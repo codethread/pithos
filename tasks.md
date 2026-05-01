@@ -63,7 +63,7 @@
    **Vertical slice:** Add `runs` table, `pithos run register`, `pithos run end`, lifecycle events for register/end, `pithos inspect run`, tests proving ended runs get `ended_at` and a lifecycle event. No separate `run resume` command; repeated registration with a known run ID should be idempotent if needed.
 
 7. **Title:** Enqueue one scoped task and view it  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 4, 5  
    **User stories covered:** US3, US6  

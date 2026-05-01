@@ -15,6 +15,7 @@ import {
   RUN_END_HELP,
 } from "../commands/run.ts"
 import { enqueueCommand, ENQUEUE_HELP } from "../commands/enqueue.ts"
+import { claimCommand, CLAIM_HELP } from "../commands/claim.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -75,6 +76,8 @@ const helpFor = (topic: string | undefined): string => {
       return RUN_END_HELP
     case "enqueue":
       return ENQUEUE_HELP
+    case "claim":
+      return CLAIM_HELP
     case "inspect":
     case "inspect:scope":
     case "inspect:run":
@@ -150,6 +153,15 @@ export const dispatch = (
           bodyFile: args.bodyFile,
           run: args.run,
           parentId: args.parentId,
+        })
+        break
+
+      case "claim":
+        yield* claimCommand({
+          run: args.run,
+          scope: args.scope,
+          capability: args.capability,
+          leaseMinutes: args.leaseMinutes,
         })
         break
 

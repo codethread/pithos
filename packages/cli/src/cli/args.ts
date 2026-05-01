@@ -32,6 +32,13 @@ export type ParsedArgs =
       run: string | undefined
       parentId: string | undefined
     }
+  | {
+      command: "claim"
+      run: string | undefined
+      scope: string | undefined
+      capability: string | undefined
+      leaseMinutes: number | undefined
+    }
   | { command: "inspect:scope"; id: string }
   | { command: "inspect:run"; id: string }
   | { command: "inspect:task"; id: string }
@@ -129,6 +136,17 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       const run = flagValue(argv, "--run")
       const parentId = flagValue(argv, "--parent-id")
       return { command: "enqueue", scope, capability, title, body, bodyFile, run, parentId } as const
+    }
+
+    if (first === "claim") {
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "claim" } as const
+      const run = flagValue(argv, "--run")
+      const scope = flagValue(argv, "--scope")
+      const capability = flagValue(argv, "--capability")
+      const leaseMinutesRaw = flagValue(argv, "--lease-minutes")
+      const leaseMinutes =
+        leaseMinutesRaw !== undefined ? parseInt(leaseMinutesRaw, 10) : undefined
+      return { command: "claim", run, scope, capability, leaseMinutes } as const
     }
 
     if (first === "inspect") {

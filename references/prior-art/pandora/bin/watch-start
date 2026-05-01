@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Called by the pandora SessionStart hook.
+# Starts pandora/bin/watch in a dedicated tmux session if not already running.
+
+VAULT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+if ! tmux has-session -t pandora--watch 2>/dev/null; then
+  tmux new-session -d -s pandora--watch -c "$VAULT" "$VAULT/pandora/bin/watch"
+  echo "pandora--watch started"
+else
+  echo "pandora--watch already running"
+fi

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# pandora/bin/done — append a completion entry to pandora/tasks/done.md
+
+set -euo pipefail
+
+HELP='pandora/bin/done — append a completion entry to done.md
+
+Usage:
+  pandora/bin/done <<EOF
+  - **task title** (refs / shas / sessions)
+    short description of what shipped
+  EOF
+
+  echo "one-liner" | pandora/bin/done
+
+Behaviour:
+  - Reads stdin (heredoc, pipe, or file redirect).
+  - Appends to pandora/tasks/done.md:
+      ## [YYYY-MM-DD HH:MM]
+      <stdin verbatim>
+  - done.md is APPEND-ONLY. Never read it whole — it grows unbounded.
+    Retrieve via: grep, ripgrep, or a research agent (read-only print mode).
+
+Exit codes:
+  0  appended successfully
+  1  empty stdin or write failure
+'
+
+case "${1:-}" in
+  -h|--help)
+    printf '%s' "$HELP"
+    exit 0
+    ;;
+esac
+
+# Resolve done.md to a canonical path relative to this script (no `..` in display).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TASKS_DIR="$(cd "$SCRIPT_DIR/../tasks" && pwd)"
+DONE_FILE="$TASKS_DIR/done.md"
+
+# Read all of stdin first so we can reject empty input cleanly.
+BODY="$(cat)"
+if [[ -z "${BODY//[[:space:]]/}" ]]; then
+  echo "done: stdin is empty — nothing to append" >&2
+  exit 1
+fi
+
+TS="$(date '+%Y-%m-%d %H:%M')"
+
+# Serialize concurrent writers via a portable mkdir-based mutex (no flock on macOS).
+# Without this, two near-simultaneous appends from different agents can interleave
+# header/body lines and corrupt the log.
+LOCK_DIR="$DONE_FILE.lock"
+TIMEOUT=10
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  TIMEOUT=$((TIMEOUT - 1))
+  if (( TIMEOUT <= 0 )); then
+    echo "done: timed out acquiring lock at $LOCK_DIR" >&2
+    exit 1
+  fi
+  sleep 1
+done
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT INT TERM
+
+# Single printf so the whole entry hits O_APPEND in one syscall when small enough,
+# minimizing risk even if the lock somehow fails.
+printf '\n## [%s]\n\n%s\n' "$TS" "$BODY" >> "$DONE_FILE"
+
+echo "done: appended to ${DONE_FILE/$HOME/\~} at $TS"

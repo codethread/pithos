@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# pandora/bin/delegate — spawn a headless agent for a one-shot task
+#
+# Usage:
+#   pandora/bin/delegate --project <path> [--branch <name>] [--harness claude|pi]
+#                        [--model <name>] [--effort low|medium|high] [--prompt "..."]
+#
+#   Prompt may also be piped via stdin / heredoc:
+#     pandora/bin/delegate --project <path> <<'EOF'
+#     ...task description...
+#     EOF
+#
+# Required:
+#   --project <path>   Absolute path to the canonical repo dir (~ expanded).
+#   <prompt>           Via --prompt, stdin, or heredoc.
+#
+# Optional:
+#   --branch <name>    Create a new git worktree via `wktree add` (handles pooled repos,
+#                      bootstrap hooks, and session naming). Session name is derived from
+#                      the actual worktree path basename. If omitted, runs in-place; if
+#                      a tmux session by that basename already exists, adds a new window.
+#   --harness <name>   claude (default) | pi
+#   --model <name>     Default per harness: claude→sonnet, pi→gpt-5.4
+#   --effort <level>   low|medium|high. Default per harness: claude→medium, pi→high
+#   --prompt "..."     Inline prompt; otherwise stdin is consumed.
+#
+# Behaviour:
+#   - Generates a UUID session id; for claude it's passed as --session-id, for pi
+#     it's used as the filename component of an absolute --session path under
+#     ~/.pi/agent/sessions/--<cwd-encoded>--/<uuid>.jsonl (so `pi -r` still finds it).
+#   - Appends a structured COMPLETION REPORT footer to the prompt so the agent's
+#     final message is machine-checkable.
+#   - Returns one line of JSON to stdout:
+#       {"session","pane_id","worktree","session_id","branch","harness"}
+#
+# Read recent messages from a delegated session with: pandora/bin/status <session_id>
+
+set -euo pipefail
+
+error() {
+  printf 'delegate: %s\n' "$*" >&2
+  exit 1
+}
+
+json_escape() {
+  python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+
+expand_path() {
+  case "$1" in
+    "~") printf '%s\n' "$HOME" ;;
+    "~/"*) printf '%s/%s\n' "$HOME" "${1#~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+generate_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  else
+    error "cannot generate UUID: uuidgen, /proc/sys/kernel/random/uuid, and python3 unavailable"
+  fi
+}
+
+project=""
+branch=""
+prompt=""
+harness="claude"
+model=""
+effort=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      awk '/^#!/{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+      exit 0
+      ;;
+    --project)
+      [[ $# -ge 2 ]] || error "--project requires a value"
+      project="$(expand_path "$2")"
+      shift 2
+      ;;
+    --branch)
+      [[ $# -ge 2 ]] || error "--branch requires a value"
+      branch="$2"
+      shift 2
+      ;;
+    --prompt)
+      [[ $# -ge 2 ]] || error "--prompt requires a value"
+      prompt="$2"
+      shift 2
+      ;;
+    --harness)
+      [[ $# -ge 2 ]] || error "--harness requires a value"
+      harness="$2"
+      shift 2
+      ;;
+    --model)
+      [[ $# -ge 2 ]] || error "--model requires a value"
+      model="$2"
+      shift 2
+      ;;
+    --effort)
+      [[ $# -ge 2 ]] || error "--effort requires a value"
+      effort="$2"
+      shift 2
+      ;;
+    *)
+      error "unknown argument: $1"
+      ;;
+  esac
+done
+
+case "$harness" in
+  claude)
+    model="${model:-sonnet}"
+    effort="${effort:-medium}"
+    ;;
+  pi)
+    model="${model:-gpt-5.4}"
+    effort="${effort:-high}"
+    ;;
+  *)
+    error "invalid --harness: $harness (expected: claude|pi)"
+    ;;
+esac
+
+[[ -n "$project" ]] || error "--project is required"
+
+if [[ -z "$prompt" ]]; then
+  if [[ ! -t 0 ]]; then
+    prompt="$(cat)"
+  fi
+fi
+
+[[ -n "$prompt" ]] || error "--prompt is required (or pipe prompt via stdin / heredoc)"
+[[ -d "$project" ]] || error "project directory does not exist: $project"
+
+# Append structured completion report requirement to every delegated prompt
+read -r -d '' completion_footer << 'FOOTER' || true
+
+---
+COMPLETION REPORT: When you have finished this task, your final message must be a structured report with these sections:
+- ACCOMPLISHED: concise summary of what was done
+- CHANGED: every file created, modified, or deleted with full paths
+- ISSUES: any problems hit and how they were resolved (or "none")
+- STATE: current state of the work and recommended next steps if any
+
+This report will be read by an orchestrating agent to verify completion.
+FOOTER
+
+prompt="${prompt}${completion_footer}"
+
+parent_dir="$(dirname "$project")"
+project_base="$(basename "$project")"
+
+if [[ -n "$branch" ]]; then
+  # Worktree mode: create a new worktree via wktree engine.
+  # wktree handles path/session naming, pooled slot allocation, and bootstrap hooks.
+  wktree_stderr="$(mktemp /tmp/delegate-wktree-err-XXXXXX)"
+  wktree_json="$(wktree add --cwd "$project" --branch "$branch" --json 2>"$wktree_stderr")" \
+    || {
+      local_exit=$?
+      cat "$wktree_stderr" >&2; rm -f "$wktree_stderr"
+      kind="$(printf '%s' "$wktree_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("kind",""))' 2>/dev/null || true)"
+      [[ "$kind" == "pool_full" ]] && error "no free worktree slot (pool full) — recycle a slot first"
+      [[ "$kind" == "blocked"   ]] && error "wktree blocked: $(printf '%s' "$wktree_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("message",""))')"
+      error "wktree add failed (exit $local_exit)"
+    }
+  rm -f "$wktree_stderr"
+
+  worktree_path="$(printf '%s' "$wktree_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree_path"])')"
+  session_name="$(printf '%s' "$wktree_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["name"])')"
+  runner_script="$(printf '%s' "$wktree_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("runner_script_path") or "")')"
+  branch="$(printf '%s' "$wktree_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["branch"])')"
+
+  if tmux has-session -t "$session_name" 2>/dev/null; then
+    error "tmux session already exists: $session_name"
+  fi
+
+  # Block on bootstrap hook before launching the agent so the worktree is fully initialised.
+  if [[ -n "$runner_script" ]]; then
+    bash "$runner_script" || error "bootstrap hook failed: $runner_script"
+  fi
+else
+  # In-place mode: run directly in the project directory
+  worktree_path="$project"
+  session_name="$project_base"
+  branch=""
+fi
+
+session_id="$(generate_uuid)"
+
+case "$harness" in
+  claude)
+    cmd=(
+      claude
+      --session-id "$session_id"
+      --dangerously-skip-permissions
+      --permission-mode acceptEdits
+      --model "$model"
+      --effort "$effort"
+      "$prompt"
+    )
+    ;;
+  pi)
+    # Pi consumes prompt via stdin; we heredoc it into the wrapper script below.
+    # `--session <path>.jsonl` writes the session log to that exact path. We mirror
+    # Pi's default cwd-encoded layout so `pi -r` can still list these sessions, and
+    # use our generated UUID as the filename so `status <id>` finds it. Pi's internal
+    # session UUID (in the JSONL header) is unrelated and not used for lookup.
+    # Canonicalize cwd (resolve symlinks, collapse `..`) so the encoded dir matches
+    # whatever Pi computes from its own pwd — keeps `pi -r` lookups consistent.
+    pi_cwd_canonical="$(cd "$worktree_path" && pwd -P)"
+    pi_cwd_encoded="$(printf '%s' "$pi_cwd_canonical" | sed 's|^/||;s|[/:\\]|-|g')"
+    pi_session_dir="${HOME}/.pi/agent/sessions/--${pi_cwd_encoded}--"
+    pi_session_file="${pi_session_dir}/${session_id}.jsonl"
+    mkdir -p "$pi_session_dir"
+    cmd=(
+      pi
+      --session "$pi_session_file"
+      --provider openai-codex
+      --model "$model"
+      --thinking "$effort"
+      --print
+    )
+    ;;
+esac
+
+tmpscript="$(mktemp /tmp/delegate-XXXXXX.sh)"
+{
+  printf '#!/usr/bin/env bash\n'
+  case "$harness" in
+    claude)
+      printf 'exec'
+      printf ' %q' "${cmd[@]}"
+      printf '\n'
+      ;;
+    pi)
+      heredoc_marker="DELEGATE_PROMPT_${session_id//-/_}"
+      printf 'exec'
+      printf ' %q' "${cmd[@]}"
+      printf " <<'%s'\n" "$heredoc_marker"
+      printf '%s\n' "$prompt"
+      printf '%s\n' "$heredoc_marker"
+      ;;
+  esac
+} > "$tmpscript"
+chmod +x "$tmpscript"
+
+if tmux has-session -t "$session_name" 2>/dev/null; then
+  # Session exists — add a new window rather than creating a new session
+  pane_id="$(tmux new-window -d -t "$session_name" -c "$worktree_path" -P -F "#{pane_id}" "bash $tmpscript")"
+else
+  tmux new-session -d -s "$session_name" -c "$worktree_path" "bash $tmpscript"
+  pane_id="$(tmux list-panes -t "$session_name" -F "#{pane_id}" | head -1)"
+fi
+
+printf '{"session":%s,"pane_id":%s,"worktree":%s,"session_id":%s,"branch":%s,"harness":%s}\n' \
+  "$(json_escape "$session_name")" \
+  "$(json_escape "$pane_id")" \
+  "$(json_escape "$worktree_path")" \
+  "$(json_escape "$session_id")" \
+  "$(json_escape "$branch")" \
+  "$(json_escape "$harness")"

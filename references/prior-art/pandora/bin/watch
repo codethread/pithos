@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# pandora/bin/watch — Envy outbox watcher
+#
+# Monitors ~/work/**/.pandora/outbox.md for changes.
+# When an outbox is written, moves the content into Pandora's inbox and clears the outbox.
+#
+# Started automatically via SessionStart hook in .claude/agents/pandora.md.
+# Runs in a dedicated tmux session (pandora--watch) so it's always visible.
+# Idempotent — hook checks for existing session before spawning.
+
+INBOX="${HOME}/Library/CloudStorage/OneDrive-Vivup/_docs/notes/pandora/tasks/inbox.md"
+WATCH_DIRS=("${HOME}/work" "${HOME}/dev")
+
+if ! command -v fswatch >/dev/null 2>&1; then
+  echo "pandora/bin/watch: fswatch required (brew install fswatch)" >&2
+  exit 1
+fi
+
+log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+
+log "watcher started — watching ${WATCH_DIRS[*]}"
+
+# FSEvents (macOS) recurses automatically; -l 2 debounces rapid writes.
+# Exclude known noisy subtrees before events hit userspace filtering.
+# Pipe through grep rather than relying on fswatch's quirky -i include filter.
+fswatch -l 2 \
+  -e "node_modules" -e "\.git" \
+  -e "/dist/" -e "/build/" -e "/target/" -e "/vendor/" \
+  -e "\.cache" -e "/tmp/" -e "/temp/" \
+  "${WATCH_DIRS[@]}" \
+| grep --line-buffered "\.pandora/outbox\.md$" \
+| while IFS= read -r path; do
+  [[ -f "$path" ]] || continue
+
+  content="$(<"$path")"
+  [[ -z "$content" ]] && continue
+
+  # Derive readable repo name from path
+  # e.g. ~/work/perkbox-services/protobuf/.pandora/outbox.md → perkbox-services/protobuf
+  repo_path="${path%/.pandora/outbox.md}"
+  repo="${repo_path#"${HOME}/work/"}"
+
+  timestamp="$(date '+%Y-%m-%d %H:%M')"
+
+  {
+    printf '\n### [%s] 📬 Envy report: %s\n\n' "$timestamp" "$repo"
+    printf '%s\n' "$content"
+  } >> "$INBOX"
+
+  # Clear outbox so it doesn't re-trigger
+  : > "$path"
+
+  log "📬 ${repo} → inbox"
+done

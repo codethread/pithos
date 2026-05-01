@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# pandora/bin/envy — persistent watcher/coordinator agent for a repo
+#
+# Usage:
+#   pandora/bin/envy --project <path> <<'EOF'
+#   task description (usually: watch session <id> doing X, report when done)
+#   EOF
+#
+#   pandora/bin/envy --kill --project <path>
+#
+# Envy's role is NOT to write code. It watches delegated worker agents (spawned
+# via pandora/bin/delegate), polls their status, and reports back to Pandora.
+#
+# If no Envy session exists: creates .pandora/ workspace, appends task to inbox,
+# spawns a persistent Claude agent in a tmux session.
+#
+# If Envy is already running: appends task to inbox, sends a wake signal.
+#
+# If Envy session exists but Claude has exited: kills stale session, respawns fresh.
+
+set -euo pipefail
+
+error() { printf 'envy: %s\n' "$*" >&2; exit 1; }
+
+expand_path() {
+  case "$1" in
+    "~")    printf '%s\n' "$HOME" ;;
+    "~/"*)  printf '%s/%s\n' "$HOME" "${1#~/}" ;;
+    *)      printf '%s\n' "$1" ;;
+  esac
+}
+
+# Derive tmux session slug from an absolute project path.
+#   ~/work/perkbox-services/protobuf  →  perkbox-services-protobuf
+#   ~/dev/dots                         →  dots
+derive_slug() {
+  local path="$1"
+  path="${path/#$HOME\//}"   # strip home prefix
+  path="${path#work/}"        # strip leading work/
+  path="${path#dev/}"         # strip leading dev/
+  path="${path//\//-}"        # / → -
+  printf '%s\n' "${path,,}"  # lowercase
+}
+
+generate_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  else
+    error "cannot generate UUID: uuidgen and python3 unavailable"
+  fi
+}
+
+# Returns 0 if a claude process is alive under the given pane PID, 1 otherwise.
+claude_alive() {
+  local pane_pid="$1"
+  local children child args
+  children=$(pgrep -P "$pane_pid" 2>/dev/null || true)
+  for child in $children; do
+    args=$(ps -o args= -p "$child" 2>/dev/null || true)
+    if [[ "$args" =~ claude ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+spawn_envy() {
+  local project="$1"
+  local session="$2"
+  local repo_name="$3"
+
+  local session_id
+  session_id="$(generate_uuid)"
+
+  local pandora_bin="${HOME}/Library/CloudStorage/OneDrive-Vivup/_docs/notes/pandora/bin"
+
+  local system_prompt
+  system_prompt="You are Envy, a persistent watcher and coordinator for the \`${repo_name}\` repository.
+
+## Your role
+
+You do NOT write code or make commits. You watch delegated worker agents, coordinate their work, and report back to Pandora. The actual coding is done by workers spawned via \`delegate\`.
+
+## Tools available to you
+
+- \`${pandora_bin}/status\` — read recent output from a worker session; look for 'COMPLETION REPORT' to detect completion
+- \`${pandora_bin}/delegate\` — spawn a new worker agent
+
+Run each with \`--help\` on first use to see the current invocation contract — that's the source of truth, not this prompt.
+
+## Responsibilities
+
+1. STARTUP: Read \`.pandora/wip.md\` first (may contain handoff from a previous Envy). Then read \`.pandora/inbox.md\` for the first unprocessed task.
+2. WATCHING: Tasks typically tell you which worker session(s) to watch and what outcome to report. Poll with \`status\` every 30–60 seconds. When you see 'COMPLETION REPORT' in the output, extract the key details and relay them.
+3. WORKER FAILURES: Watch for these signals in \`status\` output and act accordingly:
+   - **Context-limit death**: output ends with 'Prompt is too long' or 'Context limit reached' and no COMPLETION REPORT. Autonomously spawn a continuation worker (see below).
+   - **Stuck**: no new tool calls for 5+ minutes and no terminal signal. Flag clearly in your report to Pandora; do not respawn without Pandora's direction.
+   - **Error/crash**: non-context-limit failure. Flag clearly; do not respawn without Pandora's direction.
+4. AFTER EACH TASK: Write a summary to \`.pandora/log.md\`. Mark the task \`✅ DONE\` in \`.pandora/inbox.md\`. Write the COMPLETION REPORT to \`.pandora/outbox.md\` (this is how Pandora's watcher gets notified — overwrite the file each time). Emit the same COMPLETION REPORT in the conversation. Then wait — do not exit.
+5. ON NEW MESSAGE ('New task in .pandora/inbox.md'): re-read inbox, process the next pending task.
+6. CONTEXT LIMIT (your own): When approaching 85% context, finish the current watch if near-complete. Write a handoff to \`.pandora/wip.md\` (sessions being watched, their current state, next steps). Tell Pandora to rotate you.
+
+## Spawning a continuation worker (context-limit recovery)
+
+When a watched worker dies from context limit, autonomously:
+
+1. Inspect the worktree: run \`git log --oneline -10\` and \`git status --short\` in the project directory to understand what was committed vs uncommitted.
+2. Read the original task from \`.pandora/inbox.md\` to recall the full scope.
+3. Spawn a continuation worker via \`delegate\` with:
+   - The same \`--project\` and \`--harness\`/\`--effort\` as the original worker
+   - A prompt that clearly states: what was already committed (with hashes), what uncommitted changes exist and their intent, and the remaining scope to complete
+   - Instruct the continuation worker to end with a COMPLETION REPORT
+4. Record the new session_id in \`.pandora/wip.md\` and begin watching it.
+
+## COMPLETION REPORT format — emit after EACH task:
+
+\`\`\`
+COMPLETION REPORT
+ACCOMPLISHED: <what the watched worker(s) accomplished>
+ISSUES: <any problems detected, or 'none'>
+STATE: <final state and recommended next steps for Pandora>
+\`\`\`"
+
+  local initial_prompt="Starting up. Reading .pandora/wip.md for any handoff context, then .pandora/inbox.md to begin watching."
+
+  local tmpscript
+  tmpscript="$(mktemp /tmp/envy-XXXXXX.sh)"
+  {
+    printf '#!/usr/bin/env bash\nexec claude'
+    printf ' --session-id %q' "$session_id"
+    printf ' --dangerously-skip-permissions'
+    printf ' --permission-mode acceptEdits'
+    printf ' --append-system-prompt %q' "$system_prompt"
+    printf ' %q' "$initial_prompt"
+    printf '\n'
+  } > "$tmpscript"
+  chmod +x "$tmpscript"
+
+  tmux new-session -d -s "$session" -c "$project" "bash $tmpscript"
+
+  printf '{"session":%s,"session_id":%s,"action":"spawned","slug":%s}\n' \
+    "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$session")" \
+    "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$session_id")" \
+    "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$(derive_slug "$project")")"
+}
+
+# ── argument parsing ──────────────────────────────────────────────────────────
+
+project=""
+kill_mode=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --project) [[ $# -ge 2 ]] || error "--project requires a value"; project="$(expand_path "$2")"; shift 2 ;;
+    --kill)    kill_mode=1; shift ;;
+    -h|--help)
+      awk '/^#!/{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+      exit 0
+      ;;
+    *) error "unknown argument: $1" ;;
+  esac
+done
+
+[[ -n "$project" ]] || error "--project is required"
+[[ -d "$project" ]] || error "project directory does not exist: $project"
+
+slug="$(derive_slug "$project")"
+session="pandora--envy__${slug}"
+repo_name="$(basename "$project")"
+
+# ── kill mode ─────────────────────────────────────────────────────────────────
+
+if [[ $kill_mode -eq 1 ]]; then
+  if tmux has-session -t "$session" 2>/dev/null; then
+    tmux kill-session -t "$session"
+    printf 'envy: killed session %s\n' "$session"
+  else
+    printf 'envy: no session found for %s\n' "$session"
+  fi
+  exit 0
+fi
+
+# ── read task from stdin ──────────────────────────────────────────────────────
+
+task=""
+if [[ ! -t 0 ]]; then
+  task="$(cat)"
+fi
+[[ -n "$task" ]] || error "task is required (pipe via stdin / heredoc)"
+
+# ── ensure .pandora/ workspace ────────────────────────────────────────────────
+
+pandora_dir="${project}/.pandora"
+mkdir -p "$pandora_dir"
+
+# ── append task to inbox ──────────────────────────────────────────────────────
+
+timestamp="$(date '+%Y-%m-%d %H:%M')"
+printf '\n## [%s] TASK\n\n%s\n' "$timestamp" "$task" >> "${pandora_dir}/inbox.md"
+
+# ── session lifecycle ─────────────────────────────────────────────────────────
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  pane_pid=$(tmux list-panes -t "$session" -F "#{pane_pid}" | head -1)
+
+  if claude_alive "$pane_pid"; then
+    # Envy is running — send a wake signal as a new user turn
+    tmux send-keys -t "$session" "New task in .pandora/inbox.md — please read it and proceed." Enter
+    printf '{"session":%s,"action":"woke","task_added":true}\n' \
+      "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$session")"
+  else
+    # Stale session — Claude has exited; kill and respawn fresh
+    tmux kill-session -t "$session"
+    spawn_envy "$project" "$session" "$repo_name"
+  fi
+else
+  spawn_envy "$project" "$session" "$repo_name"
+fi

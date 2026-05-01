@@ -1,0 +1,216 @@
+#!/usr/bin/env bun
+// Reads recent message history for a Claude Code or Pi session id.
+// Searches both backends and parses each format into a uniform output.
+
+import {readdirSync, statSync, readFileSync, existsSync} from "node:fs"
+import {join} from "node:path"
+import {homedir} from "node:os"
+
+const HELP = `pandora/bin/status — read recent message history from a delegated agent session
+
+Usage:
+  pandora/bin/status <session-id> [--lines N]
+
+Args:
+  <session-id>   UUID returned by pandora/bin/delegate (works for both claude and pi).
+  --lines N      How many trailing user/assistant messages to print. Default: 10.
+
+Behaviour:
+  - Auto-detects backend by searching:
+      claude: ~/.claude/projects/**/<id>.jsonl
+      pi:     ~/.pi/agent/sessions/**/*_<id>.jsonl  and  ~/.pi/agent/sessions/**/<id>.jsonl
+  - For Pi (tree-structured logs), reconstructs the active branch by walking the
+    parentId chain back from the last entry.
+  - Output: one line per message:  [YYYY-MM-DD HH:MM:SS] ROLE: text...
+    Each message is whitespace-collapsed and truncated to 400 chars.
+  - Tool-only assistant turns surface as "[tools: name1, name2]" so a busy agent
+    never looks idle.
+`
+
+type Args = {sessionId: string; lines: number}
+
+function parseArgs(argv: string[]): Args {
+  let sessionId = ""
+  let lines = 10
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === "-h" || a === "--help") {
+      process.stdout.write(HELP)
+      process.exit(0)
+    } else if (a === "--lines") {
+      const v = argv[++i]
+      if (!v) die("--lines requires a value")
+      lines = Number(v)
+      if (!Number.isFinite(lines) || lines <= 0) die(`invalid --lines: ${v}`)
+    } else if (a.startsWith("-")) {
+      die(`unknown option: ${a}`)
+    } else if (!sessionId) {
+      sessionId = a
+    } else {
+      die(`unexpected argument: ${a}`)
+    }
+  }
+  if (!sessionId) die("usage: status <session-id> [--lines N] (try --help)")
+  return {sessionId, lines}
+}
+
+function die(msg: string): never {
+  process.stderr.write(`status: ${msg}\n`)
+  process.exit(1)
+}
+
+// Walk dir tree, return matching file paths.
+function findFiles(root: string, predicate: (name: string) => boolean): string[] {
+  if (!existsSync(root)) return []
+  const out: string[] = []
+  const stack = [root]
+  while (stack.length) {
+    const dir = stack.pop()!
+    let entries
+    try {
+      entries = readdirSync(dir, {withFileTypes: true})
+    } catch {
+      continue
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) stack.push(p)
+      else if (e.isFile() && predicate(e.name)) out.push(p)
+    }
+  }
+  return out
+}
+
+function findClaudeSession(id: string): string | null {
+  const root = join(homedir(), ".claude", "projects")
+  const matches = findFiles(root, (n) => n === `${id}.jsonl`)
+  return matches[0] ?? null
+}
+
+function findPiSession(id: string): string | null {
+  const root = join(homedir(), ".pi", "agent", "sessions")
+  // Default Pi files prefix a timestamp (`<ts>_<uuid>.jsonl`); `pi --session <name>.jsonl`
+  // skips that prefix, so accept both shapes.
+  const exact = `${id}.jsonl`
+  const suffix = `_${id}.jsonl`
+  const matches = findFiles(root, (n) => n === exact || n.endsWith(suffix))
+  return matches[0] ?? null
+}
+
+type Msg = {ts: string; role: string; text: string}
+
+function fmtTs(iso: string | undefined): string {
+  if (!iso) return ""
+  // "2026-05-01T05:05:50.758Z" → "2026-05-01 05:05:50"
+  return iso.slice(0, 19).replace("T", " ")
+}
+
+function readJsonl(file: string): any[] {
+  const raw = readFileSync(file, "utf8")
+  const out: any[] = []
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue
+    try {
+      out.push(JSON.parse(line))
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return out
+}
+
+function extractTextFromArray(content: any[]): string {
+  return content
+    .filter((c) => c && c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text)
+    .join("\n")
+}
+
+// Claude Code format: each line has {type: "user"|"assistant", timestamp, message: {content}}
+function parseClaude(file: string): Msg[] {
+  const entries = readJsonl(file)
+  const out: Msg[] = []
+  for (const e of entries) {
+    if (e.type !== "user" && e.type !== "assistant") continue
+    const content = e.message?.content
+    let text = ""
+    if (typeof content === "string") {
+      text = content
+    } else if (Array.isArray(content)) {
+      text = extractTextFromArray(content)
+      if (!text) {
+        // Fallback so an assistant turn currently running tools still surfaces.
+        const tools = content.filter((c) => c && c.type === "tool_use" && c.name).map((c) => c.name)
+        if (tools.length) text = `[tools: ${tools.join(", ")}]`
+      }
+    }
+    if (!text) continue
+    out.push({ts: fmtTs(e.timestamp), role: e.type.toUpperCase(), text})
+  }
+  return out
+}
+
+// Pi format: tree of entries linked via parentId; reconstruct branch ending at last entry.
+// Messages: {type:"message", timestamp, message:{role, content}}
+function parsePi(file: string): Msg[] {
+  const entries = readJsonl(file)
+  if (entries.length === 0) return []
+  const byId = new Map<string, any>()
+  for (const e of entries) if (e.id) byId.set(e.id, e)
+
+  // Walk from last entry up the parentId chain.
+  const tail = entries[entries.length - 1]
+  const branch: any[] = []
+  let cur = tail
+  const seen = new Set<string>()
+  while (cur && cur.id && !seen.has(cur.id)) {
+    seen.add(cur.id)
+    branch.unshift(cur)
+    if (!cur.parentId) break
+    cur = byId.get(cur.parentId)
+  }
+
+  const out: Msg[] = []
+  for (const e of branch) {
+    if (e.type !== "message") continue
+    const role = e.message?.role
+    if (role !== "user" && role !== "assistant") continue
+    const content = e.message?.content
+    let text = ""
+    if (typeof content === "string") {
+      text = content
+    } else if (Array.isArray(content)) {
+      text = extractTextFromArray(content)
+      if (!text) {
+        // Fallback: surface tool calls so output isn't empty.
+        const tools = content.filter((c) => c && c.type === "toolCall" && c.name).map((c) => c.name)
+        if (tools.length) text = `[tools: ${tools.join(", ")}]`
+      }
+    }
+    if (!text) continue
+    out.push({ts: fmtTs(e.timestamp), role: role.toUpperCase(), text})
+  }
+  return out
+}
+
+function main() {
+  const {sessionId, lines} = parseArgs(process.argv.slice(2))
+
+  const claudeFile = findClaudeSession(sessionId)
+  const piFile = claudeFile ? null : findPiSession(sessionId)
+
+  let messages: Msg[]
+  if (claudeFile) messages = parseClaude(claudeFile)
+  else if (piFile) messages = parsePi(piFile)
+  else die(`session not found: ${sessionId}`)
+
+  const tail = messages.slice(-lines)
+  for (const m of tail) {
+    // Collapse whitespace so each message renders as one line (`status` output is line-oriented).
+    const oneLine = m.text.replace(/\s+/g, " ").trim()
+    const snippet = oneLine.length > 400 ? oneLine.slice(0, 400) : oneLine
+    process.stdout.write(`[${m.ts}] ${m.role}: ${snippet}\n`)
+  }
+}
+
+main()

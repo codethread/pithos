@@ -2,10 +2,17 @@ import { Effect } from "effect"
 import type { ParsedArgs } from "./args.ts"
 import { PithosError } from "../errors/errors.ts"
 import type { DbService } from "../services/db.ts"
+import type { IdService } from "../services/ids.ts"
 import { VERSION } from "../version.ts"
 import { initCommand } from "../commands/init.ts"
 import { scopeUpsertCommand, SCOPE_UPSERT_HELP } from "../commands/scope.ts"
-import { inspectScopeCommand, INSPECT_HELP } from "../commands/inspect.ts"
+import { inspectScopeCommand, inspectRunCommand, INSPECT_HELP } from "../commands/inspect.ts"
+import {
+  runRegisterCommand,
+  runEndCommand,
+  RUN_REGISTER_HELP,
+  RUN_END_HELP,
+} from "../commands/run.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -59,8 +66,14 @@ const helpFor = (topic: string | undefined): string => {
     case "scope":
     case "scope:upsert":
       return SCOPE_UPSERT_HELP
+    case "run":
+    case "run:register":
+      return RUN_REGISTER_HELP
+    case "run:end":
+      return RUN_END_HELP
     case "inspect":
     case "inspect:scope":
+    case "inspect:run":
       return INSPECT_HELP
     default:
       return HELP_TEXT
@@ -71,7 +84,9 @@ const helpFor = (topic: string | undefined): string => {
 // Dispatcher
 // ---------------------------------------------------------------------------
 
-export const dispatch = (args: ParsedArgs): Effect.Effect<void, PithosError, DbService> =>
+export const dispatch = (
+  args: ParsedArgs,
+): Effect.Effect<void, PithosError, DbService | IdService> =>
   Effect.gen(function* () {
     switch (args.command) {
       case "version":
@@ -90,8 +105,31 @@ export const dispatch = (args: ParsedArgs): Effect.Effect<void, PithosError, DbS
         yield* scopeUpsertCommand({ kind: args.kind, path: args.path })
         break
 
+      case "run:register":
+        yield* runRegisterCommand({
+          agentKind: args.agentKind,
+          scopeId: args.scopeId,
+          cwd: args.cwd,
+          sessionId: args.sessionId,
+          parentRun: args.parentRun,
+          run: args.run,
+        })
+        break
+
+      case "run:end":
+        yield* runEndCommand({
+          run: args.run,
+          status: args.status,
+          summary: args.summary,
+        })
+        break
+
       case "inspect:scope":
         yield* inspectScopeCommand(args.id)
+        break
+
+      case "inspect:run":
+        yield* inspectRunCommand(args.id)
         break
 
       case "unknown": {

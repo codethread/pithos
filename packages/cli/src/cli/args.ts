@@ -7,7 +7,23 @@ export type ParsedArgs =
   | { command: "help"; topic?: string }
   | { command: "init" }
   | { command: "scope:upsert"; kind: ScopeKind; path: string | undefined }
+  | {
+      command: "run:register"
+      agentKind: string | undefined
+      scopeId: string | undefined
+      cwd: string | undefined
+      sessionId: string | undefined
+      parentRun: string | undefined
+      run: string | undefined
+    }
+  | {
+      command: "run:end"
+      run: string | undefined
+      status: "ended" | "failed" | "cancelled"
+      summary: string | undefined
+    }
   | { command: "inspect:scope"; id: string }
+  | { command: "inspect:run"; id: string }
   | { command: "unknown"; raw: readonly string[] }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +82,34 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       return { command: "unknown", raw: argv } as const
     }
 
+    if (first === "run") {
+      if (!second || second === "--help" || second === "-h") {
+        return { command: "help", topic: "run" } as const
+      }
+      if (second === "register") {
+        const remaining = [second, ...rest]
+        if (hasHelp(remaining)) return { command: "help", topic: "run:register" } as const
+        const agentKind = flagValue(argv, "--agent-kind")
+        const scopeId = flagValue(argv, "--scope")
+        const cwd = flagValue(argv, "--cwd")
+        const sessionId = flagValue(argv, "--session-id")
+        const parentRun = flagValue(argv, "--parent-run")
+        const run = flagValue(argv, "--run")
+        return { command: "run:register", agentKind, scopeId, cwd, sessionId, parentRun, run } as const
+      }
+      if (second === "end") {
+        const remaining = [second, ...rest]
+        if (hasHelp(remaining)) return { command: "help", topic: "run:end" } as const
+        const run = flagValue(argv, "--run")
+        const rawStatus = flagValue(argv, "--status")
+        const status: "ended" | "failed" | "cancelled" =
+          rawStatus === "failed" || rawStatus === "cancelled" ? rawStatus : "ended"
+        const summary = flagValue(argv, "--summary")
+        return { command: "run:end", run, status, summary } as const
+      }
+      return { command: "unknown", raw: argv } as const
+    }
+
     if (first === "inspect") {
       if (!second || second === "--help" || second === "-h") {
         return { command: "help", topic: "inspect" } as const
@@ -76,6 +120,13 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
         const id = rest[0]
         if (!id) return { command: "unknown", raw: argv } as const
         return { command: "inspect:scope", id } as const
+      }
+      if (second === "run") {
+        const remaining = [second, ...rest]
+        if (hasHelp(remaining)) return { command: "help", topic: "inspect:run" } as const
+        const id = rest[0]
+        if (!id) return { command: "unknown", raw: argv } as const
+        return { command: "inspect:run", id } as const
       }
       return { command: "unknown", raw: argv } as const
     }

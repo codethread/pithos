@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest"
-import { Effect, Exit, Cause } from "effect"
+import { Effect, Exit, Cause, Layer } from "effect"
 import { parseArgs } from "../src/cli/args.ts"
 import { dispatch } from "../src/cli/dispatch.ts"
 import { VERSION } from "../src/version.ts"
 import { makeDbServiceTest } from "../src/layers/db.ts"
+import { makeIdServiceTest } from "../src/layers/ids.ts"
 
 describe("parseArgs", () => {
   it("parses --version flag", async () => {
@@ -58,9 +59,14 @@ describe("version", () => {
   })
 })
 
-/** Run a dispatch effect with a fake DB service. */
+/** Run a dispatch effect with fake DB + ID services. */
 const runDispatch = (args: Parameters<typeof dispatch>[0]) =>
-  Effect.runPromiseExit(Effect.provide(dispatch(args), makeDbServiceTest()))
+  Effect.runPromiseExit(
+    Effect.provide(
+      dispatch(args),
+      Layer.merge(makeDbServiceTest(), makeIdServiceTest([])),
+    ),
+  )
 
 describe("dispatch", () => {
   it("version command completes without error", async () => {

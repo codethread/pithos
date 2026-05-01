@@ -70,7 +70,7 @@
    **Vertical slice:** Add `tasks` + `events` minimum schema, `pithos enqueue --scope --capability --title`, task-created event, `pithos inspect task`, tests for required fields and JSON output.
 
 8. **Title:** Claim a queued task with a fenced lease  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 6, 7  
    **User stories covered:** US3  

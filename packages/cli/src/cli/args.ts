@@ -4,6 +4,7 @@ import type { PithosError } from "../errors/errors.ts"
 export type ParsedArgs =
   | { command: "version" }
   | { command: "help" }
+  | { command: "init" }
   | { command: "unknown"; raw: readonly string[] }
 
 export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, PithosError> =>
@@ -14,6 +15,9 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
     }
     if (first === "--help" || first === "-h" || first === "help") {
       return { command: "help" } as const
+    }
+    if (first === "init") {
+      return { command: "init" } as const
     }
     return { command: "unknown", raw: argv } as const
   })

@@ -3,7 +3,7 @@ export { ClockServiceLive } from "./clock.ts"
 export { IdServiceLive } from "./ids.ts"
 export { FsServiceLive } from "./fs.ts"
 export { ProcessServiceLive } from "./process.ts"
-export { DbServiceLive } from "./db.ts"
+export { DbServiceLive, makeDbServiceLive } from "./db.ts"
 export { ClaudeHarnessServiceLive } from "./harness.ts"
 
 // Test factory functions

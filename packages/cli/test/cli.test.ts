@@ -3,6 +3,7 @@ import { Effect, Exit, Cause } from "effect"
 import { parseArgs } from "../src/cli/args.ts"
 import { dispatch } from "../src/cli/dispatch.ts"
 import { VERSION } from "../src/version.ts"
+import { makeDbServiceTest } from "../src/layers/db.ts"
 
 describe("parseArgs", () => {
   it("parses --version flag", async () => {
@@ -25,9 +26,14 @@ describe("parseArgs", () => {
     expect(result).toEqual({ command: "help" })
   })
 
-  it("returns unknown for unrecognised commands", async () => {
+  it("parses init command", async () => {
     const result = await Effect.runPromise(parseArgs(["init"]))
-    expect(result).toEqual({ command: "unknown", raw: ["init"] })
+    expect(result).toEqual({ command: "init" })
+  })
+
+  it("returns unknown for unrecognised commands", async () => {
+    const result = await Effect.runPromise(parseArgs(["no-such"]))
+    expect(result).toEqual({ command: "unknown", raw: ["no-such"] })
   })
 
   it("returns unknown for empty args", async () => {
@@ -42,21 +48,23 @@ describe("version", () => {
   })
 })
 
+/** Run a dispatch effect with a fake DB service. */
+const runDispatch = (args: Parameters<typeof dispatch>[0]) =>
+  Effect.runPromiseExit(Effect.provide(dispatch(args), makeDbServiceTest()))
+
 describe("dispatch", () => {
   it("version command completes without error", async () => {
-    const exit = await Effect.runPromiseExit(dispatch({ command: "version" }))
+    const exit = await runDispatch({ command: "version" })
     expect(Exit.isSuccess(exit)).toBe(true)
   })
 
   it("help command completes without error", async () => {
-    const exit = await Effect.runPromiseExit(dispatch({ command: "help" }))
+    const exit = await runDispatch({ command: "help" })
     expect(Exit.isSuccess(exit)).toBe(true)
   })
 
   it("unknown command fails with PithosError USER_ERROR", async () => {
-    const exit = await Effect.runPromiseExit(
-      dispatch({ command: "unknown", raw: ["no-such-cmd"] }),
-    )
+    const exit = await runDispatch({ command: "unknown", raw: ["no-such-cmd"] })
     expect(Exit.isFailure(exit)).toBe(true)
     const err = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : { _tag: "None" as const }
     expect(err._tag).toBe("Some")

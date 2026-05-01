@@ -1,7 +1,9 @@
 import { Effect } from "effect"
 import type { ParsedArgs } from "./args.ts"
 import { PithosError } from "../errors/errors.ts"
+import type { DbService } from "../services/db.ts"
 import { VERSION } from "../version.ts"
+import { initCommand } from "../commands/init.ts"
 
 const HELP_TEXT = `pithos - local control plane for coordinating Claude Code agents
 
@@ -46,7 +48,9 @@ Exit codes:
 Run \`pithos <command> --help\` for command-specific usage.
 `
 
-export const dispatch = (args: ParsedArgs): Effect.Effect<void, PithosError> =>
+export const dispatch = (
+  args: ParsedArgs,
+): Effect.Effect<void, PithosError, DbService> =>
   Effect.gen(function* () {
     switch (args.command) {
       case "version":
@@ -55,10 +59,15 @@ export const dispatch = (args: ParsedArgs): Effect.Effect<void, PithosError> =>
       case "help":
         console.log(HELP_TEXT)
         break
+      case "init":
+        yield* initCommand
+        break
       case "unknown": {
         const cmd = args.raw[0] ?? "(none)"
         console.error(`pithos: unknown command '${cmd}'\nRun \`pithos --help\` for usage.`)
-        yield* Effect.fail(new PithosError({ code: "USER_ERROR", message: `Unknown command: ${cmd}` }))
+        yield* Effect.fail(
+          new PithosError({ code: "USER_ERROR", message: `Unknown command: ${cmd}` }),
+        )
         break
       }
     }

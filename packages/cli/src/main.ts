@@ -12,6 +12,7 @@ const program = Effect.gen(function* () {
   Effect.provide(DbServiceLive),
   Effect.catchTag("PithosError", (err) =>
     Effect.sync(() => {
+      console.error(`pithos: ${err.message}`)
       process.exit(exitCodeFor(err.code))
     }),
   ),

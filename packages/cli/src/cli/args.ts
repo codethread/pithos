@@ -14,11 +14,14 @@ export type ParsedArgs =
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Return the value following a named flag, or undefined if not present. */
+/** Return the value following a named flag, or undefined if not present or if the next token is itself a flag. */
 const flagValue = (argv: readonly string[], flag: string): string | undefined => {
   const idx = argv.indexOf(flag)
   if (idx === -1 || idx + 1 >= argv.length) return undefined
-  return argv[idx + 1]
+  const next = argv[idx + 1]
+  // Reject another flag token as a value (e.g. --path --kind is invalid)
+  if (next === undefined || next.startsWith("-")) return undefined
+  return next
 }
 
 const hasHelp = (argv: readonly string[]): boolean =>

@@ -1,5 +1,5 @@
 import { homedir } from "node:os"
-import { resolve, relative, isAbsolute, basename } from "node:path"
+import { resolve, relative, basename } from "node:path"
 
 /**
  * Pure domain helpers for scope ID derivation and path canonicalisation.
@@ -24,7 +24,8 @@ export const canonicalizePath = (rawPath: string): string => {
       : rawPath.startsWith("~/")
         ? homedir() + rawPath.slice(1)
         : rawPath
-  return isAbsolute(withHome) ? withHome : resolve(withHome)
+  // resolve() normalises both relative and absolute paths (removes .., trailing slashes, etc.)
+  return resolve(withHome)
 }
 
 /**

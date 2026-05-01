@@ -59,9 +59,14 @@ describe("canonicalizePath", () => {
     expect(result).toBe("/absolute/path/to/repo")
   })
 
-  it("resolves relative paths against CWD", () => {
-    const result = canonicalizePath("relative/path")
-    expect(result).toBe(join(process.cwd(), "relative/path"))
+  it("normalises an absolute path with redundant segments", () => {
+    const result = canonicalizePath("/opt/../opt/projects/my-repo")
+    expect(result).toBe("/opt/projects/my-repo")
+  })
+
+  it("normalises a trailing slash on absolute path", () => {
+    const result = canonicalizePath("/opt/projects/my-repo/")
+    expect(result).toBe("/opt/projects/my-repo")
   })
 })
 
@@ -360,6 +365,15 @@ describe("parseArgs — scope and inspect", () => {
   it("routes 'inspect scope --help' to help", async () => {
     const result = await Effect.runPromise(parseArgs(["inspect", "scope", "--help"]))
     expect(result).toMatchObject({ command: "help" })
+  })
+
+  it("treats a flag token after --path as missing (returns undefined path)", async () => {
+    // --path --kind is invalid; --path value must not be a flag
+    const result = await Effect.runPromise(
+      parseArgs(["scope", "upsert", "--path", "--kind", "worktree"]),
+    )
+    // path is undefined; kind falls back to repo
+    expect(result).toMatchObject({ command: "scope:upsert", path: undefined })
   })
 })
 

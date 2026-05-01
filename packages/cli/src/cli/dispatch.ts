@@ -3,16 +3,18 @@ import type { ParsedArgs } from "./args.ts"
 import { PithosError } from "../errors/errors.ts"
 import type { DbService } from "../services/db.ts"
 import type { IdService } from "../services/ids.ts"
+import type { FsService } from "../services/fs.ts"
 import { VERSION } from "../version.ts"
 import { initCommand } from "../commands/init.ts"
 import { scopeUpsertCommand, SCOPE_UPSERT_HELP } from "../commands/scope.ts"
-import { inspectScopeCommand, inspectRunCommand, INSPECT_HELP } from "../commands/inspect.ts"
+import { inspectScopeCommand, inspectRunCommand, inspectTaskCommand, INSPECT_HELP } from "../commands/inspect.ts"
 import {
   runRegisterCommand,
   runEndCommand,
   RUN_REGISTER_HELP,
   RUN_END_HELP,
 } from "../commands/run.ts"
+import { enqueueCommand, ENQUEUE_HELP } from "../commands/enqueue.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -71,9 +73,12 @@ const helpFor = (topic: string | undefined): string => {
       return RUN_REGISTER_HELP
     case "run:end":
       return RUN_END_HELP
+    case "enqueue":
+      return ENQUEUE_HELP
     case "inspect":
     case "inspect:scope":
     case "inspect:run":
+    case "inspect:task":
       return INSPECT_HELP
     default:
       return HELP_TEXT
@@ -86,7 +91,7 @@ const helpFor = (topic: string | undefined): string => {
 
 export const dispatch = (
   args: ParsedArgs,
-): Effect.Effect<void, PithosError, DbService | IdService> =>
+): Effect.Effect<void, PithosError, DbService | IdService | FsService> =>
   Effect.gen(function* () {
     switch (args.command) {
       case "version":
@@ -130,6 +135,22 @@ export const dispatch = (
 
       case "inspect:run":
         yield* inspectRunCommand(args.id)
+        break
+
+      case "inspect:task":
+        yield* inspectTaskCommand(args.id)
+        break
+
+      case "enqueue":
+        yield* enqueueCommand({
+          scope: args.scope,
+          capability: args.capability,
+          title: args.title,
+          body: args.body,
+          bodyFile: args.bodyFile,
+          run: args.run,
+          parentId: args.parentId,
+        })
         break
 
       case "unknown": {

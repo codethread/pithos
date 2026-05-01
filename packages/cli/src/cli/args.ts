@@ -22,8 +22,19 @@ export type ParsedArgs =
       status: string | undefined
       summary: string | undefined
     }
+  | {
+      command: "enqueue"
+      scope: string | undefined
+      capability: string | undefined
+      title: string | undefined
+      body: string | undefined
+      bodyFile: string | undefined
+      run: string | undefined
+      parentId: string | undefined
+    }
   | { command: "inspect:scope"; id: string }
   | { command: "inspect:run"; id: string }
+  | { command: "inspect:task"; id: string }
   | { command: "unknown"; raw: readonly string[] }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +119,18 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       return { command: "unknown", raw: argv } as const
     }
 
+    if (first === "enqueue") {
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "enqueue" } as const
+      const scope = flagValue(argv, "--scope")
+      const capability = flagValue(argv, "--capability")
+      const title = flagValue(argv, "--title")
+      const body = flagValue(argv, "--body")
+      const bodyFile = flagValue(argv, "--body-file")
+      const run = flagValue(argv, "--run")
+      const parentId = flagValue(argv, "--parent-id")
+      return { command: "enqueue", scope, capability, title, body, bodyFile, run, parentId } as const
+    }
+
     if (first === "inspect") {
       if (!second || second === "--help" || second === "-h") {
         return { command: "help", topic: "inspect" } as const
@@ -125,6 +148,13 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
         const id = rest[0]
         if (!id) return { command: "unknown", raw: argv } as const
         return { command: "inspect:run", id } as const
+      }
+      if (second === "task") {
+        const remaining = [second, ...rest]
+        if (hasHelp(remaining)) return { command: "help", topic: "inspect:task" } as const
+        const id = rest[0]
+        if (!id) return { command: "unknown", raw: argv } as const
+        return { command: "inspect:task", id } as const
       }
       return { command: "unknown", raw: argv } as const
     }

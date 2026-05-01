@@ -27,6 +27,30 @@ export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError
   })
 
 /**
+ * `pithos inspect task <id>`
+ *
+ * Fetches the task row and prints it as JSON.
+ * Exits with code 3 (NOT_FOUND) if the task does not exist.
+ */
+export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError, DbService> =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+
+    const rows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [id])
+
+    if (rows.length === 0) {
+      yield* Effect.fail(
+        new PithosError({ code: "NOT_FOUND", message: `Task not found: ${id}` }),
+      )
+      return
+    }
+
+    yield* Effect.sync(() => {
+      console.log(JSON.stringify({ ok: true, task: rows[0] }))
+    })
+  })
+
+/**
  * `pithos inspect run <id>`
  *
  * Fetches the run row and prints it as JSON.
@@ -55,19 +79,23 @@ export const INSPECT_HELP = `pithos inspect - Inspect a pithos entity
 Usage:
   pithos inspect scope <id>
   pithos inspect run <id>
+  pithos inspect task <id>
 
 Subcommands:
   scope <id>    Show a scope by ID
   run <id>      Show a run by ID
+  task <id>     Show a task by ID
 
 Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
   { "ok": true, "run": { "id": "...", "agent_kind": "...", ... } }
+  { "ok": true, "task": { "id": "...", "status": "queued", ... } }
 
 Examples:
   pithos inspect scope global
   pithos inspect scope repo:work/perkbox-services/protobuf
   pithos inspect run run_abc123
+  pithos inspect task task_abc123
 
 Exit codes: 0 success | 3 not found
 `

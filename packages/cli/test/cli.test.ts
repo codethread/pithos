@@ -5,6 +5,7 @@ import { dispatch } from "../src/cli/dispatch.ts"
 import { VERSION } from "../src/version.ts"
 import { makeDbServiceTest } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
+import { makeFsServiceTest } from "../src/layers/fs.ts"
 
 describe("parseArgs", () => {
   it("parses --version flag", async () => {
@@ -59,12 +60,12 @@ describe("version", () => {
   })
 })
 
-/** Run a dispatch effect with fake DB + ID services. */
+/** Run a dispatch effect with fake DB + ID + FS services. */
 const runDispatch = (args: Parameters<typeof dispatch>[0]) =>
   Effect.runPromiseExit(
     Effect.provide(
       dispatch(args),
-      Layer.merge(makeDbServiceTest(), makeIdServiceTest([])),
+      Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest()),
     ),
   )
 

@@ -35,7 +35,7 @@
    **Vertical slice:** Add initial Effect service/layer structure for clock, IDs, filesystem, process execution, DB placeholder, and future Claude harness. Include fast Vitest unit tests with fake services to prove commands can be tested without real filesystem/process/Claude dependencies.
 
 3. **Title:** Add isolated Docker/Podman DB smoke harness  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 1, 2  
    **User stories covered:** US0  

@@ -3,6 +3,9 @@ import * as fsPromises from "node:fs/promises"
 import { FsService } from "../services/fs.ts"
 import { PithosError } from "../errors/errors.ts"
 
+const isEnoent = (e: unknown): boolean =>
+  e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT"
+
 const toFsError =
   (path: string, op: string) =>
   (e: unknown): PithosError =>
@@ -12,7 +15,13 @@ export const FsServiceLive: Layer.Layer<FsService> = Layer.succeed(FsService, {
   readFile: (path) =>
     Effect.tryPromise({
       try: () => fsPromises.readFile(path, "utf-8"),
-      catch: toFsError(path, "readFile"),
+      catch: (e) =>
+        isEnoent(e)
+          ? new PithosError({ code: "NOT_FOUND", message: `File not found: ${path}` })
+          : new PithosError({
+              code: "USER_ERROR",
+              message: `FS readFile failed for ${path}: ${String(e)}`,
+            }),
     }),
   writeFile: (path, content) =>
     Effect.tryPromise({

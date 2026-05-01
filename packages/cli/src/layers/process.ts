@@ -10,9 +10,13 @@ const spawnProcess = (
   opts: { cwd?: string; env?: Record<string, string> },
 ): Promise<ProcessResult> =>
   new Promise((resolve, reject) => {
+    // Overlay caller-supplied env vars on top of the parent process environment
+    // so PATH, HOME, auth vars, etc. are preserved.
+    const env: NodeJS.ProcessEnv | undefined =
+      opts.env !== undefined ? { ...process.env, ...opts.env } : undefined
     const proc = spawn(command, [...args], {
       cwd: opts.cwd,
-      env: opts.env,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     })
 

@@ -25,7 +25,11 @@ export const makeDbServiceTest = (
     run: () => Effect.succeed({ changes: 0, lastInsertRowid: 0 }),
     transaction: (fn) =>
       Effect.try({
-        try: fn,
+        try: () =>
+          fn({
+            query: (sql) => rowStore.get(sql) ?? [],
+            run: () => ({ changes: 0, lastInsertRowid: 0 }),
+          }),
         catch: (e) =>
           new PithosError({ code: "USER_ERROR", message: `Transaction failed: ${String(e)}` }),
       }),

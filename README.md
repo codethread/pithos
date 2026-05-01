@@ -29,9 +29,14 @@ When asked to continue Pithos implementation:
    - `pnpm typecheck`
    - `pnpm test`
 8. Commit the work in this repo.
-9. Update `tasks.md`, changing the completed slice from `Status: Unbuilt` to `Status: Built`.
-10. Commit the task-status update in this repo.
-11. Stop and report what changed, including commit hashes.
+9. Request `reviewer` subagent check your work and report back,
+   - fix any findings unless you think they are unfounded
+   - repeat the linting and testing as needed
+   - re-review, unless fix was trivial
+10. Update `tasks.md`, changing the completed slice from `Status: Unbuilt` to `Status: Built`.
+11. Commit the task-status update in this repo.
+12. Stop and report what changed, including commit hashes.
+    - IMPORTANT: if you complete the last task, or hit a fatal blocker you can't resolve, or hit a 'human in the loop' task, return the repose `COMPLETE` and nothing else
 
 ## Rules
 

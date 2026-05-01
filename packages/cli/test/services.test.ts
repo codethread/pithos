@@ -274,15 +274,19 @@ describe("DbService placeholder", () => {
     expect(result.changes).toBe(0)
   })
 
-  it("fake transaction wraps a synchronous function", async () => {
+  it("fake transaction wraps a synchronous function with TxDb access", async () => {
+    const seeded = [{ id: "task_tx", status: "queued" }]
     const result = await runWith(
       Effect.gen(function* () {
         const db = yield* DbService
-        return yield* db.transaction(() => 42)
+        return yield* db.transaction((tx) => {
+          const rows = tx.query("SELECT * FROM tasks")
+          return rows.length
+        })
       }),
-      makeDbServiceTest(),
+      makeDbServiceTest(new Map([["SELECT * FROM tasks", seeded]])),
     )
-    expect(result).toBe(42)
+    expect(result).toBe(1)
   })
 })
 

@@ -27,7 +27,10 @@ function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), "pithos-init-"))
 }
 
-function runWith<A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Promise<A> {
+function runWith<A, E, LE, R>(
+  effect: Effect.Effect<A, E, R>,
+  layer: Layer.Layer<R, LE, never>,
+): Promise<A> {
   return Effect.runPromise(Effect.provide(effect, layer))
 }
 

@@ -23,61 +23,74 @@ const wrapDbError =
 /**
  * Creates a live SQLite DbService layer backed by better-sqlite3.
  *
- * Lazy: the DB file is only opened on the first access, so commands that do
- * not use the database (e.g. `--version`) never open a connection.
- * The parent directory is created (recursively) if it does not exist.
+ * Uses `Layer.scoped` so the connection is properly closed when the scope
+ * exits (process end, test teardown, etc.). The parent directory is created
+ * recursively if it does not exist. Foreign-key enforcement is enabled for
+ * every connection so REFERENCES constraints are actually enforced.
  */
-export const makeDbServiceLive = (dbPath: string): Layer.Layer<DbService> => {
-  let db: Database.Database | null = null
+export const makeDbServiceLive = (dbPath: string): Layer.Layer<DbService, PithosError> =>
+  Layer.scoped(
+    DbService,
+    Effect.gen(function* () {
+      // Ensure the parent directory exists before opening the file.
+      yield* Effect.try({
+        try: () => mkdirSync(dirname(dbPath), { recursive: true }),
+        catch: wrapDbError("mkdir"),
+      })
 
-  const getDb = (): Database.Database => {
-    if (db === null) {
-      mkdirSync(dirname(dbPath), { recursive: true })
-      db = new Database(dbPath)
-    }
-    return db
-  }
+      // Acquire the DB connection; release it when the scope closes.
+      const db = yield* Effect.acquireRelease(
+        Effect.try({
+          try: () => {
+            const conn = new Database(dbPath)
+            conn.pragma("foreign_keys = ON")
+            return conn
+          },
+          catch: wrapDbError("open"),
+        }),
+        (conn) => Effect.sync(() => conn.close()),
+      )
 
-  return Layer.succeed(DbService, {
-    query: (sql, params) =>
-      Effect.try({
-        try: () => getDb().prepare(sql).all(...(params ?? [])) as DbRow[],
-        catch: wrapDbError(`query: ${sql.slice(0, 60)}`),
-      }),
+      return {
+        query: (sql, params) =>
+          Effect.try({
+            try: () => db.prepare(sql).all(...(params ?? [])) as DbRow[],
+            catch: wrapDbError(`query: ${sql.slice(0, 60)}`),
+          }),
 
-    run: (sql, params) =>
-      Effect.try({
-        try: () => {
-          const result = getDb().prepare(sql).run(...(params ?? []))
-          return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
-        },
-        catch: wrapDbError(`run: ${sql.slice(0, 60)}`),
-      }),
-
-    transaction: (fn) =>
-      Effect.try({
-        try: () => {
-          const _db = getDb()
-          const txDb = {
-            query: (sql: string, params?: readonly unknown[]) =>
-              _db.prepare(sql).all(...(params ?? [])) as DbRow[],
-            run: (sql: string, params?: readonly unknown[]) => {
-              const result = _db.prepare(sql).run(...(params ?? []))
+        run: (sql, params) =>
+          Effect.try({
+            try: () => {
+              const result = db.prepare(sql).run(...(params ?? []))
               return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
             },
-          }
-          return _db.transaction(() => fn(txDb))()
-        },
-        catch: wrapDbError("transaction"),
-      }),
-  })
-}
+            catch: wrapDbError(`run: ${sql.slice(0, 60)}`),
+          }),
+
+        transaction: (fn) =>
+          Effect.try({
+            try: () => {
+              const txDb = {
+                query: (sql: string, params?: readonly unknown[]) =>
+                  db.prepare(sql).all(...(params ?? [])) as DbRow[],
+                run: (sql: string, params?: readonly unknown[]) => {
+                  const result = db.prepare(sql).run(...(params ?? []))
+                  return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
+                },
+              }
+              return db.transaction(() => fn(txDb))()
+            },
+            catch: wrapDbError("transaction"),
+          }),
+      }
+    }),
+  )
 
 /**
  * Convenience live layer using the default/env-configured DB path.
  * Prefer `makeDbServiceLive(path)` in tests to control isolation.
  */
-export const DbServiceLive: Layer.Layer<DbService> = makeDbServiceLive(resolveDbPath())
+export const DbServiceLive: Layer.Layer<DbService, PithosError> = makeDbServiceLive(resolveDbPath())
 
 // ---------------------------------------------------------------------------
 // Test helpers (kept in this module for co-location)

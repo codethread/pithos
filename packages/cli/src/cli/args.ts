@@ -17,6 +17,10 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       return { command: "help" } as const
     }
     if (first === "init") {
+      // Guard: --help after a subcommand shows help instead of executing.
+      if (argv.slice(1).includes("--help") || argv.slice(1).includes("-h")) {
+        return { command: "help" } as const
+      }
       return { command: "init" } as const
     }
     return { command: "unknown", raw: argv } as const

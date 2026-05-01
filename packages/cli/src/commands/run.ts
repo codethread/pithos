@@ -19,7 +19,7 @@ export interface RunRegisterOptions {
 
 export interface RunEndOptions {
   readonly run: string | undefined
-  readonly status: "ended" | "failed" | "cancelled"
+  readonly status: string | undefined
   readonly summary?: string | undefined
 }
 
@@ -49,24 +49,14 @@ export const runRegisterCommand = (
     const db = yield* DbService
     const ids = yield* IdService
 
-    // Idempotent re-registration: if an explicit run ID is given and already
-    // exists, return it unchanged rather than inserting a duplicate.
-    if (opts.run) {
-      const existing = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [opts.run])
-      if (existing.length > 0) {
-        yield* Effect.sync(() => {
-          console.log(JSON.stringify({ ok: true, run: existing[0] }))
-        })
-        return
-      }
-    }
-
     const id = opts.run ?? (yield* ids.generate("run"))
 
-    // Insert run row and lifecycle event atomically.
+    // Use INSERT OR IGNORE so concurrent calls with the same explicit --run ID
+    // are race-safe: exactly one insertion wins; the loser silently skips.
+    // The lifecycle event is only appended for the winning insertion.
     yield* db.transaction((tx) => {
-      tx.run(
-        `INSERT INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
+      const result = tx.run(
+        `INSERT OR IGNORE INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
          VALUES (?, ?, ?, ?, ?, ?, 'starting')`,
         [
           id,
@@ -77,11 +67,13 @@ export const runRegisterCommand = (
           opts.parentRun ?? null,
         ],
       )
-      tx.run(
-        `INSERT INTO events (run_id, actor_run_id, type, payload_json)
-         VALUES (?, ?, 'run.registered', '{}')`,
-        [id, id],
-      )
+      if (result.changes > 0) {
+        tx.run(
+          `INSERT INTO events (run_id, actor_run_id, type, payload_json)
+           VALUES (?, ?, 'run.registered', '{}')`,
+          [id, id],
+        )
+      }
     })
 
     const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id])
@@ -114,12 +106,28 @@ export const runEndCommand = (
     }
     const runId = opts.run
 
+    // Validate --status: if provided it must be a recognised terminal status.
+    const validStatuses = new Set(["ended", "failed", "cancelled"])
+    const rawStatus = opts.status ?? "ended"
+    if (!validStatuses.has(rawStatus)) {
+      yield* Effect.fail(
+        new PithosError({
+          code: "VALIDATION_ERROR",
+          message: `Invalid --status value: '${rawStatus}'. Valid values: ended, failed, cancelled`,
+        }),
+      )
+      return
+    }
+    const status = rawStatus as "ended" | "failed" | "cancelled"
+
     const db = yield* DbService
 
-    // Atomically update the run status and insert the lifecycle event.
-    // If the run is already terminal, the UPDATE matches 0 rows and no event
-    // is appended (idempotent re-call returns the current state below).
-    yield* db.transaction((tx) => {
+    // Atomically check existence, update status, and insert lifecycle event.
+    // Returns false when the run ID does not exist so we can emit NOT_FOUND
+    // without a racy follow-up SELECT.
+    const exists = yield* db.transaction((tx) => {
+      const check = tx.query(`SELECT id FROM runs WHERE id = ?`, [runId])
+      if (check.length === 0) return false
       const result = tx.run(
         `UPDATE runs
          SET   status       = ?,
@@ -128,7 +136,7 @@ export const runEndCommand = (
                updated_at   = datetime('now')
          WHERE id = ?
            AND status NOT IN ('ended', 'failed', 'cancelled')`,
-        [opts.status, opts.summary ?? null, runId],
+        [status, opts.summary ?? null, runId],
       )
       if (result.changes > 0) {
         tx.run(
@@ -137,20 +145,21 @@ export const runEndCommand = (
           [
             runId,
             runId,
-            JSON.stringify({ status: opts.status, summary: opts.summary ?? null }),
+            JSON.stringify({ status, summary: opts.summary ?? null }),
           ],
         )
       }
+      return true
     })
 
-    const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [runId])
-
-    if (rows.length === 0) {
+    if (!exists) {
       yield* Effect.fail(
         new PithosError({ code: "NOT_FOUND", message: `Run not found: ${runId}` }),
       )
       return
     }
+
+    const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [runId])
 
     yield* Effect.sync(() => {
       console.log(JSON.stringify({ ok: true, run: rows[0] }))

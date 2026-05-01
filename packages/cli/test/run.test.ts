@@ -84,13 +84,26 @@ describe("runEndCommand (unit — fake DB)", () => {
     expect(Exit.isFailure(exit)).toBe(true)
   })
 
-  it("fails NOT_FOUND when run does not exist in fake DB", async () => {
+  it("fails VALIDATION_ERROR for an invalid --status value", async () => {
     const exit = await runEff(
       Effect.provide(
-        runEndCommand({ run: "run_ghost", status: "ended" }),
+        runEndCommand({ run: "run_abc", status: "faild" }),
         makeDbServiceTest(),
       ),
     )
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("accepts undefined --status and defaults to ended", async () => {
+    // fake DB returns empty rows (no run), so result is still failure (NOT_FOUND)
+    // but it should not fail with VALIDATION_ERROR
+    const exit = await runEff(
+      Effect.provide(
+        runEndCommand({ run: "run_abc", status: undefined }),
+        makeDbServiceTest(),
+      ),
+    )
+    // fails NOT_FOUND (not VALIDATION_ERROR) — status defaulted correctly
     expect(Exit.isFailure(exit)).toBe(true)
   })
 })
@@ -456,9 +469,9 @@ describe("parseArgs — run and inspect run", () => {
     })
   })
 
-  it("parses 'run end --run run_abc'", async () => {
+  it("parses 'run end --run run_abc' with no --status (defaults to undefined)", async () => {
     const result = await Effect.runPromise(parseArgs(["run", "end", "--run", "run_abc"]))
-    expect(result).toMatchObject({ command: "run:end", run: "run_abc", status: "ended" })
+    expect(result).toMatchObject({ command: "run:end", run: "run_abc", status: undefined })
   })
 
   it("parses 'run end --run run_abc --status failed --summary foo'", async () => {
@@ -473,11 +486,18 @@ describe("parseArgs — run and inspect run", () => {
     })
   })
 
-  it("defaults run:end status to 'ended' for unrecognised status values", async () => {
+  it("defaults run:end status to 'ended' when --status is not provided", async () => {
+    const result = await Effect.runPromise(
+      parseArgs(["run", "end", "--run", "run_abc"]),
+    )
+    expect(result).toMatchObject({ command: "run:end", status: undefined })
+  })
+
+  it("passes the raw --status value through (validation happens in command)", async () => {
     const result = await Effect.runPromise(
       parseArgs(["run", "end", "--run", "run_abc", "--status", "unknown_val"]),
     )
-    expect(result).toMatchObject({ command: "run:end", status: "ended" })
+    expect(result).toMatchObject({ command: "run:end", status: "unknown_val" })
   })
 
   it("routes 'run register --help' to help", async () => {
@@ -636,6 +656,19 @@ describe("pithos run end (CLI process)", () => {
       status = (e as { status?: number }).status
     }
     expect(status).toBe(3)
+  })
+
+  it("exits 2 for an invalid --status value", () => {
+    let status: number | undefined
+    try {
+      execFileSync(BIN, ["run", "end", "--run", runId, "--status", "typo"], {
+        env,
+        encoding: "utf-8",
+      })
+    } catch (e: unknown) {
+      status = (e as { status?: number }).status
+    }
+    expect(status).toBe(2)
   })
 
   it("shows help on --help", () => {

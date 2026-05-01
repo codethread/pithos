@@ -19,7 +19,7 @@ export type ParsedArgs =
   | {
       command: "run:end"
       run: string | undefined
-      status: "ended" | "failed" | "cancelled"
+      status: string | undefined
       summary: string | undefined
     }
   | { command: "inspect:scope"; id: string }
@@ -101,9 +101,7 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
         const remaining = [second, ...rest]
         if (hasHelp(remaining)) return { command: "help", topic: "run:end" } as const
         const run = flagValue(argv, "--run")
-        const rawStatus = flagValue(argv, "--status")
-        const status: "ended" | "failed" | "cancelled" =
-          rawStatus === "failed" || rawStatus === "cancelled" ? rawStatus : "ended"
+        const status = flagValue(argv, "--status")
         const summary = flagValue(argv, "--summary")
         return { command: "run:end", run, status, summary } as const
       }

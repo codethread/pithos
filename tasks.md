@@ -21,7 +21,7 @@
 ## Slices
 
 1. **Title:** Create repo workspace and baseline checks  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** none  
    **User stories covered:** US0  

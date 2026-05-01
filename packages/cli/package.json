@@ -12,9 +12,11 @@
   "dependencies": {
     "effect": "^3.21.2",
     "@effect/platform": "^0.96.1",
-    "@effect/platform-node": "^0.106.0"
+    "@effect/platform-node": "^0.106.0",
+    "better-sqlite3": "^9.6.0"
   },
   "devDependencies": {
-    "@effect/vitest": "^0.29.0"
+    "@effect/vitest": "^0.29.0",
+    "@types/better-sqlite3": "^7.6.0"
   }
 }

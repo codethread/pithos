@@ -4,6 +4,12 @@ import { PithosError } from "../errors/errors.ts"
 import type { DbService } from "../services/db.ts"
 import { VERSION } from "../version.ts"
 import { initCommand } from "../commands/init.ts"
+import { scopeUpsertCommand, SCOPE_UPSERT_HELP } from "../commands/scope.ts"
+import { inspectScopeCommand, INSPECT_HELP } from "../commands/inspect.ts"
+
+// ---------------------------------------------------------------------------
+// Help texts
+// ---------------------------------------------------------------------------
 
 const HELP_TEXT = `pithos - local control plane for coordinating Claude Code agents
 
@@ -48,20 +54,46 @@ Exit codes:
 Run \`pithos <command> --help\` for command-specific usage.
 `
 
-export const dispatch = (
-  args: ParsedArgs,
-): Effect.Effect<void, PithosError, DbService> =>
+const helpFor = (topic: string | undefined): string => {
+  switch (topic) {
+    case "scope":
+    case "scope:upsert":
+      return SCOPE_UPSERT_HELP
+    case "inspect":
+    case "inspect:scope":
+      return INSPECT_HELP
+    default:
+      return HELP_TEXT
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher
+// ---------------------------------------------------------------------------
+
+export const dispatch = (args: ParsedArgs): Effect.Effect<void, PithosError, DbService> =>
   Effect.gen(function* () {
     switch (args.command) {
       case "version":
         console.log(VERSION)
         break
+
       case "help":
-        console.log(HELP_TEXT)
+        console.log(helpFor(args.topic))
         break
+
       case "init":
         yield* initCommand
         break
+
+      case "scope:upsert":
+        yield* scopeUpsertCommand({ kind: args.kind, path: args.path })
+        break
+
+      case "inspect:scope":
+        yield* inspectScopeCommand(args.id)
+        break
+
       case "unknown": {
         const cmd = args.raw[0] ?? "(none)"
         console.error(`pithos: unknown command '${cmd}'\nRun \`pithos --help\` for usage.`)

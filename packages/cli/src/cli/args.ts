@@ -1,27 +1,81 @@
 import { Effect } from "effect"
+import type { ScopeKind } from "../domain/scope.ts"
 import type { PithosError } from "../errors/errors.ts"
 
 export type ParsedArgs =
   | { command: "version" }
-  | { command: "help" }
+  | { command: "help"; topic?: string }
   | { command: "init" }
+  | { command: "scope:upsert"; kind: ScopeKind; path: string | undefined }
+  | { command: "inspect:scope"; id: string }
   | { command: "unknown"; raw: readonly string[] }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Return the value following a named flag, or undefined if not present. */
+const flagValue = (argv: readonly string[], flag: string): string | undefined => {
+  const idx = argv.indexOf(flag)
+  if (idx === -1 || idx + 1 >= argv.length) return undefined
+  return argv[idx + 1]
+}
+
+const hasHelp = (argv: readonly string[]): boolean =>
+  argv.includes("--help") || argv.includes("-h")
+
+// ---------------------------------------------------------------------------
+// Parser
+// ---------------------------------------------------------------------------
 
 export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, PithosError> =>
   Effect.sync(() => {
-    const [first] = argv
+    const [first, second, ...rest] = argv
+
+    if (!first || first === "--help" || first === "-h" || first === "help") {
+      return { command: "help" } as const
+    }
+
     if (first === "--version" || first === "-v") {
       return { command: "version" } as const
     }
-    if (first === "--help" || first === "-h" || first === "help") {
-      return { command: "help" } as const
-    }
+
     if (first === "init") {
-      // Guard: --help after a subcommand shows help instead of executing.
-      if (argv.slice(1).includes("--help") || argv.slice(1).includes("-h")) {
-        return { command: "help" } as const
-      }
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "init" } as const
       return { command: "init" } as const
     }
+
+    if (first === "scope") {
+      if (!second || second === "--help" || second === "-h") {
+        return { command: "help", topic: "scope" } as const
+      }
+      if (second === "upsert") {
+        const remaining = [second, ...rest]
+        if (hasHelp(remaining)) return { command: "help", topic: "scope:upsert" } as const
+        const rawKind = flagValue(argv, "--kind")
+        const kind: ScopeKind =
+          rawKind === "global" || rawKind === "repo" || rawKind === "worktree"
+            ? rawKind
+            : "repo"
+        const path = flagValue(argv, "--path")
+        return { command: "scope:upsert", kind, path } as const
+      }
+      return { command: "unknown", raw: argv } as const
+    }
+
+    if (first === "inspect") {
+      if (!second || second === "--help" || second === "-h") {
+        return { command: "help", topic: "inspect" } as const
+      }
+      if (second === "scope") {
+        const remaining = [second, ...rest]
+        if (hasHelp(remaining)) return { command: "help", topic: "inspect:scope" } as const
+        const id = rest[0]
+        if (!id) return { command: "unknown", raw: argv } as const
+        return { command: "inspect:scope", id } as const
+      }
+      return { command: "unknown", raw: argv } as const
+    }
+
     return { command: "unknown", raw: argv } as const
   })

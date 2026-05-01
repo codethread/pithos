@@ -33,12 +33,12 @@ describe("parseArgs", () => {
 
   it("init --help routes to help, not init", async () => {
     const result = await Effect.runPromise(parseArgs(["init", "--help"]))
-    expect(result).toEqual({ command: "help" })
+    expect(result).toMatchObject({ command: "help" })
   })
 
   it("init -h routes to help, not init", async () => {
     const result = await Effect.runPromise(parseArgs(["init", "-h"]))
-    expect(result).toEqual({ command: "help" })
+    expect(result).toMatchObject({ command: "help" })
   })
 
   it("returns unknown for unrecognised commands", async () => {
@@ -46,9 +46,9 @@ describe("parseArgs", () => {
     expect(result).toEqual({ command: "unknown", raw: ["no-such"] })
   })
 
-  it("returns unknown for empty args", async () => {
+  it("returns help for empty args", async () => {
     const result = await Effect.runPromise(parseArgs([]))
-    expect(result).toEqual({ command: "unknown", raw: [] })
+    expect(result).toMatchObject({ command: "help" })
   })
 })
 

@@ -16,6 +16,7 @@ import {
 } from "../commands/run.ts"
 import { enqueueCommand, ENQUEUE_HELP } from "../commands/enqueue.ts"
 import { claimCommand, CLAIM_HELP } from "../commands/claim.ts"
+import { heartbeatCommand, HEARTBEAT_HELP } from "../commands/heartbeat.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -78,6 +79,8 @@ const helpFor = (topic: string | undefined): string => {
       return ENQUEUE_HELP
     case "claim":
       return CLAIM_HELP
+    case "heartbeat":
+      return HEARTBEAT_HELP
     case "inspect":
     case "inspect:scope":
     case "inspect:run":
@@ -162,6 +165,16 @@ export const dispatch = (
           scope: args.scope,
           capability: args.capability,
           leaseMinutes: args.leaseMinutes,
+        })
+        break
+
+      case "heartbeat":
+        yield* heartbeatCommand({
+          run: args.run,
+          task: args.task,
+          token: args.token,
+          hook: args.hook,
+          throttleSeconds: args.throttleSeconds,
         })
         break
 

@@ -39,6 +39,14 @@ export type ParsedArgs =
       capability: string | undefined
       leaseMinutes: number | undefined
     }
+  | {
+      command: "heartbeat"
+      run: string | undefined
+      task: string | undefined
+      token: number | undefined
+      hook: string | undefined
+      throttleSeconds: number | undefined
+    }
   | { command: "inspect:scope"; id: string }
   | { command: "inspect:run"; id: string }
   | { command: "inspect:task"; id: string }
@@ -147,6 +155,18 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       const leaseMinutes =
         leaseMinutesRaw !== undefined ? parseInt(leaseMinutesRaw, 10) : undefined
       return { command: "claim", run, scope, capability, leaseMinutes } as const
+    }
+
+    if (first === "heartbeat") {
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "heartbeat" } as const
+      const run = flagValue(argv, "--run")
+      const task = flagValue(argv, "--task")
+      const tokenRaw = flagValue(argv, "--token")
+      const token = tokenRaw !== undefined ? parseInt(tokenRaw, 10) : undefined
+      const hook = flagValue(argv, "--hook")
+      const throttleRaw = flagValue(argv, "--throttle-seconds")
+      const throttleSeconds = throttleRaw !== undefined ? parseInt(throttleRaw, 10) : undefined
+      return { command: "heartbeat", run, task, token, hook, throttleSeconds } as const
     }
 
     if (first === "inspect") {

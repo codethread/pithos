@@ -59,6 +59,16 @@ export const claimCommand = (
     const capability = opts.capability
     const leaseMinutes = opts.leaseMinutes ?? DEFAULT_LEASE_MINUTES
 
+    if (!Number.isFinite(leaseMinutes) || leaseMinutes <= 0) {
+      yield* Effect.fail(
+        new PithosError({
+          code: "VALIDATION_ERROR",
+          message: `--lease-minutes must be a positive number, got: ${String(leaseMinutes)}`,
+        }),
+      )
+      return
+    }
+
     const db = yield* DbService
 
     // Validate run exists before attempting the claim transaction.
@@ -78,7 +88,7 @@ export const claimCommand = (
          SET
            status             = 'claimed',
            lease_owner_run_id = ?,
-           lease_until        = datetime('now', '+' || ? || ' minutes'),
+           lease_until        = strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '+' || ? || ' minutes')),
            fencing_token      = fencing_token + 1,
            attempts           = attempts + 1,
            updated_at         = datetime('now')
@@ -87,7 +97,7 @@ export const claimCommand = (
            WHERE status     = 'queued'
              AND scope_id   = ?
              AND capability = ?
-           ORDER BY created_at ASC
+           ORDER BY created_at ASC, id ASC
            LIMIT 1
          )
          RETURNING *`,

@@ -73,6 +73,26 @@ describe("claimCommand (unit — fake DB)", () => {
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
+
+  it("fails VALIDATION_ERROR when --lease-minutes is NaN (e.g. 'abc')", async () => {
+    const exit = await runEff(
+      Effect.provide(
+        claimCommand({ run: "run_abc", scope: "global", capability: "triage", leaseMinutes: NaN }),
+        makeDbServiceTest(),
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("fails VALIDATION_ERROR when --lease-minutes is zero", async () => {
+    const exit = await runEff(
+      Effect.provide(
+        claimCommand({ run: "run_abc", scope: "global", capability: "triage", leaseMinutes: 0 }),
+        makeDbServiceTest(),
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -162,8 +182,9 @@ describe("claimCommand (integration — real SQLite)", () => {
     db.close()
 
     expect(row.lease_until).toBeTruthy()
-    // Append UTC marker so Node.js parses the SQLite datetime string correctly.
-    const leaseDate = new Date(row.lease_until.replace(" ", "T") + "Z")
+    // lease_until is stored as ISO-8601 UTC (ends with Z)
+    expect(row.lease_until).toMatch(/Z$/)
+    const leaseDate = new Date(row.lease_until)
     expect(leaseDate.getTime()).toBeGreaterThan(Date.now())
   })
 
@@ -267,7 +288,11 @@ describe("claimCommand (integration — real SQLite)", () => {
     await registerRun("run_race_a")
     await registerRun("run_race_b")
 
-    // Both attempt to claim — first one wins, second gets NO_CLAIMABLE_WORK.
+    // NOTE: Node.js + better-sqlite3 are single-threaded/synchronous, so true
+    // concurrent writes cannot be simulated in-process. This test proves the
+    // state-machine invariant: once a task is claimed, a second attempt must
+    // fail. SQLite UPDATE atomicity ensures the same under multi-process
+    // contention (exercised explicitly in the CLI process 'RACE (CLI)' tests).
     const exitA = await runEff(
       Effect.provide(
         claimCommand({ run: "run_race_a", scope: "global", capability: "triage" }),
@@ -548,6 +573,17 @@ describe("pithos claim (CLI process)", () => {
     expect(result.status).toBe(2)
   })
 
+  it("exits 2 when --lease-minutes is not a valid number", () => {
+    cliEnqueue()
+    const runId = cliRegisterRun()
+    const result = spawnSync(
+      BIN,
+      ["claim", "--run", runId, "--scope", "global", "--capability", "triage", "--lease-minutes", "abc"],
+      { env, encoding: "utf-8" },
+    )
+    expect(result.status).toBe(2)
+  })
+
   it("respects --lease-minutes flag", () => {
     cliEnqueue()
     const runId = cliRegisterRun()
@@ -561,7 +597,7 @@ describe("pithos claim (CLI process)", () => {
     expect(parsed.ok).toBe(true)
     // lease_until should be ~30 minutes from now, so definitely > 20 minutes
     // Append UTC marker so Node.js parses the SQLite datetime string correctly.
-    const leaseDate = new Date(parsed.task.lease_until.replace(" ", "T") + "Z")
+    const leaseDate = new Date(parsed.task.lease_until)
     const twentyMinsFromNow = new Date(Date.now() + 20 * 60 * 1000)
     expect(leaseDate.getTime()).toBeGreaterThan(twentyMinsFromNow.getTime())
   })

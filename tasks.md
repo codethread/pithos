@@ -77,7 +77,7 @@
    **Vertical slice:** Implement atomic `pithos claim --run --scope --capability`, lease timestamp, fencing token increment, task-claimed event, no-work exit code, concurrency/race test proving only one run claims one task.
 
 9. **Title:** Heartbeat an active run and task  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 8  
    **User stories covered:** US4  

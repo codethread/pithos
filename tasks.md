@@ -42,7 +42,7 @@
    **Vertical slice:** Add a basic Docker/Podman-compatible smoke test that runs through Vitest against an isolated temp DB/container context. This proves containerised DB/process tests can run without touching `~/.pandora/pithos.sqlite`. This slice must not spawn Claude, tmux, or real agents.
 
 4. **Title:** Initialise SQLite through the real CLI  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 1, 2, 3  
    **User stories covered:** US1  

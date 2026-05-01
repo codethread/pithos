@@ -1,0 +1,20 @@
+{
+  "name": "@pithos/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pithos": "./bin/pithos"
+  },
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "effect": "^3.21.2",
+    "@effect/platform": "^0.96.1",
+    "@effect/platform-node": "^0.106.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.29.0"
+  }
+}

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# pithos CLI entry point
+# In development, runs via tsx; in production, runs compiled dist
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIST="$SCRIPT_DIR/../dist/src/main.js"
+SRC="$SCRIPT_DIR/../src/main.ts"
+
+if [ -f "$DIST" ]; then
+  exec node "$DIST" "$@"
+else
+  # Development: use tsx loader via NODE_OPTIONS or direct
+  WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+  TSX="$WORKSPACE_ROOT/node_modules/.bin/tsx"
+  if [ -f "$TSX" ]; then
+    exec "$TSX" "$SRC" "$@"
+  else
+    exec node --import "tsx/esm" "$SRC" "$@"
+  fi
+fi

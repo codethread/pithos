@@ -61,6 +61,16 @@ export const enqueueCommand = (
     const fs = yield* FsService
 
     // Read body from file if provided, else fall back to inline body or empty string.
+    // Reject supplying both --body and --body-file; the caller must choose one.
+    if (opts.body !== undefined && opts.bodyFile !== undefined) {
+      yield* Effect.fail(
+        new PithosError({
+          code: "VALIDATION_ERROR",
+          message: "--body and --body-file are mutually exclusive; supply one or neither",
+        }),
+      )
+      return
+    }
     let body = opts.body ?? ""
     if (opts.bodyFile) {
       body = yield* fs.readFile(opts.bodyFile)
@@ -73,6 +83,28 @@ export const enqueueCommand = (
         new PithosError({ code: "NOT_FOUND", message: `Scope not found: ${scope}` }),
       )
       return
+    }
+
+    // Validate optional relational fields to surface clean NOT_FOUND errors
+    // rather than opaque FK constraint failures from SQLite.
+    if (opts.run) {
+      const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [opts.run])
+      if (runRows.length === 0) {
+        yield* Effect.fail(
+          new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
+        )
+        return
+      }
+    }
+
+    if (opts.parentId) {
+      const parentRows = yield* db.query(`SELECT id FROM tasks WHERE id = ?`, [opts.parentId])
+      if (parentRows.length === 0) {
+        yield* Effect.fail(
+          new PithosError({ code: "NOT_FOUND", message: `Parent task not found: ${opts.parentId}` }),
+        )
+        return
+      }
     }
 
     const id = yield* ids.generate("task")
@@ -111,8 +143,8 @@ Options:
   --scope <scope-id>     Scope ID for this task [required]
   --capability <cap>     Task capability, e.g. watch, triage [required]
   --title <title>        Human-readable task title [required]
-  --body-file <path>     File path for task body/description
-  --body <text>          Inline task body (alternative to --body-file)
+  --body-file <path>     File path for task body/description (mutually exclusive with --body)
+  --body <text>          Inline task body (mutually exclusive with --body-file)
   --run <run-id>         Run ID to record as the task creator
   --parent-id <task-id>  Parent task ID for subtasks
   --help, -h             Show this help

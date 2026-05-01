@@ -279,6 +279,86 @@ describe("enqueueCommand (integration — real SQLite)", () => {
 
     expect(row?.created_by_run_id).toBe("run_creator")
   })
+
+  it("fails NOT_FOUND for an unknown --run id", async () => {
+    const exit = await runEff(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "Bad run", run: "run_nonexistent" }),
+        makeLayer(),
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("stores parent_id when valid --parent-id is provided", async () => {
+    // Create a parent task first.
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "Parent" }),
+        makeLayer(["task_parent"]),
+      ),
+    )
+    // Create child task referencing parent.
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "Child", parentId: "task_parent" }),
+        makeLayer(["task_child"]),
+      ),
+    )
+
+    const db = new Database(dbPath)
+    const row = db
+      .prepare("SELECT parent_id FROM tasks WHERE id = 'task_child'")
+      .get() as { parent_id: string | null } | undefined
+    db.close()
+
+    expect(row?.parent_id).toBe("task_parent")
+  })
+
+  it("fails NOT_FOUND for an unknown --parent-id", async () => {
+    const exit = await runEff(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "Bad parent", parentId: "task_ghost" }),
+        makeLayer(),
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("fails VALIDATION_ERROR when both --body and --body-file are supplied", async () => {
+    const bodyPath = join(tempDir, "body.md")
+    writeFileSync(bodyPath, "file content")
+    const exit = await runEff(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "Both", body: "inline", bodyFile: bodyPath }),
+        makeLayer(),
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("stores actor_run_id in task.created event when --run is supplied", async () => {
+    // Register a run first.
+    const runLayer = Layer.mergeAll(dbLayer, makeIdServiceTest(["run_actor"]), FsServiceLive)
+    await Effect.runPromise(
+      Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_actor" }), runLayer),
+    )
+
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "With actor", run: "run_actor" }),
+        makeLayer(["task_actor_test"]),
+      ),
+    )
+
+    const db = new Database(dbPath)
+    const event = db
+      .prepare("SELECT actor_run_id FROM events WHERE type = 'task.created'")
+      .get() as { actor_run_id: string | null } | undefined
+    db.close()
+
+    expect(event?.actor_run_id).toBe("run_actor")
+  })
 })
 
 describe("inspectTaskCommand (integration — real SQLite)", () => {
@@ -519,6 +599,22 @@ describe("pithos enqueue (CLI process)", () => {
     )
     const parsed = JSON.parse(stdout) as { task: { body: string } }
     expect(parsed.task.body).toBe("Task body from file")
+  })
+
+  it("exits 2 when both --body and --body-file are supplied", () => {
+    const bodyPath = join(tempDir, "body.md")
+    writeFileSync(bodyPath, "content")
+    let status: number | undefined
+    try {
+      execFileSync(
+        BIN,
+        ["enqueue", "--scope", "global", "--capability", "triage", "--title", "T", "--body", "inline", "--body-file", bodyPath],
+        { env, encoding: "utf-8" },
+      )
+    } catch (e: unknown) {
+      status = (e as { status?: number }).status
+    }
+    expect(status).toBe(2)
   })
 
   it("shows help on --help", () => {

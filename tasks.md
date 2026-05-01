@@ -28,7 +28,7 @@
    **Vertical slice:** Create `~/dev/pithos` as a git repo with pnpm workspace layout, Node LTS TypeScript config, stable Effect v3 dependencies, ESLint flat config, Vitest, a tiny `packages/cli` package, a placeholder `pithos --version`, and CI-style scripts (`lint`, `typecheck`, `test`). ESLint must ban explicit `any` and unsafe `any` usage. No SQLite, Docker, Claude, tmux, or real agents yet.
 
 2. **Title:** Add dependency-injected service seams  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 1  
    **User stories covered:** US0  

@@ -56,7 +56,7 @@
    **Vertical slice:** Add `scopes` table migration, home-relative scope ID derivation (`repo:work/...`), `pithos scope upsert --path`, `pithos inspect scope`, JSON output, tests for path canonicalisation and idempotent upsert.
 
 6. **Title:** Register and end a Claude run  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 4, 5  
    **User stories covered:** US2, US4, US6  

@@ -49,7 +49,7 @@
    **Vertical slice:** Add executable `packages/cli/bin/pithos`, SQLite path resolution, initial migration table, `pithos init`, idempotency tests, and smoke demo: `PITHOS_DB=<temp> pithos init` creates a DB without touching `~/.pandora/pithos.sqlite` during tests.
 
 5. **Title:** Register a repo scope and inspect it  
-   **Status:** Unbuilt  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 4  
    **User stories covered:** US2, US6  

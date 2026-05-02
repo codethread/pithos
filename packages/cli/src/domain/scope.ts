@@ -1,3 +1,4 @@
+import { Schema } from "effect"
 import { homedir } from "node:os"
 import { resolve, relative, basename } from "node:path"
 
@@ -11,7 +12,8 @@ import { resolve, relative, basename } from "node:path"
  * so IDs remain stable and unambiguous.
  */
 
-export type ScopeKind = "global" | "repo" | "worktree"
+export const ScopeKindSchema = Schema.Literal("global", "repo", "worktree")
+export type ScopeKind = typeof ScopeKindSchema.Type
 
 /**
  * Expand `~` and resolve relative paths to an absolute path.

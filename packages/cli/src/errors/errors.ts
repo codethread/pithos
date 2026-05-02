@@ -6,6 +6,7 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "STALE_TOKEN"
   | "NO_CLAIMABLE_WORK"
+  | "INTERNAL_ERROR"
 
 export class PithosError extends Data.TaggedError("PithosError")<{
   readonly code: ErrorCode
@@ -24,5 +25,7 @@ export const exitCodeFor = (code: ErrorCode): number => {
       return 4
     case "NO_CLAIMABLE_WORK":
       return 5
+    case "INTERNAL_ERROR":
+      return 1
   }
 }

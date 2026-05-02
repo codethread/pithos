@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { DbService } from "../services/db.ts"
 import { IdService } from "../services/ids.ts"
 import { OutputService } from "../services/output.ts"
@@ -6,7 +6,12 @@ import { PithosError } from "../errors/errors.ts"
 import { withCommandObservability } from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
-// Options
+// Schemas
+// ---------------------------------------------------------------------------
+
+const RunEndStatusSchema = Schema.Literal("ended", "failed", "cancelled")
+
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
 export interface RunRegisterOptions {
@@ -114,18 +119,16 @@ export const runEndCommand = (
     const runId = opts.run
 
     // Validate --status: if provided it must be a recognised terminal status.
-    const validStatuses = new Set(["ended", "failed", "cancelled"])
     const rawStatus = opts.status ?? "ended"
-    if (!validStatuses.has(rawStatus)) {
-      yield* Effect.fail(
-        new PithosError({
-          code: "VALIDATION_ERROR",
-          message: `Invalid --status value: '${rawStatus}'. Valid values: ended, failed, cancelled`,
-        }),
-      )
-      return
-    }
-    const status = rawStatus as "ended" | "failed" | "cancelled"
+    const status = yield* Schema.decodeUnknown(RunEndStatusSchema)(rawStatus).pipe(
+      Effect.mapError(
+        () =>
+          new PithosError({
+            code: "VALIDATION_ERROR",
+            message: `Invalid --status value: '${rawStatus}'. Valid values: ended, failed, cancelled`,
+          }),
+      ),
+    )
 
     const db = yield* DbService
     const output = yield* OutputService

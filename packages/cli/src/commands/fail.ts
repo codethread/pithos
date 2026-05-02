@@ -1,4 +1,4 @@
-import { Effect, Metric } from "effect"
+import { Effect, Metric, Schema } from "effect"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
@@ -52,15 +52,15 @@ export const failCommand = (
       )
       return
     }
-    if (!Number.isFinite(opts.token) || !Number.isInteger(opts.token)) {
-      yield* Effect.fail(
-        new PithosError({
-          code: "VALIDATION_ERROR",
-          message: `--token must be an integer, got: ${String(opts.token)}`,
-        }),
-      )
-      return
-    }
+    yield* Schema.decodeUnknown(Schema.Int)(opts.token).pipe(
+      Effect.mapError(
+        () =>
+          new PithosError({
+            code: "VALIDATION_ERROR",
+            message: `--token must be an integer, got: ${String(opts.token)}`,
+          }),
+      ),
+    )
 
     const taskId = opts.taskId
     const runId = opts.run

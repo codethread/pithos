@@ -1,5 +1,6 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import type { ScopeKind } from "../domain/scope.ts"
+import { ScopeKindSchema } from "../domain/scope.ts"
 import { PithosError } from "../errors/errors.ts"
 
 export type ParsedArgs =
@@ -92,6 +93,36 @@ const hasHelp = (argv: readonly string[]): boolean =>
   argv.includes("--help") || argv.includes("-h")
 
 // ---------------------------------------------------------------------------
+// Numeric flag helpers
+// ---------------------------------------------------------------------------
+
+/** Integer schema: parse a string token as a safe integer (rejects NaN, float, Infinity). */
+const IntFromString = Schema.NumberFromString.pipe(Schema.int())
+
+/**
+ * Read a named flag's value and parse it as an integer via Schema.
+ * Returns undefined when the flag is absent; fails with VALIDATION_ERROR for
+ * non-integer values.
+ */
+const intFlagValue = (
+  argv: readonly string[],
+  flag: string,
+): Effect.Effect<number | undefined, PithosError> =>
+  Effect.gen(function* () {
+    const raw = flagValue(argv, flag)
+    if (raw === undefined) return undefined
+    return yield* Schema.decodeUnknown(IntFromString)(raw).pipe(
+      Effect.mapError(
+        () =>
+          new PithosError({
+            code: "VALIDATION_ERROR",
+            message: `${flag} must be an integer, got: '${raw}'`,
+          }),
+      ),
+    )
+  })
+
+// ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 
@@ -120,15 +151,17 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
         const remaining = [second, ...rest]
         if (hasHelp(remaining)) return { command: "help", topic: "scope:upsert" } as const
         const rawKind = flagValue(argv, "--kind")
-        if (rawKind !== undefined && rawKind !== "global" && rawKind !== "repo" && rawKind !== "worktree") {
-          return yield* Effect.fail(
-            new PithosError({
-              code: "VALIDATION_ERROR",
-              message: `Invalid --kind value: '${rawKind}'. Valid values: global, repo, worktree`,
-            }),
-          )
-        }
-        const kind: ScopeKind = rawKind ?? "repo"
+        const kind: ScopeKind = rawKind !== undefined
+          ? yield* Schema.decodeUnknown(ScopeKindSchema)(rawKind).pipe(
+              Effect.mapError(
+                () =>
+                  new PithosError({
+                    code: "VALIDATION_ERROR",
+                    message: `Invalid --kind value: '${rawKind}'. Valid values: global, repo, worktree`,
+                  }),
+              ),
+            )
+          : "repo"
         const path = flagValue(argv, "--path")
         return { command: "scope:upsert", kind, path } as const
       }
@@ -178,9 +211,7 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       const run = flagValue(argv, "--run")
       const scope = flagValue(argv, "--scope")
       const capability = flagValue(argv, "--capability")
-      const leaseMinutesRaw = flagValue(argv, "--lease-minutes")
-      const leaseMinutes =
-        leaseMinutesRaw !== undefined ? parseInt(leaseMinutesRaw, 10) : undefined
+      const leaseMinutes = yield* intFlagValue(argv, "--lease-minutes")
       return { command: "claim", run, scope, capability, leaseMinutes } as const
     }
 
@@ -188,11 +219,9 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       if (hasHelp(argv.slice(1))) return { command: "help", topic: "heartbeat" } as const
       const run = flagValue(argv, "--run")
       const task = flagValue(argv, "--task")
-      const tokenRaw = flagValue(argv, "--token")
-      const token = tokenRaw !== undefined ? parseInt(tokenRaw, 10) : undefined
+      const token = yield* intFlagValue(argv, "--token")
       const hook = flagValue(argv, "--hook")
-      const throttleRaw = flagValue(argv, "--throttle-seconds")
-      const throttleSeconds = throttleRaw !== undefined ? parseInt(throttleRaw, 10) : undefined
+      const throttleSeconds = yield* intFlagValue(argv, "--throttle-seconds")
       return { command: "heartbeat", run, task, token, hook, throttleSeconds } as const
     }
 
@@ -200,8 +229,7 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       if (hasHelp(argv.slice(1))) return { command: "help", topic: "complete" } as const
       const taskId = second !== undefined && !second.startsWith("-") ? second : undefined
       const run = flagValue(argv, "--run")
-      const tokenRaw = flagValue(argv, "--token")
-      const token = tokenRaw !== undefined ? parseInt(tokenRaw, 10) : undefined
+      const token = yield* intFlagValue(argv, "--token")
       const resultFile = flagValue(argv, "--result-file")
       return { command: "complete", taskId, run, token, resultFile } as const
     }
@@ -210,8 +238,7 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       if (hasHelp(argv.slice(1))) return { command: "help", topic: "fail" } as const
       const taskId = second !== undefined && !second.startsWith("-") ? second : undefined
       const run = flagValue(argv, "--run")
-      const tokenRaw = flagValue(argv, "--token")
-      const token = tokenRaw !== undefined ? parseInt(tokenRaw, 10) : undefined
+      const token = yield* intFlagValue(argv, "--token")
       const reason = flagValue(argv, "--reason")
       return { command: "fail", taskId, run, token, reason } as const
     }

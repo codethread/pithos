@@ -1,4 +1,4 @@
-import { Effect, Metric } from "effect"
+import { Effect, Metric, Schema } from "effect"
 import { DbService } from "../services/db.ts"
 import { FsService } from "../services/fs.ts"
 import { OutputService } from "../services/output.ts"
@@ -53,15 +53,15 @@ export const completeCommand = (
       )
       return
     }
-    if (!Number.isFinite(opts.token) || !Number.isInteger(opts.token)) {
-      yield* Effect.fail(
-        new PithosError({
-          code: "VALIDATION_ERROR",
-          message: `--token must be an integer, got: ${String(opts.token)}`,
-        }),
-      )
-      return
-    }
+    yield* Schema.decodeUnknown(Schema.Int)(opts.token).pipe(
+      Effect.mapError(
+        () =>
+          new PithosError({
+            code: "VALIDATION_ERROR",
+            message: `--token must be an integer, got: ${String(opts.token)}`,
+          }),
+      ),
+    )
 
     const taskId = opts.taskId
     const runId = opts.run
@@ -73,18 +73,16 @@ export const completeCommand = (
     let resultJson = "{}"
     if (opts.resultFile) {
       const raw = yield* fs.readFile(opts.resultFile)
-      try {
-        JSON.parse(raw)
-        resultJson = raw.trim()
-      } catch {
-        yield* Effect.fail(
-          new PithosError({
-            code: "VALIDATION_ERROR",
-            message: `--result-file does not contain valid JSON: ${opts.resultFile}`,
-          }),
-        )
-        return
-      }
+      yield* Schema.decodeUnknown(Schema.parseJson(Schema.Unknown))(raw).pipe(
+        Effect.mapError(
+          () =>
+            new PithosError({
+              code: "VALIDATION_ERROR",
+              message: `--result-file does not contain valid JSON: ${opts.resultFile}`,
+            }),
+        ),
+      )
+      resultJson = raw.trim()
     }
 
     const db = yield* DbService

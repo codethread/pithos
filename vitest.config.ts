@@ -8,13 +8,19 @@ export default defineConfig({
     // onTaskUpdate" unhandled errors. They are framework noise, not test
     // failures — ignore so the suite exits 0.
     dangerouslyIgnoreUnhandledErrors: true,
+    // Timeouts are tight on purpose. Slowest unit ≈ 30ms, slowest integration
+    // ≈ 1.7s (CLI subprocess + SQLite). If a test starts brushing these,
+    // **do not raise the timeout to make it pass** — write a faster test
+    // (smaller fixture, fewer subprocess hops, mock the slow boundary, split
+    // the assertion). Timeouts catch real regressions; loosening them hides
+    // them.
     projects: [
       {
         test: {
           name: "unit",
           include: ["packages/*/src/**/*.test.ts"],
           pool: "threads",
-          testTimeout: 5000,
+          testTimeout: 2000,
         },
       },
       {
@@ -22,8 +28,8 @@ export default defineConfig({
           name: "integration",
           include: ["packages/*/test/**/*.test.ts"],
           pool: "forks",
-          testTimeout: 15000,
-          teardownTimeout: 30000,
+          testTimeout: 5000,
+          teardownTimeout: 10000,
           globalSetup: ["./vitest.global-setup.ts"],
         },
       },

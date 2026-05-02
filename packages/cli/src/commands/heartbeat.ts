@@ -215,7 +215,25 @@ export const heartbeatCommand = (
       )
 
       return { kind: "success" }
-    })
+    }).pipe(
+      // Catch the mid-transaction race: the throw-to-rollback sentinel is converted
+      // by db.transaction into PithosError{STALE_TOKEN}. Increment the counter so
+      // the race path is visible in metrics, then re-raise the error unchanged.
+      Effect.tapError((e) =>
+        e.code === "STALE_TOKEN"
+          ? Effect.all([
+              Metric.increment(staleTokensHeartbeatCounter),
+              Effect.logWarning("stale fencing token race on heartbeat").pipe(
+                Effect.annotateLogs({
+                  runId,
+                  taskId: String(opts.task ?? ""),
+                  token: String(opts.token ?? ""),
+                }),
+              ),
+            ])
+          : Effect.void,
+      ),
+    )
 
     if (txResult.kind === "not_found") {
       yield* Effect.fail(

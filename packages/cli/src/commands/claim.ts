@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ const DEFAULT_LEASE_MINUTES = 10
  */
 export const claimCommand = (
   opts: ClaimOptions,
-): Effect.Effect<void, PithosError, DbService> =>
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.run) {
       yield* Effect.fail(
@@ -70,6 +71,7 @@ export const claimCommand = (
     }
 
     const db = yield* DbService
+    const output = yield* OutputService
 
     // Validate run exists before attempting the claim transaction.
     const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId])
@@ -137,9 +139,7 @@ export const claimCommand = (
       return
     }
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, task: claimedTask }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, task: claimedTask }))
   })
 
 // ---------------------------------------------------------------------------

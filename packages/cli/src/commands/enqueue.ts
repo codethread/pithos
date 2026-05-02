@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
 import { IdService } from "../services/ids.ts"
 import { FsService } from "../services/fs.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -31,7 +32,7 @@ export interface EnqueueOptions {
  */
 export const enqueueCommand = (
   opts: EnqueueOptions,
-): Effect.Effect<void, PithosError, DbService | IdService | FsService> =>
+): Effect.Effect<void, PithosError, DbService | IdService | FsService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.scope) {
       yield* Effect.fail(
@@ -59,6 +60,7 @@ export const enqueueCommand = (
     const db = yield* DbService
     const ids = yield* IdService
     const fs = yield* FsService
+    const output = yield* OutputService
 
     // Read body from file if provided, else fall back to inline body or empty string.
     // Reject supplying both --body and --body-file; the caller must choose one.
@@ -125,9 +127,7 @@ export const enqueueCommand = (
 
     const rows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [id])
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, task: rows[0] }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, task: rows[0] }))
   })
 
 // ---------------------------------------------------------------------------

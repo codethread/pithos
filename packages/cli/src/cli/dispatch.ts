@@ -4,6 +4,7 @@ import { PithosError } from "../errors/errors.ts"
 import type { DbService } from "../services/db.ts"
 import type { IdService } from "../services/ids.ts"
 import type { FsService } from "../services/fs.ts"
+import { OutputService } from "../services/output.ts"
 import { VERSION } from "../version.ts"
 import { initCommand } from "../commands/init.ts"
 import { scopeUpsertCommand, SCOPE_UPSERT_HELP } from "../commands/scope.ts"
@@ -107,16 +108,20 @@ const helpFor = (topic: string | undefined): string => {
 
 export const dispatch = (
   args: ParsedArgs,
-): Effect.Effect<void, PithosError, DbService | IdService | FsService> =>
+): Effect.Effect<void, PithosError, DbService | IdService | FsService | OutputService> =>
   Effect.gen(function* () {
     switch (args.command) {
-      case "version":
-        console.log(VERSION)
+      case "version": {
+        const output = yield* OutputService
+        yield* output.print(VERSION)
         break
+      }
 
-      case "help":
-        console.log(helpFor(args.topic))
+      case "help": {
+        const output = yield* OutputService
+        yield* output.print(helpFor(args.topic))
         break
+      }
 
       case "init":
         yield* initCommand
@@ -218,7 +223,10 @@ export const dispatch = (
 
       case "unknown": {
         const cmd = args.raw[0] ?? "(none)"
-        console.error(`pithos: unknown command '${cmd}'\nRun \`pithos --help\` for usage.`)
+        const output = yield* OutputService
+        yield* output.printError(
+          `pithos: unknown command '${cmd}'\nRun \`pithos --help\` for usage.`,
+        )
         yield* Effect.fail(
           new PithosError({ code: "USER_ERROR", message: `Unknown command: ${cmd}` }),
         )

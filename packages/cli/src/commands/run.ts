@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
 import { IdService } from "../services/ids.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@ export interface RunEndOptions {
  */
 export const runRegisterCommand = (
   opts: RunRegisterOptions,
-): Effect.Effect<void, PithosError, DbService | IdService> =>
+): Effect.Effect<void, PithosError, DbService | IdService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.agentKind) {
       yield* Effect.fail(
@@ -48,6 +49,7 @@ export const runRegisterCommand = (
 
     const db = yield* DbService
     const ids = yield* IdService
+    const output = yield* OutputService
 
     const id = opts.run ?? (yield* ids.generate("run"))
 
@@ -78,9 +80,7 @@ export const runRegisterCommand = (
 
     const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id])
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, run: rows[0] }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
   })
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ export const runRegisterCommand = (
  */
 export const runEndCommand = (
   opts: RunEndOptions,
-): Effect.Effect<void, PithosError, DbService> =>
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.run) {
       yield* Effect.fail(
@@ -121,6 +121,7 @@ export const runEndCommand = (
     const status = rawStatus as "ended" | "failed" | "cancelled"
 
     const db = yield* DbService
+    const output = yield* OutputService
 
     // Atomically check existence, update status, and insert lifecycle event.
     // Returns false when the run ID does not exist so we can emit NOT_FOUND
@@ -161,9 +162,7 @@ export const runEndCommand = (
 
     const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [runId])
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, run: rows[0] }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
   })
 
 // ---------------------------------------------------------------------------

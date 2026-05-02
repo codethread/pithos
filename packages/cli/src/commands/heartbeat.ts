@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -61,7 +62,7 @@ export interface HeartbeatOptions {
  */
 export const heartbeatCommand = (
   opts: HeartbeatOptions,
-): Effect.Effect<void, PithosError, DbService> =>
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.run) {
       yield* Effect.fail(
@@ -107,6 +108,7 @@ export const heartbeatCommand = (
     const hook = opts.hook ?? null
 
     const db = yield* DbService
+    const output = yield* OutputService
 
     type TxResult =
       | { readonly kind: "not_found" }
@@ -231,24 +233,18 @@ export const heartbeatCommand = (
     const run = runRows[0]!
 
     if (txResult.kind === "throttled") {
-      yield* Effect.sync(() => {
-        console.log(JSON.stringify({ ok: true, skipped: true, run }))
-      })
+      yield* output.print(JSON.stringify({ ok: true, skipped: true, run }))
       return
     }
 
     if (txResult.kind === "success_with_task") {
-      yield* Effect.sync(() => {
-        console.log(
-          JSON.stringify({ ok: true, skipped: false, run, task: txResult.task }),
-        )
-      })
+      yield* output.print(
+        JSON.stringify({ ok: true, skipped: false, run, task: txResult.task }),
+      )
       return
     }
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, skipped: false, run }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, skipped: false, run }))
   })
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 /**
@@ -8,9 +9,10 @@ import { PithosError } from "../errors/errors.ts"
  * Fetches the scope row and prints it as JSON.
  * Exits with code 3 (NOT_FOUND) if the scope does not exist.
  */
-export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError, DbService> =>
+export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const db = yield* DbService
+    const output = yield* OutputService
 
     const rows = yield* db.query(`SELECT * FROM scopes WHERE id = ?`, [id])
 
@@ -21,9 +23,7 @@ export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError
       return
     }
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, scope: rows[0] }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, scope: rows[0] }))
   })
 
 /**
@@ -32,9 +32,10 @@ export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError
  * Fetches the task row and its associated artifacts, then prints as JSON.
  * Exits with code 3 (NOT_FOUND) if the task does not exist.
  */
-export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError, DbService> =>
+export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const db = yield* DbService
+    const output = yield* OutputService
 
     const rows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [id])
 
@@ -50,9 +51,7 @@ export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError,
       [id],
     )
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, task: rows[0], artifacts }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, task: rows[0], artifacts }))
   })
 
 /**
@@ -61,9 +60,10 @@ export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError,
  * Fetches the run row and prints it as JSON.
  * Exits with code 3 (NOT_FOUND) if the run does not exist.
  */
-export const inspectRunCommand = (id: string): Effect.Effect<void, PithosError, DbService> =>
+export const inspectRunCommand = (id: string): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const db = yield* DbService
+    const output = yield* OutputService
 
     const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id])
 
@@ -74,9 +74,7 @@ export const inspectRunCommand = (id: string): Effect.Effect<void, PithosError, 
       return
     }
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, run: rows[0] }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
   })
 
 export const INSPECT_HELP = `pithos inspect - Inspect a pithos entity

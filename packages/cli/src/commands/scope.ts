@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 import { canonicalizePath, deriveScopeId, nameFromPath } from "../domain/scope.ts"
 import type { ScopeKind } from "../domain/scope.ts"
@@ -21,9 +22,10 @@ export interface ScopeUpsertOptions {
  */
 export const scopeUpsertCommand = (
   opts: ScopeUpsertOptions,
-): Effect.Effect<void, PithosError, DbService> =>
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const db = yield* DbService
+    const output = yield* OutputService
 
     if (opts.kind === "global") {
       yield* db.run(
@@ -31,11 +33,9 @@ export const scopeUpsertCommand = (
          VALUES ('global', 'global', 'global', NULL, '{}', CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`,
       )
-      yield* Effect.sync(() => {
-        console.log(
-          JSON.stringify({ ok: true, scope: { id: "global", kind: "global", name: "global" } }),
-        )
-      })
+      yield* output.print(
+        JSON.stringify({ ok: true, scope: { id: "global", kind: "global", name: "global" } }),
+      )
       return
     }
 
@@ -65,14 +65,12 @@ export const scopeUpsertCommand = (
       [id, opts.kind, name, canonicalPath],
     )
 
-    yield* Effect.sync(() => {
-      console.log(
-        JSON.stringify({
-          ok: true,
-          scope: { id, kind: opts.kind, name, canonical_path: canonicalPath },
-        }),
-      )
-    })
+    yield* output.print(
+      JSON.stringify({
+        ok: true,
+        scope: { id, kind: opts.kind, name, canonical_path: canonicalPath },
+      }),
+    )
   })
 
 export const SCOPE_UPSERT_HELP = `pithos scope upsert - Register a scope (global/repo/worktree)

@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
 import { FsService } from "../services/fs.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -31,7 +32,7 @@ export interface CompleteOptions {
  */
 export const completeCommand = (
   opts: CompleteOptions,
-): Effect.Effect<void, PithosError, DbService | FsService> =>
+): Effect.Effect<void, PithosError, DbService | FsService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.taskId) {
       yield* Effect.fail(
@@ -67,6 +68,7 @@ export const completeCommand = (
 
     // Read result JSON from --result-file if provided; validate JSON.
     const fs = yield* FsService
+    const output = yield* OutputService
     let resultJson = "{}"
     if (opts.resultFile) {
       const raw = yield* fs.readFile(opts.resultFile)
@@ -134,9 +136,7 @@ export const completeCommand = (
       return
     }
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, task: txResult.task }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, task: txResult.task }))
   })
 
 // ---------------------------------------------------------------------------

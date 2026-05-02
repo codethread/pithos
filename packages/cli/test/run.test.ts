@@ -22,6 +22,9 @@ import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
 import { makeIdServiceTest, IdServiceLive } from "../src/layers/ids.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { scopeUpsertCommand } from "../src/commands/scope.ts"
+import { makeOutputServiceSilent } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -43,7 +46,7 @@ async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Ex
 
 describe("runRegisterCommand (unit — fake DB)", () => {
   it("fails VALIDATION_ERROR when --agent-kind is missing", async () => {
-    const layer = Layer.merge(makeDbServiceTest(), makeIdServiceTest([]))
+    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), silentOutput)
     const exit = await runEff(
       Effect.provide(runRegisterCommand({ agentKind: undefined }), layer),
     )
@@ -51,7 +54,7 @@ describe("runRegisterCommand (unit — fake DB)", () => {
   })
 
   it("succeeds when agent-kind is provided", async () => {
-    const layer = Layer.merge(makeDbServiceTest(), makeIdServiceTest(["run_u1"]))
+    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest(["run_u1"]), silentOutput)
     const exit = await runEff(
       Effect.provide(runRegisterCommand({ agentKind: "envy" }), layer),
     )
@@ -65,7 +68,7 @@ describe("runRegisterCommand (unit — fake DB)", () => {
         [{ id: "run_existing", agent_kind: "envy", status: "starting" }],
       ],
     ])
-    const layer = Layer.merge(makeDbServiceTest(seed), makeIdServiceTest([]))
+    const layer = Layer.mergeAll(makeDbServiceTest(seed), makeIdServiceTest([]), silentOutput)
     const exit = await runEff(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_existing" }), layer),
     )
@@ -78,7 +81,7 @@ describe("runEndCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         runEndCommand({ run: undefined, status: "ended" }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -88,7 +91,7 @@ describe("runEndCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         runEndCommand({ run: "run_abc", status: "faild" }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -100,7 +103,7 @@ describe("runEndCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         runEndCommand({ run: "run_abc", status: undefined }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     // fails NOT_FOUND (not VALIDATION_ERROR) — status defaulted correctly
@@ -111,7 +114,7 @@ describe("runEndCommand (unit — fake DB)", () => {
 describe("inspectRunCommand (unit — fake DB)", () => {
   it("fails NOT_FOUND when run is absent from fake DB", async () => {
     const exit = await runEff(
-      Effect.provide(inspectRunCommand("run_missing"), makeDbServiceTest()),
+      Effect.provide(inspectRunCommand("run_missing"), Layer.merge(makeDbServiceTest(), silentOutput)),
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
@@ -130,7 +133,7 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
   })
 
   afterEach(() => {
@@ -138,7 +141,7 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
   })
 
   it("creates a run with status=starting", async () => {
-    const layer = Layer.merge(dbLayer, IdServiceLive)
+    const layer = Layer.mergeAll(dbLayer, IdServiceLive, silentOutput)
     await Effect.runPromise(Effect.provide(runRegisterCommand({ agentKind: "envy" }), layer))
 
     const db = new Database(dbPath)
@@ -153,7 +156,7 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
   })
 
   it("generates a run_ prefixed ID", async () => {
-    const layer = Layer.merge(dbLayer, IdServiceLive)
+    const layer = Layer.mergeAll(dbLayer, IdServiceLive, silentOutput)
     await Effect.runPromise(Effect.provide(runRegisterCommand({ agentKind: "envy" }), layer))
 
     const db = new Database(dbPath)
@@ -165,7 +168,7 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
   })
 
   it("appends a run.registered lifecycle event", async () => {
-    const layer = Layer.merge(dbLayer, IdServiceLive)
+    const layer = Layer.mergeAll(dbLayer, IdServiceLive, silentOutput)
     await Effect.runPromise(Effect.provide(runRegisterCommand({ agentKind: "envy" }), layer))
 
     const db = new Database(dbPath)
@@ -182,10 +185,10 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
   it("stores scope_id and cwd when provided", async () => {
     const scopePath = join(process.env.HOME ?? "/tmp", "work/run-scope-test")
     await Effect.runPromise(
-      Effect.provide(scopeUpsertCommand({ kind: "repo", path: scopePath }), dbLayer),
+      Effect.provide(scopeUpsertCommand({ kind: "repo", path: scopePath }), Layer.merge(dbLayer, silentOutput)),
     )
 
-    const layer = Layer.merge(dbLayer, IdServiceLive)
+    const layer = Layer.mergeAll(dbLayer, IdServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         runRegisterCommand({
@@ -208,7 +211,7 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
   })
 
   it("is idempotent — re-registering with same run ID returns existing run", async () => {
-    const layer = Layer.merge(dbLayer, makeIdServiceTest([]))
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([]), silentOutput)
 
     // First call: run_fixed doesn't exist yet, so it inserts
     await Effect.runPromise(
@@ -233,7 +236,7 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
   })
 
   it("idempotent re-registration does not insert a second run.registered event", async () => {
-    const layer = Layer.merge(dbLayer, makeIdServiceTest([]))
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([]), silentOutput)
 
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_idem" }), layer),
@@ -261,9 +264,9 @@ describe("runEndCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
     // Seed a run to end
-    const layer = Layer.merge(dbLayer, makeIdServiceTest([]))
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([]), silentOutput)
     await Effect.runPromise(
       Effect.provide(
         runRegisterCommand({ agentKind: "envy", run: "run_to_end" }),
@@ -280,7 +283,7 @@ describe("runEndCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         runEndCommand({ run: "run_to_end", status: "ended" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -298,7 +301,7 @@ describe("runEndCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         runEndCommand({ run: "run_to_end", status: "ended", summary: "completed" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -323,7 +326,7 @@ describe("runEndCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         runEndCommand({ run: "run_to_end", status: "failed", summary: "crashed" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -341,7 +344,7 @@ describe("runEndCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         runEndCommand({ run: "run_ghost", status: "ended" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -349,12 +352,12 @@ describe("runEndCommand (integration — real SQLite)", () => {
 
   it("is idempotent — ending an already-ended run returns success without re-appending an event", async () => {
     await Effect.runPromise(
-      Effect.provide(runEndCommand({ run: "run_to_end", status: "ended" }), dbLayer),
+      Effect.provide(runEndCommand({ run: "run_to_end", status: "ended" }), Layer.merge(dbLayer, silentOutput)),
     )
 
     // Second call on an already-ended run
     const exit = await runEff(
-      Effect.provide(runEndCommand({ run: "run_to_end", status: "ended" }), dbLayer),
+      Effect.provide(runEndCommand({ run: "run_to_end", status: "ended" }), Layer.merge(dbLayer, silentOutput)),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
 
@@ -371,7 +374,7 @@ describe("runEndCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         runEndCommand({ run: "run_to_end", status: "cancelled" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -394,8 +397,8 @@ describe("inspectRunCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
-    const layer = Layer.merge(dbLayer, makeIdServiceTest([]))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([]), silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_inspect" }), layer),
     )
@@ -407,24 +410,24 @@ describe("inspectRunCommand (integration — real SQLite)", () => {
 
   it("returns the run after registration", async () => {
     const exit = await runEff(
-      Effect.provide(inspectRunCommand("run_inspect"), dbLayer),
+      Effect.provide(inspectRunCommand("run_inspect"), Layer.merge(dbLayer, silentOutput)),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
   })
 
   it("fails NOT_FOUND for unknown run ID", async () => {
     const exit = await runEff(
-      Effect.provide(inspectRunCommand("run_unknown"), dbLayer),
+      Effect.provide(inspectRunCommand("run_unknown"), Layer.merge(dbLayer, silentOutput)),
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
 
   it("shows ended_at after run is ended", async () => {
     await Effect.runPromise(
-      Effect.provide(runEndCommand({ run: "run_inspect", status: "ended" }), dbLayer),
+      Effect.provide(runEndCommand({ run: "run_inspect", status: "ended" }), Layer.merge(dbLayer, silentOutput)),
     )
     const exit = await runEff(
-      Effect.provide(inspectRunCommand("run_inspect"), dbLayer),
+      Effect.provide(inspectRunCommand("run_inspect"), Layer.merge(dbLayer, silentOutput)),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
   })

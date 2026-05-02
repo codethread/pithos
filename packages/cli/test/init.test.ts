@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { Effect, Exit, type Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { mkdtempSync, existsSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir, homedir } from "node:os"
@@ -18,6 +18,9 @@ import Database from "better-sqlite3"
 import { initCommand } from "../src/commands/init.ts"
 import { runMigrations } from "../src/db/migrate.ts"
 import { makeDbServiceTest, makeDbServiceLive } from "../src/layers/db.ts"
+import { makeOutputServiceSilent } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,13 +44,13 @@ function runWith<A, E, LE, R>(
 describe("initCommand (unit — fake DB)", () => {
   it("succeeds with a fresh fake DB", async () => {
     const exit = await Effect.runPromiseExit(
-      Effect.provide(initCommand, makeDbServiceTest()),
+      Effect.provide(initCommand, Layer.merge(makeDbServiceTest(), silentOutput)),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
   })
 
   it("succeeds a second time (idempotent with fake DB)", async () => {
-    const layer = makeDbServiceTest()
+    const layer = Layer.merge(makeDbServiceTest(), silentOutput)
     const first = await Effect.runPromiseExit(Effect.provide(initCommand, layer))
     const second = await Effect.runPromiseExit(Effect.provide(initCommand, layer))
     expect(Exit.isSuccess(first)).toBe(true)
@@ -93,12 +96,12 @@ describe("initCommand (integration — real SQLite)", () => {
   })
 
   it("creates the DB file", async () => {
-    await runWith(initCommand, makeDbServiceLive(dbPath))
+    await runWith(initCommand, Layer.merge(makeDbServiceLive(dbPath), silentOutput))
     expect(existsSync(dbPath)).toBe(true)
   })
 
   it("creates all required tables", async () => {
-    await runWith(initCommand, makeDbServiceLive(dbPath))
+    await runWith(initCommand, Layer.merge(makeDbServiceLive(dbPath), silentOutput))
 
     const db = new Database(dbPath)
     const tables = (
@@ -117,7 +120,7 @@ describe("initCommand (integration — real SQLite)", () => {
   })
 
   it("records migration 1 in schema_migrations", async () => {
-    await runWith(initCommand, makeDbServiceLive(dbPath))
+    await runWith(initCommand, Layer.merge(makeDbServiceLive(dbPath), silentOutput))
 
     const db = new Database(dbPath)
     const rows = db
@@ -130,7 +133,7 @@ describe("initCommand (integration — real SQLite)", () => {
   })
 
   it("inserts the default global scope", async () => {
-    await runWith(initCommand, makeDbServiceLive(dbPath))
+    await runWith(initCommand, Layer.merge(makeDbServiceLive(dbPath), silentOutput))
 
     const db = new Database(dbPath)
     const row = db
@@ -144,7 +147,7 @@ describe("initCommand (integration — real SQLite)", () => {
   })
 
   it("is idempotent — running init twice leaves one migration row and one global scope", async () => {
-    const layer = makeDbServiceLive(dbPath)
+    const layer = Layer.merge(makeDbServiceLive(dbPath), silentOutput)
     await runWith(initCommand, layer)
     await runWith(initCommand, layer)
 
@@ -167,7 +170,7 @@ describe("initCommand (integration — real SQLite)", () => {
       ? statSync(realDbPath).mtimeMs
       : null
 
-    await runWith(initCommand, makeDbServiceLive(dbPath))
+    await runWith(initCommand, Layer.merge(makeDbServiceLive(dbPath), silentOutput))
 
     const mtimeAfter: number | null = existsSync(realDbPath)
       ? statSync(realDbPath).mtimeMs

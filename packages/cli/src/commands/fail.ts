@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ export interface FailOptions {
  */
 export const failCommand = (
   opts: FailOptions,
-): Effect.Effect<void, PithosError, DbService> =>
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.taskId) {
       yield* Effect.fail(
@@ -67,6 +68,7 @@ export const failCommand = (
     const resultJson = JSON.stringify({ reason })
 
     const db = yield* DbService
+    const output = yield* OutputService
 
     type TxResult =
       | { readonly kind: "stale_token" }
@@ -115,9 +117,7 @@ export const failCommand = (
       return
     }
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, task: txResult.task }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, task: txResult.task }))
   })
 
 // ---------------------------------------------------------------------------

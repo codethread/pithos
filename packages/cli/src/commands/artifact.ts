@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
 import { FsService } from "../services/fs.ts"
 import { IdService } from "../services/ids.ts"
+import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
@@ -28,7 +29,7 @@ export interface ArtifactAddOptions {
  */
 export const artifactAddCommand = (
   opts: ArtifactAddOptions,
-): Effect.Effect<void, PithosError, DbService | IdService | FsService> =>
+): Effect.Effect<void, PithosError, DbService | IdService | FsService | OutputService> =>
   Effect.gen(function* () {
     if (!opts.task) {
       yield* Effect.fail(
@@ -81,6 +82,7 @@ export const artifactAddCommand = (
     }
 
     const ids = yield* IdService
+    const output = yield* OutputService
     const artifactId = yield* ids.generate("artifact")
 
     const artifact = yield* db.transaction((tx): Record<string, unknown> => {
@@ -99,9 +101,7 @@ export const artifactAddCommand = (
       return rows[0]!
     })
 
-    yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, artifact }))
-    })
+    yield* output.print(JSON.stringify({ ok: true, artifact }))
   })
 
 // ---------------------------------------------------------------------------

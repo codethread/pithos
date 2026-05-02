@@ -24,6 +24,9 @@ import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,7 +51,7 @@ describe("claimCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: undefined, scope: "global", capability: "triage" }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -58,7 +61,7 @@ describe("claimCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: "run_abc", scope: undefined, capability: "triage" }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -68,7 +71,7 @@ describe("claimCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: "run_abc", scope: "global", capability: undefined }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -78,7 +81,7 @@ describe("claimCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: "run_abc", scope: "global", capability: "triage", leaseMinutes: NaN }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -88,7 +91,7 @@ describe("claimCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: "run_abc", scope: "global", capability: "triage", leaseMinutes: 0 }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -108,7 +111,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
   })
 
   afterEach(() => {
@@ -117,7 +120,7 @@ describe("claimCommand (integration — real SQLite)", () => {
 
   /** Enqueue a task in the global scope. Returns the task id. */
   const enqueue = async (taskId: string, capability = "triage"): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability, title: `Task ${taskId}` }),
@@ -129,7 +132,7 @@ describe("claimCommand (integration — real SQLite)", () => {
 
   /** Register a run. Returns the run id. */
   const registerRun = async (runId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: runId }), layer),
     )
@@ -143,7 +146,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         claimCommand({ run: "run_claim1", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -171,7 +174,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         claimCommand({ run: "run_lease1", scope: "global", capability: "triage", leaseMinutes: 15 }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -195,7 +198,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         claimCommand({ run: "run_event1", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -226,7 +229,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         claimCommand({ run: "run_fifo1", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -249,7 +252,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: "run_nowork1", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -263,7 +266,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: "run_cap_mismatch", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -276,7 +279,7 @@ describe("claimCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         claimCommand({ run: "run_nonexistent", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -296,13 +299,13 @@ describe("claimCommand (integration — real SQLite)", () => {
     const exitA = await runEff(
       Effect.provide(
         claimCommand({ run: "run_race_a", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     const exitB = await runEff(
       Effect.provide(
         claimCommand({ run: "run_race_b", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -329,13 +332,13 @@ describe("claimCommand (integration — real SQLite)", () => {
     await runEff(
       Effect.provide(
         claimCommand({ run: "run_race_ev_a", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     await runEff(
       Effect.provide(
         claimCommand({ run: "run_race_ev_b", scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -352,25 +355,16 @@ describe("claimCommand (integration — real SQLite)", () => {
     await enqueue("task_output1")
     await registerRun("run_output1")
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        claimCommand({ run: "run_output1", scope: "global", capability: "triage" }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
 
-    try {
-      await Effect.runPromise(
-        Effect.provide(
-          claimCommand({ run: "run_output1", scope: "global", capability: "triage" }),
-          dbLayer,
-        ),
-      )
-    } finally {
-      console.log = originalLog
-    }
-
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as {
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       task: {
         id: string

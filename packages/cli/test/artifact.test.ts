@@ -25,6 +25,9 @@ import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive, makeFsServiceTest } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,7 +48,7 @@ async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Ex
 // ---------------------------------------------------------------------------
 
 describe("artifactAddCommand (unit — fake DB)", () => {
-  const fakeLayer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest())
+  const fakeLayer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest(), silentOutput)
 
   it("fails VALIDATION_ERROR when --task is missing", async () => {
     const exit = await runEff(
@@ -112,7 +115,7 @@ describe("artifactAddCommand (unit — fake DB)", () => {
   })
 
   it("fails NOT_FOUND when --body-file does not exist", async () => {
-    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest())
+    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest(), silentOutput)
     const exit = await runEff(
       Effect.provide(
         artifactAddCommand({
@@ -142,7 +145,7 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
   })
 
   afterEach(() => {
@@ -150,7 +153,7 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
   })
 
   const enqueue = async (taskId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: "watch", title: `Task ${taskId}` }),
@@ -161,7 +164,7 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
   }
 
   const registerRun = async (runId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: runId }), layer),
     )
@@ -172,31 +175,22 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
     const taskId = await enqueue("task_art1")
     const runId = await registerRun("run_art1")
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        artifactAddCommand({
+          task: taskId,
+          run: runId,
+          kind: "worker-completion",
+          title: "Worker report",
+          bodyFile: undefined,
+        }),
+        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_art1"]), FsServiceLive, out.layer),
+      ),
+    )
 
-    try {
-      await Effect.runPromise(
-        Effect.provide(
-          artifactAddCommand({
-            task: taskId,
-            run: runId,
-            kind: "worker-completion",
-            title: "Worker report",
-            bodyFile: undefined,
-          }),
-          Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_art1"]), FsServiceLive),
-        ),
-      )
-    } finally {
-      console.log = originalLog
-    }
-
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as {
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       artifact: { id: string; kind: string; title: string }
     }
@@ -223,7 +217,7 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
           title: "Report",
           bodyFile: reportPath,
         }),
-        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_art_body"]), FsServiceLive),
+        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_art_body"]), FsServiceLive, silentOutput),
       ),
     )
 
@@ -249,7 +243,7 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
           title: "Brief",
           bodyFile: undefined,
         }),
-        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_art_nobody"]), FsServiceLive),
+        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_art_nobody"]), FsServiceLive, silentOutput),
       ),
     )
 
@@ -276,26 +270,17 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
           title: "Completion report",
           bodyFile: undefined,
         }),
-        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_inspect1"]), FsServiceLive),
+        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_inspect1"]), FsServiceLive, silentOutput),
       ),
     )
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(inspectTaskCommand(taskId), Layer.merge(dbLayer, out.layer)),
+    )
 
-    try {
-      await Effect.runPromise(
-        Effect.provide(inspectTaskCommand(taskId), dbLayer),
-      )
-    } finally {
-      console.log = originalLog
-    }
-
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as {
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       task: { id: string }
       artifacts: { id: string; kind: string; title: string }[]
@@ -311,21 +296,12 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
   it("inspect task shows empty artifacts array when no artifacts added", async () => {
     const taskId = await enqueue("task_art_empty")
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(inspectTaskCommand(taskId), Layer.merge(dbLayer, out.layer)),
+    )
 
-    try {
-      await Effect.runPromise(
-        Effect.provide(inspectTaskCommand(taskId), dbLayer),
-      )
-    } finally {
-      console.log = originalLog
-    }
-
-    const parsed = JSON.parse(logs[0]!) as {
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       artifacts: unknown[]
     }
@@ -346,7 +322,7 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
           title: "First report",
           bodyFile: undefined,
         }),
-        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_multi1"]), FsServiceLive),
+        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_multi1"]), FsServiceLive, silentOutput),
       ),
     )
 
@@ -359,7 +335,7 @@ describe("artifactAddCommand (integration — real SQLite)", () => {
           title: "Design notes",
           bodyFile: undefined,
         }),
-        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_multi2"]), FsServiceLive),
+        Layer.mergeAll(dbLayer, makeIdServiceTest(["artifact_multi2"]), FsServiceLive, silentOutput),
       ),
     )
 

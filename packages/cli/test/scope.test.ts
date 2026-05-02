@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { Effect, Exit } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir, homedir } from "node:os"
@@ -22,6 +22,9 @@ import { inspectScopeCommand } from "../src/commands/inspect.ts"
 import { parseArgs } from "../src/cli/args.ts"
 import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
 import { initCommand } from "../src/commands/init.ts"
+import { makeOutputServiceSilent } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -111,7 +114,7 @@ describe("scopeUpsertCommand (unit — fake DB)", () => {
     const exit = await runEffect(
       Effect.provide(
         scopeUpsertCommand({ kind: "global", path: undefined }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
@@ -121,7 +124,7 @@ describe("scopeUpsertCommand (unit — fake DB)", () => {
     const exit = await runEffect(
       Effect.provide(
         scopeUpsertCommand({ kind: "repo", path: "~/work/my-repo" }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
@@ -131,7 +134,7 @@ describe("scopeUpsertCommand (unit — fake DB)", () => {
     const exit = await runEffect(
       Effect.provide(
         scopeUpsertCommand({ kind: "repo", path: undefined }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -142,7 +145,7 @@ describe("scopeUpsertCommand (unit — fake DB)", () => {
 describe("inspectScopeCommand (unit — fake DB)", () => {
   it("fails with NOT_FOUND when scope is absent", async () => {
     const exit = await runEffect(
-      Effect.provide(inspectScopeCommand("repo:missing"), makeDbServiceTest()),
+      Effect.provide(inspectScopeCommand("repo:missing"), Layer.merge(makeDbServiceTest(), silentOutput)),
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
@@ -160,7 +163,7 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     // Must init first so scopes table (and global scope) exist.
-    await Effect.runPromise(Effect.provide(initCommand, makeDbServiceLive(dbPath)))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(makeDbServiceLive(dbPath), silentOutput)))
   })
 
   afterEach(() => {
@@ -174,7 +177,7 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         scopeUpsertCommand({ kind: "repo", path: absPath }),
-        makeDbServiceLive(dbPath),
+        Layer.merge(makeDbServiceLive(dbPath), silentOutput),
       ),
     )
 
@@ -195,7 +198,7 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
 
   it("is idempotent — upserting the same path twice yields one row", async () => {
     const absPath = join(homedir(), "work/my-project")
-    const layer = makeDbServiceLive(dbPath)
+    const layer = Layer.merge(makeDbServiceLive(dbPath), silentOutput)
 
     await Effect.runPromise(
       Effect.provide(scopeUpsertCommand({ kind: "repo", path: absPath }), layer),
@@ -215,7 +218,7 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
 
   it("preserves created_at on repeated upsert", async () => {
     const absPath = join(homedir(), "work/stable-project")
-    const layer = makeDbServiceLive(dbPath)
+    const layer = Layer.merge(makeDbServiceLive(dbPath), silentOutput)
     const id = "repo:work/stable-project"
 
     await Effect.runPromise(
@@ -249,7 +252,7 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         scopeUpsertCommand({ kind: "global", path: undefined }),
-        makeDbServiceLive(dbPath),
+        Layer.merge(makeDbServiceLive(dbPath), silentOutput),
       ),
     )
 
@@ -270,7 +273,7 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         scopeUpsertCommand({ kind: "repo", path: tildeRelPath }),
-        makeDbServiceLive(dbPath),
+        Layer.merge(makeDbServiceLive(dbPath), silentOutput),
       ),
     )
 
@@ -291,7 +294,7 @@ describe("inspectScopeCommand (integration — real SQLite)", () => {
   beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
-    await Effect.runPromise(Effect.provide(initCommand, makeDbServiceLive(dbPath)))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(makeDbServiceLive(dbPath), silentOutput)))
   })
 
   afterEach(() => {
@@ -300,14 +303,14 @@ describe("inspectScopeCommand (integration — real SQLite)", () => {
 
   it("returns the global scope after init", async () => {
     const exit = await Effect.runPromiseExit(
-      Effect.provide(inspectScopeCommand("global"), makeDbServiceLive(dbPath)),
+      Effect.provide(inspectScopeCommand("global"), Layer.merge(makeDbServiceLive(dbPath), silentOutput)),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
   })
 
   it("fails NOT_FOUND for unknown scope ID", async () => {
     const exit = await Effect.runPromiseExit(
-      Effect.provide(inspectScopeCommand("repo:does-not-exist"), makeDbServiceLive(dbPath)),
+      Effect.provide(inspectScopeCommand("repo:does-not-exist"), Layer.merge(makeDbServiceLive(dbPath), silentOutput)),
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
@@ -315,7 +318,7 @@ describe("inspectScopeCommand (integration — real SQLite)", () => {
   it("returns the correct row after upsert", async () => {
     const absPath = join(homedir(), "work/inspect-test")
     const id = "repo:work/inspect-test"
-    const layer = makeDbServiceLive(dbPath)
+    const layer = Layer.merge(makeDbServiceLive(dbPath), silentOutput)
 
     await Effect.runPromise(
       Effect.provide(scopeUpsertCommand({ kind: "repo", path: absPath }), layer),

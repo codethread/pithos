@@ -25,6 +25,9 @@ import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,7 +50,7 @@ async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Ex
 describe("heartbeatCommand (unit — fake DB)", () => {
   it("fails VALIDATION_ERROR when --run is missing", async () => {
     const exit = await runEff(
-      Effect.provide(heartbeatCommand({ run: undefined }), makeDbServiceTest()),
+      Effect.provide(heartbeatCommand({ run: undefined }), Layer.merge(makeDbServiceTest(), silentOutput)),
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
@@ -56,7 +59,7 @@ describe("heartbeatCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: "run_abc", task: "task_xyz", token: undefined }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -66,7 +69,7 @@ describe("heartbeatCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: "run_abc", task: "task_xyz", token: NaN }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -76,7 +79,7 @@ describe("heartbeatCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: "run_abc", throttleSeconds: NaN }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -86,7 +89,7 @@ describe("heartbeatCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: "run_abc", throttleSeconds: -5 }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -106,7 +109,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
   })
 
   afterEach(() => {
@@ -115,7 +118,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
 
   /** Enqueue a task and return the task ID. */
   const enqueue = async (taskId: string, capability = "triage"): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability, title: `Task ${taskId}` }),
@@ -127,7 +130,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
 
   /** Register a run and return the run ID. */
   const registerRun = async (runId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: runId }), layer),
     )
@@ -139,7 +142,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         claimCommand({ run: runId, scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     const db = new Database(dbPath)
@@ -171,7 +174,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     const runId = await registerRun("run_hb1")
 
     await Effect.runPromise(
-      Effect.provide(heartbeatCommand({ run: runId }), dbLayer),
+      Effect.provide(heartbeatCommand({ run: runId }), Layer.merge(dbLayer, silentOutput)),
     )
 
     const db = new Database(dbPath)
@@ -194,7 +197,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     expect(before.status).toBe("starting")
 
     await Effect.runPromise(
-      Effect.provide(heartbeatCommand({ run: runId }), dbLayer),
+      Effect.provide(heartbeatCommand({ run: runId }), Layer.merge(dbLayer, silentOutput)),
     )
 
     const db2 = new Database(dbPath)
@@ -209,7 +212,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     const runId = await registerRun("run_hb_hook")
 
     await Effect.runPromise(
-      Effect.provide(heartbeatCommand({ run: runId, hook: "PreToolUse" }), dbLayer),
+      Effect.provide(heartbeatCommand({ run: runId, hook: "PreToolUse" }), Layer.merge(dbLayer, silentOutput)),
     )
 
     const db = new Database(dbPath)
@@ -222,7 +225,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
 
   it("fails NOT_FOUND when run does not exist", async () => {
     const exit = await runEff(
-      Effect.provide(heartbeatCommand({ run: "run_nonexistent" }), dbLayer),
+      Effect.provide(heartbeatCommand({ run: "run_nonexistent" }), Layer.merge(dbLayer, silentOutput)),
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
@@ -237,7 +240,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         heartbeatCommand({ run: runId, task: taskId, token }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -266,7 +269,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         heartbeatCommand({ run: runId, task: taskId, token }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -293,7 +296,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: runId, task: taskId, token: 999 }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -313,7 +316,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     await runEff(
       Effect.provide(
         heartbeatCommand({ run: runId, task: taskId, token: 999 }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -336,14 +339,14 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         heartbeatCommand({ run: runId, task: taskId, token }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     // Second heartbeat with same token: already running → still running
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: runId, task: taskId, token }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
@@ -365,14 +368,14 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
 
     // First heartbeat to set last_heartbeat_at
     await Effect.runPromise(
-      Effect.provide(heartbeatCommand({ run: runId }), dbLayer),
+      Effect.provide(heartbeatCommand({ run: runId }), Layer.merge(dbLayer, silentOutput)),
     )
 
     // Stale token inside throttle window must still fail with STALE_TOKEN
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: runId, task: taskId, token: 999, throttleSeconds: 3600 }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -386,28 +389,20 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
 
     // First heartbeat sets last_heartbeat_at
     await Effect.runPromise(
-      Effect.provide(heartbeatCommand({ run: runId }), dbLayer),
+      Effect.provide(heartbeatCommand({ run: runId }), Layer.merge(dbLayer, silentOutput)),
     )
 
     // Second heartbeat within 60-second throttle — should be skipped
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
-    try {
-      await Effect.runPromise(
-        Effect.provide(
-          heartbeatCommand({ run: runId, throttleSeconds: 60 }),
-          dbLayer,
-        ),
-      )
-    } finally {
-      console.log = originalLog
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        heartbeatCommand({ run: runId, throttleSeconds: 60 }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
 
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as { ok: boolean; skipped: boolean }
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as { ok: boolean; skipped: boolean }
     expect(parsed.ok).toBe(true)
     expect(parsed.skipped).toBe(true)
 
@@ -427,7 +422,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
 
     // First heartbeat
     await Effect.runPromise(
-      Effect.provide(heartbeatCommand({ run: runId }), dbLayer),
+      Effect.provide(heartbeatCommand({ run: runId }), Layer.merge(dbLayer, silentOutput)),
     )
 
     const db1 = new Database(dbPath)
@@ -440,7 +435,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         heartbeatCommand({ run: runId, hook: "SessionEnd", throttleSeconds: 3600 }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -468,7 +463,7 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         heartbeatCommand({ run: runId, throttleSeconds: 3600 }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
@@ -484,21 +479,13 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
   it("outputs skipped:false and run on successful unthrottled heartbeat", async () => {
     const runId = await registerRun("run_hb_out")
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
-    try {
-      await Effect.runPromise(
-        Effect.provide(heartbeatCommand({ run: runId }), dbLayer),
-      )
-    } finally {
-      console.log = originalLog
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(heartbeatCommand({ run: runId }), Layer.merge(dbLayer, out.layer)),
+    )
 
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as {
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       skipped: boolean
       run: { id: string; status: string }
@@ -514,24 +501,16 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     const runId = await registerRun("run_hb_resp")
     const token = await claim(runId, taskId)
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
-    try {
-      await Effect.runPromise(
-        Effect.provide(
-          heartbeatCommand({ run: runId, task: taskId, token }),
-          dbLayer,
-        ),
-      )
-    } finally {
-      console.log = originalLog
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        heartbeatCommand({ run: runId, task: taskId, token }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
 
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as {
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       skipped: boolean
       run: { id: string }

@@ -24,6 +24,9 @@ import { makeIdServiceTest, IdServiceLive } from "../src/layers/ids.ts"
 import { makeFsServiceTest, FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { runRegisterCommand } from "../src/commands/run.ts"
+import { makeOutputServiceSilent } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,7 +48,7 @@ async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Ex
 
 describe("enqueueCommand (unit — fake DB)", () => {
   it("fails VALIDATION_ERROR when --scope is missing", async () => {
-    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest())
+    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest(), silentOutput)
     const exit = await runEff(
       Effect.provide(
         enqueueCommand({ scope: undefined, capability: "watch", title: "Test" }),
@@ -56,7 +59,7 @@ describe("enqueueCommand (unit — fake DB)", () => {
   })
 
   it("fails VALIDATION_ERROR when --capability is missing", async () => {
-    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest())
+    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest(), silentOutput)
     const exit = await runEff(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: undefined, title: "Test" }),
@@ -67,7 +70,7 @@ describe("enqueueCommand (unit — fake DB)", () => {
   })
 
   it("fails VALIDATION_ERROR when --title is missing", async () => {
-    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest())
+    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest(), silentOutput)
     const exit = await runEff(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: "watch", title: undefined }),
@@ -81,7 +84,7 @@ describe("enqueueCommand (unit — fake DB)", () => {
 describe("inspectTaskCommand (unit — fake DB)", () => {
   it("fails NOT_FOUND when task is absent from fake DB", async () => {
     const exit = await runEff(
-      Effect.provide(inspectTaskCommand("task_missing"), makeDbServiceTest()),
+      Effect.provide(inspectTaskCommand("task_missing"), Layer.merge(makeDbServiceTest(), silentOutput)),
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
@@ -100,7 +103,7 @@ describe("enqueueCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
   })
 
   afterEach(() => {
@@ -108,7 +111,7 @@ describe("enqueueCommand (integration — real SQLite)", () => {
   })
 
   const makeLayer = (ids: string[] = ["task_test1"]) =>
-    Layer.mergeAll(dbLayer, makeIdServiceTest(ids), FsServiceLive)
+    Layer.mergeAll(dbLayer, makeIdServiceTest(ids), FsServiceLive, silentOutput)
 
   it("creates a queued task with a task_ prefixed ID", async () => {
     await Effect.runPromise(
@@ -131,7 +134,7 @@ describe("enqueueCommand (integration — real SQLite)", () => {
   })
 
   it("generates a task_ prefixed ID from IdService", async () => {
-    const layer = Layer.mergeAll(dbLayer, IdServiceLive, FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, IdServiceLive, FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: "triage", title: "ID test" }),
@@ -259,7 +262,7 @@ describe("enqueueCommand (integration — real SQLite)", () => {
 
   it("records created_by_run_id when --run is provided", async () => {
     // First register a real run so the FK constraint is satisfied.
-    const runLayer = Layer.mergeAll(dbLayer, makeIdServiceTest(["run_creator"]), FsServiceLive)
+    const runLayer = Layer.mergeAll(dbLayer, makeIdServiceTest(["run_creator"]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_creator" }), runLayer),
     )
@@ -339,7 +342,7 @@ describe("enqueueCommand (integration — real SQLite)", () => {
 
   it("stores actor_run_id in task.created event when --run is supplied", async () => {
     // Register a run first.
-    const runLayer = Layer.mergeAll(dbLayer, makeIdServiceTest(["run_actor"]), FsServiceLive)
+    const runLayer = Layer.mergeAll(dbLayer, makeIdServiceTest(["run_actor"]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_actor" }), runLayer),
     )
@@ -371,9 +374,9 @@ describe("inspectTaskCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
 
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: "triage", title: "For inspection" }),
@@ -387,12 +390,12 @@ describe("inspectTaskCommand (integration — real SQLite)", () => {
   })
 
   it("returns the task row for a known ID", async () => {
-    const exit = await runEff(Effect.provide(inspectTaskCommand(taskId), dbLayer))
+    const exit = await runEff(Effect.provide(inspectTaskCommand(taskId), Layer.merge(dbLayer, silentOutput)))
     expect(Exit.isSuccess(exit)).toBe(true)
   })
 
   it("fails NOT_FOUND for an unknown task ID", async () => {
-    const exit = await runEff(Effect.provide(inspectTaskCommand("task_ghost"), dbLayer))
+    const exit = await runEff(Effect.provide(inspectTaskCommand("task_ghost"), Layer.merge(dbLayer, silentOutput)))
     expect(Exit.isFailure(exit)).toBe(true)
   })
 })

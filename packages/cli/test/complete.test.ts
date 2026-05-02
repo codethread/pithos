@@ -26,6 +26,9 @@ import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive, makeFsServiceTest } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+
+const silentOutput = makeOutputServiceSilent()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,7 +49,7 @@ async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Ex
 // ---------------------------------------------------------------------------
 
 describe("completeCommand (unit — fake DB)", () => {
-  const fakeLayer = Layer.mergeAll(makeDbServiceTest(), makeFsServiceTest())
+  const fakeLayer = Layer.mergeAll(makeDbServiceTest(), makeFsServiceTest(), silentOutput)
 
   it("fails VALIDATION_ERROR when task id is missing", async () => {
     const exit = await runEff(
@@ -90,7 +93,7 @@ describe("completeCommand (unit — fake DB)", () => {
 
   it("fails VALIDATION_ERROR when --result-file is not valid JSON", async () => {
     const fs = makeFsServiceTest(new Map([["/tmp/bad.json", "not json {"]]))
-    const layer = Layer.mergeAll(makeDbServiceTest(), fs)
+    const layer = Layer.mergeAll(makeDbServiceTest(), fs, silentOutput)
     const exit = await runEff(
       Effect.provide(
         completeCommand({ taskId: "task_abc", run: "run_abc", token: 1, resultFile: "/tmp/bad.json" }),
@@ -106,7 +109,7 @@ describe("failCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         failCommand({ taskId: undefined, run: "run_abc", token: 1 }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -116,7 +119,7 @@ describe("failCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         failCommand({ taskId: "task_abc", run: undefined, token: 1 }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -126,7 +129,7 @@ describe("failCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         failCommand({ taskId: "task_abc", run: "run_abc", token: undefined }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -136,7 +139,7 @@ describe("failCommand (unit — fake DB)", () => {
     const exit = await runEff(
       Effect.provide(
         failCommand({ taskId: "task_abc", run: "run_abc", token: NaN }),
-        makeDbServiceTest(),
+        Layer.merge(makeDbServiceTest(), silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -156,7 +159,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
   })
 
   afterEach(() => {
@@ -164,7 +167,7 @@ describe("completeCommand (integration — real SQLite)", () => {
   })
 
   const enqueue = async (taskId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: "triage", title: `Task ${taskId}` }),
@@ -175,7 +178,7 @@ describe("completeCommand (integration — real SQLite)", () => {
   }
 
   const registerRun = async (runId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: runId }), layer),
     )
@@ -186,7 +189,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         claimCommand({ run: runId, scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     const db = new Database(dbPath)
@@ -207,7 +210,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete1", token }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
 
@@ -234,7 +237,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete_running", token }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
 
@@ -260,7 +263,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete_res", token, resultFile: resultPath }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
 
@@ -283,7 +286,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete_ev", token }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
 
@@ -307,24 +310,16 @@ describe("completeCommand (integration — real SQLite)", () => {
     await registerRun("run_complete_out")
     const { taskId, token } = await claimTask("run_complete_out")
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
-    try {
-      await Effect.runPromise(
-        Effect.provide(
-          completeCommand({ taskId, run: "run_complete_out", token }),
-          Layer.mergeAll(dbLayer, FsServiceLive),
-        ),
-      )
-    } finally {
-      console.log = originalLog
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        completeCommand({ taskId, run: "run_complete_out", token }),
+        Layer.mergeAll(dbLayer, FsServiceLive, out.layer),
+      ),
+    )
 
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as {
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       task: { id: string; status: string; completed_at: string }
     }
@@ -341,7 +336,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete_stale", token: 999 }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -365,7 +360,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete_wr_b", token }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -380,7 +375,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete_done", token }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
 
@@ -388,7 +383,7 @@ describe("completeCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         completeCommand({ taskId, run: "run_complete_done", token }),
-        Layer.mergeAll(dbLayer, FsServiceLive),
+        Layer.mergeAll(dbLayer, FsServiceLive, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -404,7 +399,7 @@ describe("failCommand (integration — real SQLite)", () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
-    await Effect.runPromise(Effect.provide(initCommand, dbLayer))
+    await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
   })
 
   afterEach(() => {
@@ -412,7 +407,7 @@ describe("failCommand (integration — real SQLite)", () => {
   })
 
   const enqueue = async (taskId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: "triage", title: `Task ${taskId}` }),
@@ -423,7 +418,7 @@ describe("failCommand (integration — real SQLite)", () => {
   }
 
   const registerRun = async (runId: string): Promise<string> => {
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive)
+    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(runRegisterCommand({ agentKind: "envy", run: runId }), layer),
     )
@@ -434,7 +429,7 @@ describe("failCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         claimCommand({ run: runId, scope: "global", capability: "triage" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     const db = new Database(dbPath)
@@ -455,7 +450,7 @@ describe("failCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         failCommand({ taskId, run: "run_fail1", token, reason: "worker crashed" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -478,7 +473,7 @@ describe("failCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         failCommand({ taskId, run: "run_fail_noreason", token }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -500,7 +495,7 @@ describe("failCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         failCommand({ taskId, run: "run_fail_ev", token, reason: "timeout" }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -528,24 +523,16 @@ describe("failCommand (integration — real SQLite)", () => {
     await registerRun("run_fail_out")
     const { taskId, token } = await claimTask("run_fail_out")
 
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
-    try {
-      await Effect.runPromise(
-        Effect.provide(
-          failCommand({ taskId, run: "run_fail_out", token, reason: "oops" }),
-          dbLayer,
-        ),
-      )
-    } finally {
-      console.log = originalLog
-    }
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        failCommand({ taskId, run: "run_fail_out", token, reason: "oops" }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
 
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as {
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
       ok: boolean
       task: { id: string; status: string }
     }
@@ -561,7 +548,7 @@ describe("failCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         failCommand({ taskId, run: "run_fail_stale", token: 999 }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -584,7 +571,7 @@ describe("failCommand (integration — real SQLite)", () => {
     await Effect.runPromise(
       Effect.provide(
         failCommand({ taskId, run: "run_fail_done_r", token }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
 
@@ -592,7 +579,7 @@ describe("failCommand (integration — real SQLite)", () => {
     const exit = await runEff(
       Effect.provide(
         failCommand({ taskId, run: "run_fail_done_r", token }),
-        dbLayer,
+        Layer.merge(dbLayer, silentOutput),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)

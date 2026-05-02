@@ -6,6 +6,7 @@ import { VERSION } from "../src/version.ts"
 import { makeDbServiceTest } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { makeFsServiceTest } from "../src/layers/fs.ts"
+import { makeOutputServiceSilent } from "../src/layers/output.ts"
 
 describe("parseArgs", () => {
   it("parses --version flag", async () => {
@@ -65,7 +66,7 @@ const runDispatch = (args: Parameters<typeof dispatch>[0]) =>
   Effect.runPromiseExit(
     Effect.provide(
       dispatch(args),
-      Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest()),
+      Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest(), makeOutputServiceSilent()),
     ),
   )
 

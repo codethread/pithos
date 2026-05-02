@@ -85,6 +85,16 @@ export const claimCommand = (
     }
 
     // Atomic claim: single transaction, no select-then-update race.
+    //
+    // TODO: test cross-process contention. In-process tests (claim.test.ts +
+    // claim-sqlite.integration.test.ts) verify the state-machine invariant
+    // (first claim wins, second fails) but cannot simulate true concurrent
+    // processes inside the critical section. A proper race test needs a
+    // synchronization barrier (e.g. test-only env hook / named pipe / file
+    // lock) that holds all N processes at the transaction boundary and
+    // releases them together, then asserts exactly M < N succeed with no
+    // duplicate owners. Without this, a regression in SQLite's locking mode
+    // or the UPDATE RETURNING atomicity would not be caught.
     const claimedTask = yield* db.withTransaction(
       Effect.gen(function* () {
         const rows = yield* db.query(

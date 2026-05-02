@@ -1,5 +1,15 @@
 /**
- * CLI process smoke tests for pithos claim command.
+ * CLI process smoke tests for pithos claim — cross-process atomicity only.
+ *
+ * All other claim behaviour (validation, DB state, event writes, FIFO ordering,
+ * output format, error codes, help output) is covered by unit tests
+ * (src/commands/claim.test.ts) and SQLite integration tests
+ * (test/claim-sqlite.integration.test.ts), which import the command module
+ * directly.
+ *
+ * The two tests below exercise true multi-process contention against the same
+ * SQLite file — something that cannot be simulated in-process because
+ * better-sqlite3 is synchronous/single-threaded.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
@@ -10,21 +20,13 @@ import Database from "better-sqlite3"
 
 import { runCli, runCliOk } from "./_helpers/exec.ts"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 const BIN = join(import.meta.dirname, "../bin/pithos")
 
 function makeTempDir(): string {
-  return mkdtempSync(join(tmpdir(), "pithos-claim-"))
+  return mkdtempSync(join(tmpdir(), "pithos-claim-race-"))
 }
 
-// ---------------------------------------------------------------------------
-// CLI process smoke tests
-// ---------------------------------------------------------------------------
-
-describe("pithos claim (CLI process)", () => {
+describe("pithos claim (CLI process — cross-process races)", () => {
   let tempDir: string
   let dbPath: string
   let env: NodeJS.ProcessEnv
@@ -54,120 +56,7 @@ describe("pithos claim (CLI process)", () => {
     return (JSON.parse(out) as { run: { id: string } }).run.id
   }
 
-  it("claims a task and returns JSON with ok:true and task_ id", async () => {
-    await cliEnqueue()
-    const runId = await cliRegisterRun()
-
-    const stdout = await runCliOk(
-      BIN,
-      ["claim", "--run", runId, "--scope", "global", "--capability", "triage"],
-      env,
-    )
-    const parsed = JSON.parse(stdout) as {
-      ok: boolean
-      task: { id: string; status: string; fencing_token: number; lease_until: string }
-    }
-    expect(parsed.ok).toBe(true)
-    expect(parsed.task.id).toMatch(/^task_/)
-    expect(parsed.task.status).toBe("claimed")
-    expect(parsed.task.fencing_token).toBe(1)
-    expect(parsed.task.lease_until).toBeTruthy()
-  })
-
-  it("exits 5 with no_claimable_work JSON when no queued tasks", async () => {
-    const runId = await cliRegisterRun()
-
-    const result = await runCli(
-      BIN,
-      ["claim", "--run", runId, "--scope", "global", "--capability", "triage"],
-      env,
-    )
-
-    expect(result.exitCode).toBe(5)
-    const parsed = JSON.parse(result.stderr) as { ok: boolean; error: { code: string } }
-    expect(parsed.ok).toBe(false)
-    expect(parsed.error.code).toBe("NO_CLAIMABLE_WORK")
-  })
-
-  it("exits 3 when run does not exist", async () => {
-    await cliEnqueue()
-
-    const result = await runCli(
-      BIN,
-      ["claim", "--run", "run_nonexistent", "--scope", "global", "--capability", "triage"],
-      env,
-    )
-    expect(result.exitCode).toBe(3)
-  })
-
-  it("exits 2 when --run is missing", async () => {
-    const result = await runCli(
-      BIN,
-      ["claim", "--scope", "global", "--capability", "triage"],
-      env,
-    )
-    expect(result.exitCode).toBe(2)
-  })
-
-  it("exits 2 when --scope is missing", async () => {
-    const runId = await cliRegisterRun()
-    const result = await runCli(
-      BIN,
-      ["claim", "--run", runId, "--capability", "triage"],
-      env,
-    )
-    expect(result.exitCode).toBe(2)
-  })
-
-  it("exits 2 when --capability is missing", async () => {
-    const runId = await cliRegisterRun()
-    const result = await runCli(
-      BIN,
-      ["claim", "--run", runId, "--scope", "global"],
-      env,
-    )
-    expect(result.exitCode).toBe(2)
-  })
-
-  it("exits 2 when --lease-minutes is not a valid number", async () => {
-    await cliEnqueue()
-    const runId = await cliRegisterRun()
-    const result = await runCli(
-      BIN,
-      ["claim", "--run", runId, "--scope", "global", "--capability", "triage", "--lease-minutes", "abc"],
-      env,
-    )
-    expect(result.exitCode).toBe(2)
-  })
-
-  it("respects --lease-minutes flag", async () => {
-    await cliEnqueue()
-    const runId = await cliRegisterRun()
-
-    const stdout = await runCliOk(
-      BIN,
-      ["claim", "--run", runId, "--scope", "global", "--capability", "triage", "--lease-minutes", "30"],
-      env,
-    )
-    const parsed = JSON.parse(stdout) as { ok: boolean; task: { lease_until: string } }
-    expect(parsed.ok).toBe(true)
-    // lease_until should be ~30 minutes from now, so definitely > 20 minutes
-    // Append UTC marker so Node.js parses the SQLite datetime string correctly.
-    const leaseDate = new Date(parsed.task.lease_until)
-    const twentyMinsFromNow = new Date(Date.now() + 20 * 60 * 1000)
-    expect(leaseDate.getTime()).toBeGreaterThan(twentyMinsFromNow.getTime())
-  })
-
-  it("shows help on --help", async () => {
-    const stdout = await runCliOk(BIN, ["claim", "--help"], env)
-    expect(stdout).toContain("pithos claim")
-    expect(stdout).toContain("--run")
-    expect(stdout).toContain("--scope")
-    expect(stdout).toContain("--capability")
-    expect(stdout).toContain("--lease-minutes")
-  })
-
-  it("RACE (CLI): two concurrent processes — only one claims the task", async () => {
+  it("RACE: two concurrent processes — only one claims the task", async () => {
     // Enqueue exactly one task.
     await cliEnqueue()
     const runIdA = await cliRegisterRun()
@@ -201,7 +90,7 @@ describe("pithos claim (CLI process)", () => {
     expect(claimed[0]?.fencing_token).toBe(1)
   })
 
-  it("RACE (CLI): two runs, two tasks — each gets exactly one", async () => {
+  it("RACE: two runs, two tasks — each gets exactly one", async () => {
     // Enqueue two tasks, two runs both claim — each should get one.
     await cliEnqueue("triage")
     await cliEnqueue("triage")

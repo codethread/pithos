@@ -1,5 +1,5 @@
 /**
- * Integration tests for pithos scope — real SQLite + CLI subprocess. Unit coverage lives in src/commands/scope.test.ts.
+ * Integration tests for pithos scope — real SQLite. Unit coverage lives in src/commands/scope.test.ts.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
@@ -14,7 +14,6 @@ import { inspectScopeCommand } from "../src/commands/inspect.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
-import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -22,14 +21,12 @@ const silentOutput = makeOutputServiceSilent()
 // Helpers
 // ---------------------------------------------------------------------------
 
-const BIN = join(import.meta.dirname, "../bin/pithos")
-
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), "pithos-scope-"))
 }
 
 // ---------------------------------------------------------------------------
-// 3. Integration — real SQLite
+// Integration — real SQLite
 // ---------------------------------------------------------------------------
 
 describe("scopeUpsertCommand (integration — real SQLite)", () => {
@@ -240,102 +237,4 @@ describe("inspectScopeCommand (integration — real SQLite)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 5. CLI process smoke
-// ---------------------------------------------------------------------------
 
-describe("pithos scope upsert (CLI process)", () => {
-  let tempDir: string
-  let dbPath: string
-  let env: NodeJS.ProcessEnv
-
-  beforeEach(async () => {
-    tempDir = makeTempDir()
-    dbPath = join(tempDir, "pithos.sqlite")
-    env = { ...process.env, PITHOS_DB: dbPath }
-    // Init DB first
-    await runCliOk(BIN, ["init"], env)
-  })
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true })
-  })
-
-  it("upserts a repo scope and returns JSON with ok:true", async () => {
-    const scopePath = join(homedir(), "work/test-project")
-    const stdout = await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
-    const parsed = JSON.parse(stdout) as { ok: boolean; scope: { id: string; kind: string } }
-    expect(parsed.ok).toBe(true)
-    expect(parsed.scope.id).toBe("repo:work/test-project")
-    expect(parsed.scope.kind).toBe("repo")
-  })
-
-  it("is idempotent — calling twice exits 0 both times", async () => {
-    const scopePath = join(homedir(), "work/idempotent-project")
-    const out1 = await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
-    const out2 = await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
-    expect((JSON.parse(out1) as { ok: boolean }).ok).toBe(true)
-    expect((JSON.parse(out2) as { ok: boolean }).ok).toBe(true)
-  })
-
-  it("expands ~ in --path", async () => {
-    const stdout = await runCliOk(
-      BIN,
-      ["scope", "upsert", "--path", "~/work/tilde-smoke"],
-      env,
-    )
-    const parsed = JSON.parse(stdout) as { scope: { id: string } }
-    expect(parsed.scope.id).toBe("repo:work/tilde-smoke")
-  })
-
-  it("shows help on --help", async () => {
-    const stdout = await runCliOk(BIN, ["scope", "upsert", "--help"], env)
-    expect(stdout).toContain("pithos scope upsert")
-    expect(stdout).toContain("--path")
-  })
-
-  it("exits 2 when kind=repo and no --path given", async () => {
-    const result = await runCli(BIN, ["scope", "upsert", "--kind", "repo"], env)
-    expect(result.exitCode).toBe(2)
-  })
-})
-
-describe("pithos inspect scope (CLI process)", () => {
-  let tempDir: string
-  let dbPath: string
-  let env: NodeJS.ProcessEnv
-
-  beforeEach(async () => {
-    tempDir = makeTempDir()
-    dbPath = join(tempDir, "pithos.sqlite")
-    env = { ...process.env, PITHOS_DB: dbPath }
-    await runCliOk(BIN, ["init"], env)
-  })
-
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true })
-  })
-
-  it("returns global scope after init", async () => {
-    const stdout = await runCliOk(BIN, ["inspect", "scope", "global"], env)
-    const parsed = JSON.parse(stdout) as { ok: boolean; scope: { id: string } }
-    expect(parsed.ok).toBe(true)
-    expect(parsed.scope.id).toBe("global")
-  })
-
-  it("returns a upserted scope", async () => {
-    const scopePath = join(homedir(), "work/inspect-smoke")
-    await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
-
-    const stdout = await runCliOk(BIN, ["inspect", "scope", "repo:work/inspect-smoke"], env)
-    const parsed = JSON.parse(stdout) as { ok: boolean; scope: { id: string; kind: string } }
-    expect(parsed.ok).toBe(true)
-    expect(parsed.scope.id).toBe("repo:work/inspect-smoke")
-    expect(parsed.scope.kind).toBe("repo")
-  })
-
-  it("exits 3 for unknown scope ID", async () => {
-    const result = await runCli(BIN, ["inspect", "scope", "repo:nonexistent"], env)
-    expect(result.exitCode).toBe(3)
-  })
-})

@@ -98,7 +98,7 @@
     **Vertical slice:** Add `artifacts` table, `pithos artifact add --task --run --kind --title --body-file`, show artifacts in `inspect task`, tests for adding and retrieving a worker-completion report.
 
 12. **Title:** Tail recent events for debugging  
-    **Status:** Unbuilt  
+    **Status:** Built  
     **Type:** AFK  
     **Blocked by:** 6, 7, 8, 10  
     **User stories covered:** US6  

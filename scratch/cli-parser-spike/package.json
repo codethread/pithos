@@ -1,0 +1,14 @@
+{
+  "name": "pithos-cli-parser-spike",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@effect/cli": "0.75.1",
+    "@effect/platform-node": "0.106.0",
+    "@effect/printer": "0.49.0",
+    "@effect/printer-ansi": "0.49.0",
+    "clipanion": "4.0.0-rc.4",
+    "effect": "3.21.2",
+    "typanion": "3.14.0"
+  }
+}

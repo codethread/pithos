@@ -4,6 +4,7 @@ import { FsService } from "../services/fs.ts"
 import { IdService } from "../services/ids.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { withCommandObservability } from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
 // Options
@@ -102,7 +103,10 @@ export const artifactAddCommand = (
     })
 
     yield* output.print(JSON.stringify({ ok: true, artifact }))
-  })
+  }).pipe(
+    Effect.withLogSpan("pithos.artifact.add"),
+    withCommandObservability("artifact.add"),
+  )
 
 // ---------------------------------------------------------------------------
 // Help text

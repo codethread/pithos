@@ -1,7 +1,8 @@
-import { Effect } from "effect"
+import { Effect, Metric } from "effect"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { tasksClaimedCounter, withCommandObservability } from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
 // Options
@@ -142,11 +143,15 @@ export const claimCommand = (
       return
     }
 
+    yield* Metric.increment(tasksClaimedCounter)
     yield* Effect.logDebug("task claimed").pipe(
       Effect.annotateLogs({ taskId: String(claimedTask.id), runId }),
     )
     yield* output.print(JSON.stringify({ ok: true, task: claimedTask }))
-  }).pipe(Effect.withLogSpan("pithos.claim"))
+  }).pipe(
+    Effect.withLogSpan("pithos.claim"),
+    withCommandObservability("claim"),
+  )
 
 // ---------------------------------------------------------------------------
 // Help text

@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { withCommandObservability } from "../layers/metrics.ts"
 
 /**
  * `pithos inspect scope <id>`
@@ -24,7 +25,10 @@ export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError
     }
 
     yield* output.print(JSON.stringify({ ok: true, scope: rows[0] }))
-  })
+  }).pipe(
+    Effect.withLogSpan("pithos.inspect.scope"),
+    withCommandObservability("inspect.scope"),
+  )
 
 /**
  * `pithos inspect task <id>`
@@ -52,7 +56,10 @@ export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError,
     )
 
     yield* output.print(JSON.stringify({ ok: true, task: rows[0], artifacts }))
-  })
+  }).pipe(
+    Effect.withLogSpan("pithos.inspect.task"),
+    withCommandObservability("inspect.task"),
+  )
 
 /**
  * `pithos inspect run <id>`
@@ -75,7 +82,10 @@ export const inspectRunCommand = (id: string): Effect.Effect<void, PithosError, 
     }
 
     yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
-  })
+  }).pipe(
+    Effect.withLogSpan("pithos.inspect.run"),
+    withCommandObservability("inspect.run"),
+  )
 
 export const INSPECT_HELP = `pithos inspect - Inspect a pithos entity
 

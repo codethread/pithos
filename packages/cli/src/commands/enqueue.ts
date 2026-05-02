@@ -4,6 +4,7 @@ import { IdService } from "../services/ids.ts"
 import { FsService } from "../services/fs.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { withCommandObservability } from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
 // Options
@@ -128,7 +129,10 @@ export const enqueueCommand = (
     const rows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [id])
 
     yield* output.print(JSON.stringify({ ok: true, task: rows[0] }))
-  })
+  }).pipe(
+    Effect.withLogSpan("pithos.enqueue"),
+    withCommandObservability("enqueue"),
+  )
 
 // ---------------------------------------------------------------------------
 // Help text

@@ -4,6 +4,7 @@ import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 import { canonicalizePath, deriveScopeId, nameFromPath } from "../domain/scope.ts"
 import type { ScopeKind } from "../domain/scope.ts"
+import { withCommandObservability } from "../layers/metrics.ts"
 
 export interface ScopeUpsertOptions {
   readonly kind: ScopeKind
@@ -71,7 +72,10 @@ export const scopeUpsertCommand = (
         scope: { id, kind: opts.kind, name, canonical_path: canonicalPath },
       }),
     )
-  })
+  }).pipe(
+    Effect.withLogSpan("pithos.scope.upsert"),
+    withCommandObservability("scope.upsert"),
+  )
 
 export const SCOPE_UPSERT_HELP = `pithos scope upsert - Register a scope (global/repo/worktree)
 

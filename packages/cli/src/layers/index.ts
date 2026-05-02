@@ -9,6 +9,18 @@ export { OutputServiceLive, makeOutputServiceTest, makeOutputServiceSilent } fro
 export type { OutputCapture } from "./output.ts"
 export { LoggerLive, LoggerSilent, makeLogCapture } from "./logger.ts"
 export type { LogEntry, LogCapture } from "./logger.ts"
+export {
+  tasksClaimedCounter,
+  heartbeatsWrittenCounter,
+  heartbeatsThrottledCounter,
+  staleTokensHeartbeatCounter,
+  staleTokensCompleteCounter,
+  staleTokensFailCounter,
+  sweepRequeuedCounter,
+  sweepDeadLetteredCounter,
+  commandDurationTimer,
+  withCommandObservability,
+} from "./metrics.ts"
 
 // Test factory functions
 export { makeClockServiceTest } from "./clock.ts"

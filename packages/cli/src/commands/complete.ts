@@ -1,8 +1,9 @@
-import { Effect } from "effect"
+import { Effect, Metric } from "effect"
 import { DbService } from "../services/db.ts"
 import { FsService } from "../services/fs.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { staleTokensCompleteCounter, withCommandObservability } from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
 // Options
@@ -127,6 +128,7 @@ export const completeCommand = (
     })
 
     if (txResult.kind === "stale_token") {
+      yield* Metric.increment(staleTokensCompleteCounter)
       yield* Effect.logWarning("stale fencing token rejected on complete").pipe(
         Effect.annotateLogs({ taskId, runId, token: String(token) }),
       )
@@ -143,7 +145,10 @@ export const completeCommand = (
       Effect.annotateLogs({ taskId, runId }),
     )
     yield* output.print(JSON.stringify({ ok: true, task: txResult.task }))
-  }).pipe(Effect.withLogSpan("pithos.complete"))
+  }).pipe(
+    Effect.withLogSpan("pithos.complete"),
+    withCommandObservability("complete"),
+  )
 
 // ---------------------------------------------------------------------------
 // Help text

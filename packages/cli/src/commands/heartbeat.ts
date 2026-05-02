@@ -1,7 +1,13 @@
-import { Effect } from "effect"
+import { Effect, Metric } from "effect"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import {
+  heartbeatsWrittenCounter,
+  heartbeatsThrottledCounter,
+  staleTokensHeartbeatCounter,
+  withCommandObservability,
+} from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -219,6 +225,7 @@ export const heartbeatCommand = (
     }
 
     if (txResult.kind === "stale_token") {
+      yield* Metric.increment(staleTokensHeartbeatCounter)
       yield* Effect.logWarning("stale fencing token rejected on heartbeat").pipe(
         Effect.annotateLogs({ runId, taskId: String(opts.task ?? ""), token: String(opts.token ?? "") }),
       )
@@ -236,6 +243,7 @@ export const heartbeatCommand = (
     const run = runRows[0]!
 
     if (txResult.kind === "throttled") {
+      yield* Metric.increment(heartbeatsThrottledCounter)
       yield* Effect.logDebug("heartbeat throttled").pipe(
         Effect.annotateLogs({ runId, throttleSeconds: String(opts.throttleSeconds ?? "") }),
       )
@@ -244,6 +252,7 @@ export const heartbeatCommand = (
     }
 
     if (txResult.kind === "success_with_task") {
+      yield* Metric.increment(heartbeatsWrittenCounter)
       yield* Effect.logDebug("heartbeat written with task advance").pipe(
         Effect.annotateLogs({ runId, taskId: String(opts.task ?? "") }),
       )
@@ -253,11 +262,15 @@ export const heartbeatCommand = (
       return
     }
 
+    yield* Metric.increment(heartbeatsWrittenCounter)
     yield* Effect.logDebug("heartbeat written").pipe(
       Effect.annotateLogs({ runId }),
     )
     yield* output.print(JSON.stringify({ ok: true, skipped: false, run }))
-  }).pipe(Effect.withLogSpan("pithos.heartbeat"))
+  }).pipe(
+    Effect.withLogSpan("pithos.heartbeat"),
+    withCommandObservability("heartbeat"),
+  )
 
 // ---------------------------------------------------------------------------
 // Help text

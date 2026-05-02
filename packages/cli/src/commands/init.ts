@@ -3,6 +3,7 @@ import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import type { PithosError } from "../errors/errors.ts"
 import { runMigrations } from "../db/migrate.ts"
+import { withCommandObservability } from "../layers/metrics.ts"
 
 /**
  * `pithos init`
@@ -25,4 +26,7 @@ export const initCommand: Effect.Effect<void, PithosError, DbService | OutputSer
 
     yield* Effect.logDebug("database initialized")
     yield* output.print(JSON.stringify({ ok: true, initialized: true }))
-  }).pipe(Effect.withLogSpan("pithos.init"))
+  }).pipe(
+    Effect.withLogSpan("pithos.init"),
+    withCommandObservability("init"),
+  )

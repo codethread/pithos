@@ -3,6 +3,7 @@ import { DbService } from "../services/db.ts"
 import { IdService } from "../services/ids.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { withCommandObservability } from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
 // Options
@@ -84,7 +85,10 @@ export const runRegisterCommand = (
       Effect.annotateLogs({ runId: id, agentKind }),
     )
     yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
-  }).pipe(Effect.withLogSpan("pithos.run.register"))
+  }).pipe(
+    Effect.withLogSpan("pithos.run.register"),
+    withCommandObservability("run.register"),
+  )
 
 // ---------------------------------------------------------------------------
 // pithos run end
@@ -169,7 +173,10 @@ export const runEndCommand = (
       Effect.annotateLogs({ runId, status }),
     )
     yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
-  }).pipe(Effect.withLogSpan("pithos.run.end"))
+  }).pipe(
+    Effect.withLogSpan("pithos.run.end"),
+    withCommandObservability("run.end"),
+  )
 
 // ---------------------------------------------------------------------------
 // Help texts

@@ -120,7 +120,7 @@ export const makeDbServiceTest = (
             run: () => ({ changes: 0, lastInsertRowid: 0 }),
           }),
         catch: (e) =>
-          new PithosError({ code: "USER_ERROR", message: `Transaction failed: ${String(e)}` }),
+          new PithosError({ code: "INTERNAL_ERROR", message: `Transaction failed: ${String(e)}` }),
       }),
   })
 }

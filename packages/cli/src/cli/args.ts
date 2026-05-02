@@ -89,6 +89,17 @@ const flagValue = (argv: readonly string[], flag: string): string | undefined =>
   return next
 }
 
+/**
+ * Like flagValue but does NOT reject tokens starting with "-".
+ * Used for numeric flags where negative values (e.g. --token -1) must reach
+ * the Schema decoder rather than being silently dropped.
+ */
+const rawFlagValue = (argv: readonly string[], flag: string): string | undefined => {
+  const idx = argv.indexOf(flag)
+  if (idx === -1 || idx + 1 >= argv.length) return undefined
+  return argv[idx + 1]
+}
+
 const hasHelp = (argv: readonly string[]): boolean =>
   argv.includes("--help") || argv.includes("-h")
 
@@ -109,7 +120,7 @@ const intFlagValue = (
   flag: string,
 ): Effect.Effect<number | undefined, PithosError> =>
   Effect.gen(function* () {
-    const raw = flagValue(argv, flag)
+    const raw = rawFlagValue(argv, flag)
     if (raw === undefined) return undefined
     return yield* Schema.decodeUnknown(IntFromString)(raw).pipe(
       Effect.mapError(

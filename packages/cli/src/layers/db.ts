@@ -80,7 +80,15 @@ export const makeDbServiceLive = (dbPath: string): Layer.Layer<DbService, Pithos
               }
               return db.transaction(() => fn(txDb))()
             },
-            catch: wrapDbError("transaction"),
+            catch: (e) => {
+              if (e instanceof Error && e.message === "PITHOS_STALE_TOKEN_RACE") {
+                return new PithosError({
+                  code: "STALE_TOKEN",
+                  message: "Stale fencing token (race condition)",
+                })
+              }
+              return wrapDbError("transaction")(e)
+            },
           }),
       }
     }),

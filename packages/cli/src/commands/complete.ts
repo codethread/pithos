@@ -117,8 +117,8 @@ export const completeCommand = (
       )
 
       tx.run(
-        `UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ?`,
-        [runId],
+        `UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
+        [runId, taskId],
       )
 
       return { kind: "success", task }

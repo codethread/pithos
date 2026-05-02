@@ -152,21 +152,11 @@ export const heartbeatCommand = (
         }
       }
 
-      // 4. Update run heartbeat
-      tx.run(
-        `UPDATE runs
-         SET
-           status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
-           last_heartbeat_at = datetime('now'),
-           last_hook         = ?,
-           updated_at        = datetime('now')
-         WHERE id = ?`,
-        [hook, runId],
-      )
-
-      // 5. If task+token provided, move task to running and extend lease.
-      //    Token was pre-validated in step 2; throw to roll back the runs
-      //    write if a concurrent process invalidated it between steps 2 and 5.
+      // 4. If task+token provided, UPDATE task FIRST so the run write only
+      //    happens after we know the token is still valid.  If the UPDATE
+      //    finds 0 rows (token invalidated between the pre-check and now),
+      //    throw a sentinel so better-sqlite3 rolls back the whole transaction
+      //    (nothing has been written yet at this point).
       if (opts.task !== undefined && opts.token !== undefined) {
         const taskRows = tx.query(
           `UPDATE tasks
@@ -184,12 +174,37 @@ export const heartbeatCommand = (
         )
         if (taskRows.length === 0) {
           // Pre-check passed but UPDATE found no row: concurrent reclaim/sweep
-          // invalidated the token between steps 2 and 5. Return stale_token so
-          // the run heartbeat (step 4) commits but the task does NOT advance.
-          return { kind: "stale_token" }
+          // invalidated the token between steps 2 and 4.  Throw to roll back
+          // the entire transaction (no writes committed yet).
+          throw new Error("PITHOS_STALE_TOKEN_RACE")
         }
+
+        // 5. Task write succeeded — now update run heartbeat.
+        tx.run(
+          `UPDATE runs
+           SET
+             status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
+             last_heartbeat_at = datetime('now'),
+             last_hook         = ?,
+             updated_at        = datetime('now')
+           WHERE id = ?`,
+          [hook, runId],
+        )
+
         return { kind: "success_with_task", task: taskRows[0]! }
       }
+
+      // 4b. No task — update run heartbeat unconditionally.
+      tx.run(
+        `UPDATE runs
+         SET
+           status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
+           last_heartbeat_at = datetime('now'),
+           last_hook         = ?,
+           updated_at        = datetime('now')
+         WHERE id = ?`,
+        [hook, runId],
+      )
 
       return { kind: "success" }
     })

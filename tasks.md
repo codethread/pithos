@@ -105,7 +105,7 @@
     **Vertical slice:** Implement `pithos tail --limit`, render event rows in stable JSON/text, include task/run references, test ordering and limit behaviour.
 
 13. **Title:** Sweep expired leases into retry/dead-letter state  
-    **Status:** Unbuilt  
+    **Status:** Built  
     **Type:** AFK  
     **Blocked by:** 8, 10, 12  
     **User stories covered:** US8  

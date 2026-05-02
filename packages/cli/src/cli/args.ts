@@ -75,6 +75,7 @@ export type ParsedArgs =
   | { command: "inspect:task"; id: string }
   | { command: "tail"; limit: number | undefined }
   | { command: "sweep"; leaseGraceSeconds: number | undefined; runStaleMinutes: number | undefined }
+  | { command: "briefing"; agent: string | undefined }
   | { command: "unknown"; raw: readonly string[] }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +313,12 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       const leaseGraceSeconds = yield* intFlagValue(argv, "--lease-grace-seconds")
       const runStaleMinutes = yield* intFlagValue(argv, "--run-stale-minutes")
       return { command: "sweep", leaseGraceSeconds, runStaleMinutes } as const
+    }
+
+    if (first === "briefing") {
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "briefing" } as const
+      const agent = flagValue(argv, "--agent")
+      return { command: "briefing", agent } as const
     }
 
     return { command: "unknown", raw: argv } as const

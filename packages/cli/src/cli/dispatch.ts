@@ -23,6 +23,7 @@ import { failCommand, FAIL_HELP } from "../commands/fail.ts"
 import { artifactAddCommand, ARTIFACT_ADD_HELP } from "../commands/artifact.ts"
 import { tailCommand, TAIL_HELP } from "../commands/tail.ts"
 import { sweepCommand, SWEEP_HELP } from "../commands/sweep.ts"
+import { briefingCommand, BRIEFING_HELP } from "../commands/briefing.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -103,6 +104,8 @@ const helpFor = (topic: string | undefined): string => {
       return TAIL_HELP
     case "sweep":
       return SWEEP_HELP
+    case "briefing":
+      return BRIEFING_HELP
     default:
       return HELP_TEXT
   }
@@ -236,6 +239,10 @@ export const dispatch = (
           leaseGraceSeconds: args.leaseGraceSeconds,
           runStaleMinutes: args.runStaleMinutes,
         })
+        break
+
+      case "briefing":
+        yield* briefingCommand({ agent: args.agent })
         break
 
       case "unknown": {

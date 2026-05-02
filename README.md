@@ -29,7 +29,7 @@ When asked to continue Pithos implementation:
    - `pnpm typecheck`
    - `pnpm test`
 8. Commit the work in this repo.
-9. Request `reviewer` subagent check your work and report back,
+9. Request `review` subagent check your work and report back,
    - fix any findings unless you think they are unfounded
    - repeat the linting and testing as needed
    - re-review, unless fix was trivial
@@ -51,14 +51,14 @@ When asked to continue Pithos implementation:
 
 ## Documents
 
-| File                  | Purpose                                                          |
-| --------------------- | ---------------------------------------------------------------- |
+| File                  | Purpose                                                               |
+| --------------------- | --------------------------------------------------------------------- |
 | `tasks-adhoc.md`      | Ad hoc observability/repair slices; actioned before the primary queue |
-| `tasks.md`            | Numbered tracer-bullet implementation slices; primary work queue |
-| `mvp-spec.md`         | MVP product/domain spec                                          |
-| `technical-design.md` | Technical contracts and implementation details                   |
-| `ambition.md`         | Long-term direction; do not overbuild from it                    |
-| `references/`         | Copied prior art from the current Pandora prototype              |
+| `tasks.md`            | Numbered tracer-bullet implementation slices; primary work queue      |
+| `mvp-spec.md`         | MVP product/domain spec                                               |
+| `technical-design.md` | Technical contracts and implementation details                        |
+| `ambition.md`         | Long-term direction; do not overbuild from it                         |
+| `references/`         | Copied prior art from the current Pandora prototype                   |
 
 ## Current next action
 

@@ -21,6 +21,7 @@ import { heartbeatCommand, HEARTBEAT_HELP } from "../commands/heartbeat.ts"
 import { completeCommand, COMPLETE_HELP } from "../commands/complete.ts"
 import { failCommand, FAIL_HELP } from "../commands/fail.ts"
 import { artifactAddCommand, ARTIFACT_ADD_HELP } from "../commands/artifact.ts"
+import { tailCommand, TAIL_HELP } from "../commands/tail.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -97,6 +98,8 @@ const helpFor = (topic: string | undefined): string => {
     case "inspect:run":
     case "inspect:task":
       return INSPECT_HELP
+    case "tail":
+      return TAIL_HELP
     default:
       return HELP_TEXT
   }
@@ -219,6 +222,10 @@ export const dispatch = (
           token: args.token,
           reason: args.reason,
         })
+        break
+
+      case "tail":
+        yield* tailCommand({ limit: args.limit })
         break
 
       case "unknown": {

@@ -69,6 +69,16 @@ export class ArtifactRow extends Schema.Class<ArtifactRow>("ArtifactRow")({
   created_at: Schema.String,
 }) {}
 
+export class EventRow extends Schema.Class<EventRow>("EventRow")({
+  id: Schema.Number,
+  created_at: Schema.String,
+  actor_run_id: Schema.NullOr(Schema.String),
+  task_id: Schema.NullOr(Schema.String),
+  run_id: Schema.NullOr(Schema.String),
+  type: Schema.String,
+  payload_json: Schema.String,
+}) {}
+
 export class MigrationRow extends Schema.Class<MigrationRow>("MigrationRow")({
   version: Schema.Number,
 }) {}

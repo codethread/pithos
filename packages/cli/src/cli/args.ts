@@ -73,6 +73,7 @@ export type ParsedArgs =
   | { command: "inspect:scope"; id: string }
   | { command: "inspect:run"; id: string }
   | { command: "inspect:task"; id: string }
+  | { command: "tail"; limit: number | undefined }
   | { command: "unknown"; raw: readonly string[] }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +298,12 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
         return { command: "inspect:task", id } as const
       }
       return { command: "unknown", raw: argv } as const
+    }
+
+    if (first === "tail") {
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "tail" } as const
+      const limit = yield* intFlagValue(argv, "--limit")
+      return { command: "tail", limit } as const
     }
 
     return { command: "unknown", raw: argv } as const

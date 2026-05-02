@@ -375,7 +375,8 @@ Planned new dedicated repo:
 | `packages/cli/src/commands/`         | CLI command handlers                    |
 | `packages/cli/src/render/briefing.*` | Markdown briefing rendering             |
 | `packages/cli/src/claude-code/`      | Hook integration helpers                |
-| `packages/cli/test/`                 | Vitest CLI and DB transaction tests     |
+| `packages/cli/src/**/*.test.ts`      | File-adjacent unit tests (fake layers)  |
+| `packages/cli/test/*.integration.test.ts` | Integration tests (real SQLite + CLI subprocess) |
 | `packages/cli/test/integration/`     | Containerised DB smoke tests            |
 | `hooks/claude-code/`                 | Shell wrappers for Claude Code hooks    |
 | `recipes/`                           | Config-only workflow examples           |

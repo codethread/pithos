@@ -14,7 +14,7 @@ import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest, IdServiceLive } from "../src/layers/ids.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { scopeUpsertCommand } from "../src/commands/scope.ts"
-import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -131,6 +131,26 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
     expect(rows).toHaveLength(1)
     const [fixedRow] = rows
     expect(fixedRow?.agent_kind).toBe("envy")
+  })
+
+  it("outputs JSON with ok:true and run row on success", async () => {
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        runRegisterCommand({ agentKind: "envy", run: "run_json_out" }),
+        Layer.mergeAll(dbLayer, makeIdServiceTest([]), out.layer),
+      ),
+    )
+
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      run: { id: string; agent_kind: string; status: string }
+    }
+    expect(parsed.ok).toBe(true)
+    expect(parsed.run.id).toBe("run_json_out")
+    expect(parsed.run.agent_kind).toBe("envy")
+    expect(parsed.run.status).toBe("starting")
   })
 
   it("idempotent re-registration does not insert a second run.registered event", async () => {

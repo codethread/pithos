@@ -13,7 +13,7 @@ import { runRegisterCommand, runEndCommand } from "../src/commands/run.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { initCommand } from "../src/commands/init.ts"
-import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -138,6 +138,25 @@ describe("runEndCommand (integration — real SQLite)", () => {
       .all() as { type: string }[]
     db.close()
     expect(events).toHaveLength(1)
+  })
+
+  it("outputs JSON with ok:true and run row on success", async () => {
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        runEndCommand({ run: "run_to_end", status: "ended", summary: "all done" }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
+
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      run: { id: string; status: string }
+    }
+    expect(parsed.ok).toBe(true)
+    expect(parsed.run.id).toBe("run_to_end")
+    expect(parsed.run.status).toBe("ended")
   })
 
   it("supports cancellation status", async () => {

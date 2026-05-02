@@ -13,7 +13,7 @@ import { inspectRunCommand } from "../src/commands/inspect.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { initCommand } from "../src/commands/init.ts"
-import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -43,6 +43,22 @@ describe("inspectRunCommand (integration — real SQLite)", () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it("outputs JSON with ok:true and run row", async () => {
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(inspectRunCommand("run_inspect"), Layer.merge(dbLayer, out.layer)),
+    )
+
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      run: { id: string; agent_kind: string; status: string }
+    }
+    expect(parsed.ok).toBe(true)
+    expect(parsed.run.id).toBe("run_inspect")
+    expect(parsed.run.agent_kind).toBe("envy")
   })
 
   it("returns the run after registration", async () => {

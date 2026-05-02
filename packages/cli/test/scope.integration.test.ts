@@ -13,7 +13,7 @@ import { scopeUpsertCommand } from "../src/commands/scope.ts"
 import { inspectScopeCommand } from "../src/commands/inspect.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { initCommand } from "../src/commands/init.ts"
-import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
 import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
@@ -125,6 +125,28 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
     expect(after).toBe(before)
   })
 
+  it("outputs JSON with ok:true and scope row for repo upsert", async () => {
+    const absPath = join(homedir(), "work/output-test-project")
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        scopeUpsertCommand({ kind: "repo", path: absPath }),
+        Layer.merge(makeDbServiceLive(dbPath), out.layer),
+      ),
+    )
+
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      scope: { id: string; kind: string; name: string; canonical_path: string }
+    }
+    expect(parsed.ok).toBe(true)
+    expect(parsed.scope.id).toBe("repo:work/output-test-project")
+    expect(parsed.scope.kind).toBe("repo")
+    expect(parsed.scope.name).toBe("output-test-project")
+    expect(parsed.scope.canonical_path).toBe(absPath)
+  })
+
   it("upserts a global scope (no path required)", async () => {
     await Effect.runPromise(
       Effect.provide(
@@ -179,10 +201,18 @@ describe("inspectScopeCommand (integration — real SQLite)", () => {
   })
 
   it("returns the global scope after init", async () => {
+    const out = makeOutputServiceTest()
     const exit = await Effect.runPromiseExit(
-      Effect.provide(inspectScopeCommand("global"), Layer.merge(makeDbServiceLive(dbPath), silentOutput)),
+      Effect.provide(inspectScopeCommand("global"), Layer.merge(makeDbServiceLive(dbPath), out.layer)),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      scope: { id: string; kind: string }
+    }
+    expect(parsed.ok).toBe(true)
+    expect(parsed.scope.id).toBe("global")
   })
 
   it("fails NOT_FOUND for unknown scope ID", async () => {

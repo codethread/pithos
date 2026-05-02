@@ -16,7 +16,7 @@ import { makeIdServiceTest, IdServiceLive } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { runRegisterCommand } from "../src/commands/run.ts"
-import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -163,6 +163,27 @@ describe("enqueueCommand (integration — real SQLite)", () => {
     db.close()
 
     expect(row?.body).toBe("File body content")
+  })
+
+  it("outputs JSON with ok:true and task row on success", async () => {
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "Output test" }),
+        Layer.mergeAll(dbLayer, makeIdServiceTest(["task_out1"]), FsServiceLive, out.layer),
+      ),
+    )
+
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      task: { id: string; status: string; scope_id: string; capability: string }
+    }
+    expect(parsed.ok).toBe(true)
+    expect(parsed.task.id).toBe("task_out1")
+    expect(parsed.task.status).toBe("queued")
+    expect(parsed.task.scope_id).toBe("global")
+    expect(parsed.task.capability).toBe("triage")
   })
 
   it("fails NOT_FOUND when scope does not exist", async () => {

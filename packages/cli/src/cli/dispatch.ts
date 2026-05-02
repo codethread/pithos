@@ -17,6 +17,8 @@ import {
 import { enqueueCommand, ENQUEUE_HELP } from "../commands/enqueue.ts"
 import { claimCommand, CLAIM_HELP } from "../commands/claim.ts"
 import { heartbeatCommand, HEARTBEAT_HELP } from "../commands/heartbeat.ts"
+import { completeCommand, COMPLETE_HELP } from "../commands/complete.ts"
+import { failCommand, FAIL_HELP } from "../commands/fail.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -81,6 +83,10 @@ const helpFor = (topic: string | undefined): string => {
       return CLAIM_HELP
     case "heartbeat":
       return HEARTBEAT_HELP
+    case "complete":
+      return COMPLETE_HELP
+    case "fail":
+      return FAIL_HELP
     case "inspect":
     case "inspect:scope":
     case "inspect:run":
@@ -175,6 +181,24 @@ export const dispatch = (
           token: args.token,
           hook: args.hook,
           throttleSeconds: args.throttleSeconds,
+        })
+        break
+
+      case "complete":
+        yield* completeCommand({
+          taskId: args.taskId,
+          run: args.run,
+          token: args.token,
+          resultFile: args.resultFile,
+        })
+        break
+
+      case "fail":
+        yield* failCommand({
+          taskId: args.taskId,
+          run: args.run,
+          token: args.token,
+          reason: args.reason,
         })
         break
 

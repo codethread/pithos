@@ -47,6 +47,20 @@ export type ParsedArgs =
       hook: string | undefined
       throttleSeconds: number | undefined
     }
+  | {
+      command: "complete"
+      taskId: string | undefined
+      run: string | undefined
+      token: number | undefined
+      resultFile: string | undefined
+    }
+  | {
+      command: "fail"
+      taskId: string | undefined
+      run: string | undefined
+      token: number | undefined
+      reason: string | undefined
+    }
   | { command: "inspect:scope"; id: string }
   | { command: "inspect:run"; id: string }
   | { command: "inspect:task"; id: string }
@@ -167,6 +181,26 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       const throttleRaw = flagValue(argv, "--throttle-seconds")
       const throttleSeconds = throttleRaw !== undefined ? parseInt(throttleRaw, 10) : undefined
       return { command: "heartbeat", run, task, token, hook, throttleSeconds } as const
+    }
+
+    if (first === "complete") {
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "complete" } as const
+      const taskId = second !== undefined && !second.startsWith("-") ? second : undefined
+      const run = flagValue(argv, "--run")
+      const tokenRaw = flagValue(argv, "--token")
+      const token = tokenRaw !== undefined ? parseInt(tokenRaw, 10) : undefined
+      const resultFile = flagValue(argv, "--result-file")
+      return { command: "complete", taskId, run, token, resultFile } as const
+    }
+
+    if (first === "fail") {
+      if (hasHelp(argv.slice(1))) return { command: "help", topic: "fail" } as const
+      const taskId = second !== undefined && !second.startsWith("-") ? second : undefined
+      const run = flagValue(argv, "--run")
+      const tokenRaw = flagValue(argv, "--token")
+      const token = tokenRaw !== undefined ? parseInt(tokenRaw, 10) : undefined
+      const reason = flagValue(argv, "--reason")
+      return { command: "fail", taskId, run, token, reason } as const
     }
 
     if (first === "inspect") {

@@ -564,7 +564,7 @@ const tail = Command.make(
   {
     limit: Options.integer("limit").pipe(
       Options.optional,
-      Options.withDescription("Maximum number of events to return (default: 50)"),
+      Options.withDescription("Maximum number of events to return (default: 20)"),
     ),
   },
   ({ limit }) => tailCommand({ limit: opt(limit) }),
@@ -574,7 +574,7 @@ const tail = Command.make(
       "Show recent events for debugging",
       "pithos tail",
       ["pithos tail", "pithos tail --limit 100"],
-      "0 success",
+      "0 success | 2 validation error",
     ),
   ),
 )
@@ -592,7 +592,7 @@ const sweep = Command.make(
     ),
     runStaleMinutes: Options.integer("run-stale-minutes").pipe(
       Options.optional,
-      Options.withDescription("Minutes of silence before a run is considered stale (default: 30)"),
+      Options.withDescription("Minutes of silence before a run is considered stale (default: 15)"),
     ),
   },
   ({ leaseGraceSeconds, runStaleMinutes }) =>
@@ -609,7 +609,7 @@ const sweep = Command.make(
         "pithos sweep",
         "pithos sweep --lease-grace-seconds 30 --run-stale-minutes 60",
       ],
-      "0 success | 1 DB error",
+      "0 success | 2 validation error | 1 DB error",
     ),
   ),
 )

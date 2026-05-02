@@ -44,9 +44,7 @@ const cli = Command.run(pithosCommand, {
 // ---------------------------------------------------------------------------
 
 const program = cli(process.argv).pipe(
-  // Catch PithosError to emit structured JSON on stderr and use our exit codes.
-  // ValidationError from the parser is handled by @effect/cli itself (prints
-  // to stderr and exits 1 via NodeRuntime.runMain's default teardown).
+  // Catch PithosError: emit structured JSON to stderr and use our exit codes.
   Effect.catchTag("PithosError", (err) =>
     Effect.gen(function* () {
       const output = yield* OutputService
@@ -56,6 +54,9 @@ const program = cli(process.argv).pipe(
       process.exit(exitCodeFor(err.code))
     }),
   ),
+  // Catch @effect/cli ValidationError: the library has already printed the
+  // error to stderr; map to exit code 2 to preserve the CLI error contract.
+  Effect.catchAll(() => Effect.sync(() => process.exit(2))),
   Effect.provide(
     Layer.mergeAll(
       isNoDbNeeded(rawArgs) ? makeDbServiceTest() : DbServiceLive,

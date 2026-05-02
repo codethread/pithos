@@ -25,7 +25,7 @@
    **Vertical slice:** Wire Effect metrics and spans into a first-class observability layer. Track command durations, task claim/heartbeat counts, stale-token failures, and sweep outcomes with OTLP-friendly composition.
 
 4. **Title:** Capture test output deterministically  
-   **Status:** Unimplemented  
+   **Status:** Implemented  
    **Type:** AFK  
    **Blocked by:** 1  
    **Vertical slice:** Replace raw stdout assertions and console interception in tests with output sinks or temp-file captures. Keep Vitest output quiet unless a test explicitly opts into the captured stream.

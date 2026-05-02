@@ -109,6 +109,11 @@ export const claimCommand = (
       const task = rows[0]!
 
       tx.run(
+        `UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`,
+        [task.id, runId],
+      )
+
+      tx.run(
         `INSERT INTO events (task_id, actor_run_id, type, payload_json)
          VALUES (?, ?, 'task.claimed', ?)`,
         [
@@ -126,10 +131,6 @@ export const claimCommand = (
     })
 
     if (claimedTask === null) {
-      // Print machine-readable JSON to stdout before the error propagates.
-      yield* Effect.sync(() => {
-        console.log(JSON.stringify({ ok: false, error: "no_claimable_work" }))
-      })
       yield* Effect.fail(
         new PithosError({ code: "NO_CLAIMABLE_WORK", message: "no claimable work found" }),
       )

@@ -386,31 +386,6 @@ describe("claimCommand (integration — real SQLite)", () => {
     expect(parsed.task.lease_owner_run_id).toBe("run_output1")
   })
 
-  it("outputs JSON with ok:false on no_claimable_work", async () => {
-    await registerRun("run_nowork_out")
-
-    const logs: string[] = []
-    const originalLog = console.log
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(" "))
-    }
-
-    try {
-      await runEff(
-        Effect.provide(
-          claimCommand({ run: "run_nowork_out", scope: "global", capability: "triage" }),
-          dbLayer,
-        ),
-      )
-    } finally {
-      console.log = originalLog
-    }
-
-    expect(logs).toHaveLength(1)
-    const parsed = JSON.parse(logs[0]!) as { ok: boolean; error: string }
-    expect(parsed.ok).toBe(false)
-    expect(parsed.error).toBe("no_claimable_work")
-  })
 })
 
 // ---------------------------------------------------------------------------
@@ -528,9 +503,9 @@ describe("pithos claim (CLI process)", () => {
     )
 
     expect(result.status).toBe(5)
-    const parsed = JSON.parse(result.stdout) as { ok: boolean; error: string }
+    const parsed = JSON.parse(result.stderr) as { ok: boolean; error: { code: string } }
     expect(parsed.ok).toBe(false)
-    expect(parsed.error).toBe("no_claimable_work")
+    expect(parsed.error.code).toBe("NO_CLAIMABLE_WORK")
   })
 
   it("exits 3 when run does not exist", () => {

@@ -97,6 +97,11 @@ export const failCommand = (
         [task.id, runId, JSON.stringify({ run_id: runId, fencing_token: token, reason })],
       )
 
+      tx.run(
+        `UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ?`,
+        [runId],
+      )
+
       return { kind: "success", task }
     })
 

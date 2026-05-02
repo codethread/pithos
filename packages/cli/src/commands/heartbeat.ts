@@ -183,8 +183,10 @@ export const heartbeatCommand = (
           [opts.task, runId, opts.token],
         )
         if (taskRows.length === 0) {
-          // Pre-check passed but UPDATE found no row; throw to trigger rollback
-          throw new Error("STALE_TOKEN_ROLLBACK")
+          // Pre-check passed but UPDATE found no row: concurrent reclaim/sweep
+          // invalidated the token between steps 2 and 5. Return stale_token so
+          // the run heartbeat (step 4) commits but the task does NOT advance.
+          return { kind: "stale_token" }
         }
         return { kind: "success_with_task", task: taskRows[0]! }
       }

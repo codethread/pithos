@@ -62,10 +62,26 @@ export const artifactAddCommand = (
       body = yield* fs.readFile(opts.bodyFile)
     }
 
+    // Validate task and run exist before insert.
+    const db = yield* DbService
+
+    const taskCheck = yield* db.query("SELECT id FROM tasks WHERE id = ?", [opts.task])
+    if (taskCheck.length === 0) {
+      yield* Effect.fail(
+        new PithosError({ code: "NOT_FOUND", message: `Task not found: ${opts.task}` }),
+      )
+      return
+    }
+    const runCheck = yield* db.query("SELECT id FROM runs WHERE id = ?", [opts.run])
+    if (runCheck.length === 0) {
+      yield* Effect.fail(
+        new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
+      )
+      return
+    }
+
     const ids = yield* IdService
     const artifactId = yield* ids.generate("artifact")
-
-    const db = yield* DbService
 
     const artifact = yield* db.transaction((tx): Record<string, unknown> => {
       const rows = tx.query(

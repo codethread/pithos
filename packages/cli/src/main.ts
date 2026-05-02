@@ -14,7 +14,7 @@ const program = Effect.gen(function* () {
   Effect.provide(Layer.mergeAll(DbServiceLive, IdServiceLive, FsServiceLive)),
   Effect.catchTag("PithosError", (err) =>
     Effect.sync(() => {
-      console.error(`pithos: ${err.message}`)
+      console.error(JSON.stringify({ ok: false, error: { code: err.code, message: err.message } }))
       process.exit(exitCodeFor(err.code))
     }),
   ),

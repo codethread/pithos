@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import type { ScopeKind } from "../domain/scope.ts"
-import type { PithosError } from "../errors/errors.ts"
+import { PithosError } from "../errors/errors.ts"
 
 export type ParsedArgs =
   | { command: "version" }
@@ -96,7 +96,7 @@ const hasHelp = (argv: readonly string[]): boolean =>
 // ---------------------------------------------------------------------------
 
 export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, PithosError> =>
-  Effect.sync(() => {
+  Effect.gen(function* () {
     const [first, second, ...rest] = argv
 
     if (!first || first === "--help" || first === "-h" || first === "help") {
@@ -120,10 +120,15 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
         const remaining = [second, ...rest]
         if (hasHelp(remaining)) return { command: "help", topic: "scope:upsert" } as const
         const rawKind = flagValue(argv, "--kind")
-        const kind: ScopeKind =
-          rawKind === "global" || rawKind === "repo" || rawKind === "worktree"
-            ? rawKind
-            : "repo"
+        if (rawKind !== undefined && rawKind !== "global" && rawKind !== "repo" && rawKind !== "worktree") {
+          return yield* Effect.fail(
+            new PithosError({
+              code: "VALIDATION_ERROR",
+              message: `Invalid --kind value: '${rawKind}'. Valid values: global, repo, worktree`,
+            }),
+          )
+        }
+        const kind: ScopeKind = rawKind ?? "repo"
         const path = flagValue(argv, "--path")
         return { command: "scope:upsert", kind, path } as const
       }

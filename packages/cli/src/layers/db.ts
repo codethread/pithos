@@ -87,7 +87,14 @@ export const makeDbServiceLive = (dbPath: string): Layer.Layer<DbService, Pithos
                   message: "Stale fencing token (race condition)",
                 })
               }
-              return wrapDbError("transaction")(e)
+              // Any other throw from a transaction body signals an internal
+              // invariant violation (e.g. INSERT RETURNING * returned no rows),
+              // not a user mistake.  Classify as INTERNAL_ERROR so automated
+              // triage and agents are not misled into treating it as user error.
+              return new PithosError({
+                code: "INTERNAL_ERROR",
+                message: `DB integrity error (transaction): ${String(e)}`,
+              })
             },
           }),
       }

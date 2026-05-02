@@ -7,7 +7,6 @@ import { Effect, Exit, Layer } from "effect"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { execFileSync, spawnSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { completeCommand } from "../src/commands/complete.ts"
@@ -20,6 +19,7 @@ import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -486,53 +486,50 @@ describe("pithos complete (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  const cliEnqueue = (): string => {
-    const out = execFileSync(
+  const cliEnqueue = async (): Promise<string> => {
+    const out = await runCliOk(
       BIN,
       ["enqueue", "--scope", "global", "--capability", "triage", "--title", "Test task"],
-      { env, encoding: "utf-8" },
+      env,
     )
     return (JSON.parse(out) as { task: { id: string } }).task.id
   }
 
-  const cliRegisterRun = (): string => {
-    const out = execFileSync(BIN, ["run", "register", "--agent-kind", "envy"], {
-      env,
-      encoding: "utf-8",
-    })
+  const cliRegisterRun = async (): Promise<string> => {
+    const out = await runCliOk(BIN, ["run", "register", "--agent-kind", "envy"], env)
     return (JSON.parse(out) as { run: { id: string } }).run.id
   }
 
-  const cliClaim = (runId: string): { taskId: string; token: number } => {
-    const out = execFileSync(
+  const cliClaim = async (runId: string): Promise<{ taskId: string; token: number }> => {
+    const out = await runCliOk(
       BIN,
       ["claim", "--run", runId, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(out) as { ok: boolean; task: { id: string; fencing_token: number } }
     return { taskId: parsed.task.id, token: parsed.task.fencing_token }
   }
 
-  it("completes a task and returns ok:true with status done", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
+  it("completes a task and returns ok:true with status done", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["complete", taskId, "--run", runId, "--token", String(token)],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as {
       ok: boolean
@@ -544,19 +541,19 @@ describe("pithos complete (CLI process)", () => {
     expect(parsed.task.completed_at).toBeTruthy()
   })
 
-  it("stores result_json from --result-file", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
+  it("stores result_json from --result-file", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
 
     const resultPath = join(tempDir, "result.json")
     const resultData = { score: 99, label: "pass" }
     writeFileSync(resultPath, JSON.stringify(resultData))
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["complete", taskId, "--run", runId, "--token", String(token), "--result-file", resultPath],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as {
       ok: boolean
@@ -567,93 +564,90 @@ describe("pithos complete (CLI process)", () => {
     expect(result.score).toBe(99)
   })
 
-  it("exits 4 with stale fencing token", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId } = cliClaim(runId)
+  it("exits 4 with stale fencing token", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId } = await cliClaim(runId)
 
-    const result = spawnSync(
+    const result = await runCli(
       BIN,
       ["complete", taskId, "--run", runId, "--token", "999"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(4)
+    expect(result.exitCode).toBe(4)
   })
 
-  it("exits 4 when token is correct but wrong run owns the task", () => {
-    cliEnqueue()
-    const runA = cliRegisterRun()
-    const runB = cliRegisterRun()
-    const { taskId, token } = cliClaim(runA)
+  it("exits 4 when token is correct but wrong run owns the task", async () => {
+    await cliEnqueue()
+    const runA = await cliRegisterRun()
+    const runB = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runA)
 
-    const result = spawnSync(
+    const result = await runCli(
       BIN,
       ["complete", taskId, "--run", runB, "--token", String(token)],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(4)
+    expect(result.exitCode).toBe(4)
   })
 
-  it("exits 2 when task id is missing", () => {
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when task id is missing", async () => {
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["complete", "--run", runId, "--token", "1"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --run is missing", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
-    const result = spawnSync(
+  it("exits 2 when --run is missing", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
+    const result = await runCli(
       BIN,
       ["complete", taskId, "--token", String(token)],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --token is missing", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId } = cliClaim(runId)
-    const result = spawnSync(
+  it("exits 2 when --token is missing", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId } = await cliClaim(runId)
+    const result = await runCli(
       BIN,
       ["complete", taskId, "--run", runId],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["complete", "--help"], { env, encoding: "utf-8" })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["complete", "--help"], env)
     expect(stdout).toContain("pithos complete")
     expect(stdout).toContain("--run")
     expect(stdout).toContain("--token")
     expect(stdout).toContain("--result-file")
   })
 
-  it("exits 4 when completing an already-completed task", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
+  it("exits 4 when completing an already-completed task", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
 
     // First completion — success
-    execFileSync(BIN, ["complete", taskId, "--run", runId, "--token", String(token)], {
-      env,
-      encoding: "utf-8",
-    })
+    await runCliOk(BIN, ["complete", taskId, "--run", runId, "--token", String(token)], env)
 
     // Second completion — stale
-    const result = spawnSync(
+    const result = await runCli(
       BIN,
       ["complete", taskId, "--run", runId, "--token", String(token)],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(4)
+    expect(result.exitCode).toBe(4)
   })
 })
 
@@ -662,53 +656,50 @@ describe("pithos fail (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  const cliEnqueue = (): string => {
-    const out = execFileSync(
+  const cliEnqueue = async (): Promise<string> => {
+    const out = await runCliOk(
       BIN,
       ["enqueue", "--scope", "global", "--capability", "triage", "--title", "Test task"],
-      { env, encoding: "utf-8" },
+      env,
     )
     return (JSON.parse(out) as { task: { id: string } }).task.id
   }
 
-  const cliRegisterRun = (): string => {
-    const out = execFileSync(BIN, ["run", "register", "--agent-kind", "envy"], {
-      env,
-      encoding: "utf-8",
-    })
+  const cliRegisterRun = async (): Promise<string> => {
+    const out = await runCliOk(BIN, ["run", "register", "--agent-kind", "envy"], env)
     return (JSON.parse(out) as { run: { id: string } }).run.id
   }
 
-  const cliClaim = (runId: string): { taskId: string; token: number } => {
-    const out = execFileSync(
+  const cliClaim = async (runId: string): Promise<{ taskId: string; token: number }> => {
+    const out = await runCliOk(
       BIN,
       ["claim", "--run", runId, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(out) as { ok: boolean; task: { id: string; fencing_token: number } }
     return { taskId: parsed.task.id, token: parsed.task.fencing_token }
   }
 
-  it("fails a task and returns ok:true with status failed", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
+  it("fails a task and returns ok:true with status failed", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["fail", taskId, "--run", runId, "--token", String(token), "--reason", "worker crashed"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as {
       ok: boolean
@@ -719,86 +710,74 @@ describe("pithos fail (CLI process)", () => {
     expect(parsed.task.status).toBe("failed")
   })
 
-  it("stores reason in result_json", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
+  it("stores reason in result_json", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["fail", taskId, "--run", runId, "--token", String(token), "--reason", "timeout occurred"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as { ok: boolean; task: { result_json: string } }
     const result = JSON.parse(parsed.task.result_json) as { reason: string }
     expect(result.reason).toBe("timeout occurred")
   })
 
-  it("exits 4 with stale fencing token", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId } = cliClaim(runId)
+  it("exits 4 with stale fencing token", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId } = await cliClaim(runId)
 
-    const result = spawnSync(
+    const result = await runCli(
       BIN,
       ["fail", taskId, "--run", runId, "--token", "999"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(4)
+    expect(result.exitCode).toBe(4)
   })
 
-  it("exits 2 when task id is missing", () => {
-    const runId = cliRegisterRun()
-    const result = spawnSync(BIN, ["fail", "--run", runId, "--token", "1"], {
-      env,
-      encoding: "utf-8",
-    })
-    expect(result.status).toBe(2)
+  it("exits 2 when task id is missing", async () => {
+    const runId = await cliRegisterRun()
+    const result = await runCli(BIN, ["fail", "--run", runId, "--token", "1"], env)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --run is missing", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
-    const result = spawnSync(BIN, ["fail", taskId, "--token", String(token)], {
-      env,
-      encoding: "utf-8",
-    })
-    expect(result.status).toBe(2)
+  it("exits 2 when --run is missing", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
+    const result = await runCli(BIN, ["fail", taskId, "--token", String(token)], env)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --token is missing", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId } = cliClaim(runId)
-    const result = spawnSync(BIN, ["fail", taskId, "--run", runId], { env, encoding: "utf-8" })
-    expect(result.status).toBe(2)
+  it("exits 2 when --token is missing", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId } = await cliClaim(runId)
+    const result = await runCli(BIN, ["fail", taskId, "--run", runId], env)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["fail", "--help"], { env, encoding: "utf-8" })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["fail", "--help"], env)
     expect(stdout).toContain("pithos fail")
     expect(stdout).toContain("--run")
     expect(stdout).toContain("--token")
     expect(stdout).toContain("--reason")
   })
 
-  it("exits 4 when failing an already-failed task", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
+  it("exits 4 when failing an already-failed task", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
 
     // First fail — success
-    execFileSync(BIN, ["fail", taskId, "--run", runId, "--token", String(token)], {
-      env,
-      encoding: "utf-8",
-    })
+    await runCliOk(BIN, ["fail", taskId, "--run", runId, "--token", String(token)], env)
 
     // Second fail — stale
-    const result = spawnSync(BIN, ["fail", taskId, "--run", runId, "--token", String(token)], {
-      env,
-      encoding: "utf-8",
-    })
-    expect(result.status).toBe(4)
+    const result = await runCli(BIN, ["fail", taskId, "--run", runId, "--token", String(token)], env)
+    expect(result.exitCode).toBe(4)
   })
 })

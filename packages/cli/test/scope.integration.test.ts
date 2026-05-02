@@ -7,7 +7,6 @@ import { Effect, Exit, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir, homedir } from "node:os"
-import { execFileSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { scopeUpsertCommand } from "../src/commands/scope.ts"
@@ -15,6 +14,7 @@ import { inspectScopeCommand } from "../src/commands/inspect.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -217,66 +217,54 @@ describe("pithos scope upsert (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
     // Init DB first
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it("upserts a repo scope and returns JSON with ok:true", () => {
+  it("upserts a repo scope and returns JSON with ok:true", async () => {
     const scopePath = join(homedir(), "work/test-project")
-    const stdout = execFileSync(BIN, ["scope", "upsert", "--path", scopePath], {
-      env,
-      encoding: "utf-8",
-    })
+    const stdout = await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
     const parsed = JSON.parse(stdout) as { ok: boolean; scope: { id: string; kind: string } }
     expect(parsed.ok).toBe(true)
     expect(parsed.scope.id).toBe("repo:work/test-project")
     expect(parsed.scope.kind).toBe("repo")
   })
 
-  it("is idempotent — calling twice exits 0 both times", () => {
+  it("is idempotent — calling twice exits 0 both times", async () => {
     const scopePath = join(homedir(), "work/idempotent-project")
-    const opts = { env, encoding: "utf-8" } as const
-    const out1 = execFileSync(BIN, ["scope", "upsert", "--path", scopePath], opts)
-    const out2 = execFileSync(BIN, ["scope", "upsert", "--path", scopePath], opts)
+    const out1 = await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
+    const out2 = await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
     expect((JSON.parse(out1) as { ok: boolean }).ok).toBe(true)
     expect((JSON.parse(out2) as { ok: boolean }).ok).toBe(true)
   })
 
-  it("expands ~ in --path", () => {
-    const stdout = execFileSync(
+  it("expands ~ in --path", async () => {
+    const stdout = await runCliOk(
       BIN,
       ["scope", "upsert", "--path", "~/work/tilde-smoke"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as { scope: { id: string } }
     expect(parsed.scope.id).toBe("repo:work/tilde-smoke")
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["scope", "upsert", "--help"], {
-      env,
-      encoding: "utf-8",
-    })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["scope", "upsert", "--help"], env)
     expect(stdout).toContain("pithos scope upsert")
     expect(stdout).toContain("--path")
   })
 
-  it("exits 2 when kind=repo and no --path given", () => {
-    let status: number | undefined
-    try {
-      execFileSync(BIN, ["scope", "upsert", "--kind", "repo"], { env, encoding: "utf-8" })
-    } catch (e: unknown) {
-      status = (e as { status?: number }).status
-    }
-    expect(status).toBe(2)
+  it("exits 2 when kind=repo and no --path given", async () => {
+    const result = await runCli(BIN, ["scope", "upsert", "--kind", "repo"], env)
+    expect(result.exitCode).toBe(2)
   })
 })
 
@@ -285,51 +273,37 @@ describe("pithos inspect scope (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it("returns global scope after init", () => {
-    const stdout = execFileSync(BIN, ["inspect", "scope", "global"], {
-      env,
-      encoding: "utf-8",
-    })
+  it("returns global scope after init", async () => {
+    const stdout = await runCliOk(BIN, ["inspect", "scope", "global"], env)
     const parsed = JSON.parse(stdout) as { ok: boolean; scope: { id: string } }
     expect(parsed.ok).toBe(true)
     expect(parsed.scope.id).toBe("global")
   })
 
-  it("returns a upserted scope", () => {
+  it("returns a upserted scope", async () => {
     const scopePath = join(homedir(), "work/inspect-smoke")
-    execFileSync(BIN, ["scope", "upsert", "--path", scopePath], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["scope", "upsert", "--path", scopePath], env)
 
-    const stdout = execFileSync(BIN, ["inspect", "scope", "repo:work/inspect-smoke"], {
-      env,
-      encoding: "utf-8",
-    })
+    const stdout = await runCliOk(BIN, ["inspect", "scope", "repo:work/inspect-smoke"], env)
     const parsed = JSON.parse(stdout) as { ok: boolean; scope: { id: string; kind: string } }
     expect(parsed.ok).toBe(true)
     expect(parsed.scope.id).toBe("repo:work/inspect-smoke")
     expect(parsed.scope.kind).toBe("repo")
   })
 
-  it("exits 3 for unknown scope ID", () => {
-    let status: number | undefined
-    try {
-      execFileSync(BIN, ["inspect", "scope", "repo:nonexistent"], {
-        env,
-        encoding: "utf-8",
-      })
-    } catch (e: unknown) {
-      status = (e as { status?: number }).status
-    }
-    expect(status).toBe(3)
+  it("exits 3 for unknown scope ID", async () => {
+    const result = await runCli(BIN, ["inspect", "scope", "repo:nonexistent"], env)
+    expect(result.exitCode).toBe(3)
   })
 })

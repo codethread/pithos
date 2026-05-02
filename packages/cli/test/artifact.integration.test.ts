@@ -7,7 +7,6 @@ import { Effect, Layer } from "effect"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { execFileSync, spawnSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { artifactAddCommand } from "../src/commands/artifact.ts"
@@ -19,6 +18,7 @@ import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -260,39 +260,36 @@ describe("pithos artifact add (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  const cliEnqueue = (): string => {
-    const out = execFileSync(
+  const cliEnqueue = async (): Promise<string> => {
+    const out = await runCliOk(
       BIN,
       ["enqueue", "--scope", "global", "--capability", "watch", "--title", "Test task"],
-      { env, encoding: "utf-8" },
+      env,
     )
     return (JSON.parse(out) as { task: { id: string } }).task.id
   }
 
-  const cliRegisterRun = (): string => {
-    const out = execFileSync(BIN, ["run", "register", "--agent-kind", "envy"], {
-      env,
-      encoding: "utf-8",
-    })
+  const cliRegisterRun = async (): Promise<string> => {
+    const out = await runCliOk(BIN, ["run", "register", "--agent-kind", "envy"], env)
     return (JSON.parse(out) as { run: { id: string } }).run.id
   }
 
-  it("adds a worker-completion artifact and returns ok:true", () => {
-    const taskId = cliEnqueue()
-    const runId = cliRegisterRun()
+  it("adds a worker-completion artifact and returns ok:true", async () => {
+    const taskId = await cliEnqueue()
+    const runId = await cliRegisterRun()
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       [
         "artifact",
@@ -306,7 +303,7 @@ describe("pithos artifact add (CLI process)", () => {
         "--title",
         "Worker report",
       ],
-      { env, encoding: "utf-8" },
+      env,
     )
 
     const parsed = JSON.parse(stdout) as {
@@ -321,15 +318,15 @@ describe("pithos artifact add (CLI process)", () => {
     expect(parsed.artifact.id).toMatch(/^artifact_/)
   })
 
-  it("reads body from --body-file", () => {
-    const taskId = cliEnqueue()
-    const runId = cliRegisterRun()
+  it("reads body from --body-file", async () => {
+    const taskId = await cliEnqueue()
+    const runId = await cliRegisterRun()
 
     const reportPath = join(tempDir, "report.md")
     const reportContent = "## Summary\n\nAll good."
     writeFileSync(reportPath, reportContent)
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       [
         "artifact",
@@ -345,7 +342,7 @@ describe("pithos artifact add (CLI process)", () => {
         "--body-file",
         reportPath,
       ],
-      { env, encoding: "utf-8" },
+      env,
     )
 
     const parsed = JSON.parse(stdout) as {
@@ -356,11 +353,11 @@ describe("pithos artifact add (CLI process)", () => {
     expect(parsed.artifact.body).toBe(reportContent)
   })
 
-  it("inspect task shows artifact after add", () => {
-    const taskId = cliEnqueue()
-    const runId = cliRegisterRun()
+  it("inspect task shows artifact after add", async () => {
+    const taskId = await cliEnqueue()
+    const runId = await cliRegisterRun()
 
-    execFileSync(
+    await runCliOk(
       BIN,
       [
         "artifact",
@@ -374,13 +371,10 @@ describe("pithos artifact add (CLI process)", () => {
         "--title",
         "Completion report",
       ],
-      { env, encoding: "utf-8" },
+      env,
     )
 
-    const inspectOut = execFileSync(BIN, ["inspect", "task", taskId], {
-      env,
-      encoding: "utf-8",
-    })
+    const inspectOut = await runCliOk(BIN, ["inspect", "task", taskId], env)
     const inspected = JSON.parse(inspectOut) as {
       ok: boolean
       task: { id: string }
@@ -393,52 +387,52 @@ describe("pithos artifact add (CLI process)", () => {
     expect(inspected.artifacts[0]!.title).toBe("Completion report")
   })
 
-  it("exits 2 when --task is missing", () => {
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when --task is missing", async () => {
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["artifact", "add", "--run", runId, "--kind", "worker-completion", "--title", "Report"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --run is missing", () => {
-    const taskId = cliEnqueue()
-    const result = spawnSync(
+  it("exits 2 when --run is missing", async () => {
+    const taskId = await cliEnqueue()
+    const result = await runCli(
       BIN,
       ["artifact", "add", "--task", taskId, "--kind", "worker-completion", "--title", "Report"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --kind is missing", () => {
-    const taskId = cliEnqueue()
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when --kind is missing", async () => {
+    const taskId = await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["artifact", "add", "--task", taskId, "--run", runId, "--title", "Report"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --title is missing", () => {
-    const taskId = cliEnqueue()
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when --title is missing", async () => {
+    const taskId = await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["artifact", "add", "--task", taskId, "--run", runId, "--kind", "worker-completion"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 1 when --body-file does not exist", () => {
-    const taskId = cliEnqueue()
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 1 when --body-file does not exist", async () => {
+    const taskId = await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       [
         "artifact",
@@ -454,13 +448,13 @@ describe("pithos artifact add (CLI process)", () => {
         "--body-file",
         "/nonexistent/report.md",
       ],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).not.toBe(0)
+    expect(result.exitCode).not.toBe(0)
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["artifact", "add", "--help"], { env, encoding: "utf-8" })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["artifact", "add", "--help"], env)
     expect(stdout).toContain("pithos artifact add")
     expect(stdout).toContain("--task")
     expect(stdout).toContain("--run")

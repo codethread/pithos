@@ -7,7 +7,6 @@ import { Effect, Exit, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { execFileSync, spawnSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { claimCommand } from "../src/commands/claim.ts"
@@ -18,6 +17,7 @@ import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -328,42 +328,39 @@ describe("pithos claim (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  const cliEnqueue = (capability = "triage"): string => {
-    const out = execFileSync(
+  const cliEnqueue = async (capability = "triage"): Promise<string> => {
+    const out = await runCliOk(
       BIN,
       ["enqueue", "--scope", "global", "--capability", capability, "--title", "Test task"],
-      { env, encoding: "utf-8" },
+      env,
     )
     return (JSON.parse(out) as { task: { id: string } }).task.id
   }
 
-  const cliRegisterRun = (): string => {
-    const out = execFileSync(BIN, ["run", "register", "--agent-kind", "envy"], {
-      env,
-      encoding: "utf-8",
-    })
+  const cliRegisterRun = async (): Promise<string> => {
+    const out = await runCliOk(BIN, ["run", "register", "--agent-kind", "envy"], env)
     return (JSON.parse(out) as { run: { id: string } }).run.id
   }
 
-  it("claims a task and returns JSON with ok:true and task_ id", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
+  it("claims a task and returns JSON with ok:true and task_ id", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["claim", "--run", runId, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as {
       ok: boolean
@@ -376,80 +373,80 @@ describe("pithos claim (CLI process)", () => {
     expect(parsed.task.lease_until).toBeTruthy()
   })
 
-  it("exits 5 with no_claimable_work JSON when no queued tasks", () => {
-    const runId = cliRegisterRun()
+  it("exits 5 with no_claimable_work JSON when no queued tasks", async () => {
+    const runId = await cliRegisterRun()
 
-    const result = spawnSync(
+    const result = await runCli(
       BIN,
       ["claim", "--run", runId, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
 
-    expect(result.status).toBe(5)
+    expect(result.exitCode).toBe(5)
     const parsed = JSON.parse(result.stderr) as { ok: boolean; error: { code: string } }
     expect(parsed.ok).toBe(false)
     expect(parsed.error.code).toBe("NO_CLAIMABLE_WORK")
   })
 
-  it("exits 3 when run does not exist", () => {
-    cliEnqueue()
+  it("exits 3 when run does not exist", async () => {
+    await cliEnqueue()
 
-    const result = spawnSync(
+    const result = await runCli(
       BIN,
       ["claim", "--run", "run_nonexistent", "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(3)
+    expect(result.exitCode).toBe(3)
   })
 
-  it("exits 2 when --run is missing", () => {
-    const result = spawnSync(
+  it("exits 2 when --run is missing", async () => {
+    const result = await runCli(
       BIN,
       ["claim", "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --scope is missing", () => {
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when --scope is missing", async () => {
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["claim", "--run", runId, "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --capability is missing", () => {
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when --capability is missing", async () => {
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["claim", "--run", runId, "--scope", "global"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 2 when --lease-minutes is not a valid number", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when --lease-minutes is not a valid number", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["claim", "--run", runId, "--scope", "global", "--capability", "triage", "--lease-minutes", "abc"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("respects --lease-minutes flag", () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
+  it("respects --lease-minutes flag", async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["claim", "--run", runId, "--scope", "global", "--capability", "triage", "--lease-minutes", "30"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as { ok: boolean; task: { lease_until: string } }
     expect(parsed.ok).toBe(true)
@@ -460,8 +457,8 @@ describe("pithos claim (CLI process)", () => {
     expect(leaseDate.getTime()).toBeGreaterThan(twentyMinsFromNow.getTime())
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["claim", "--help"], { env, encoding: "utf-8" })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["claim", "--help"], env)
     expect(stdout).toContain("pithos claim")
     expect(stdout).toContain("--run")
     expect(stdout).toContain("--scope")
@@ -469,27 +466,27 @@ describe("pithos claim (CLI process)", () => {
     expect(stdout).toContain("--lease-minutes")
   })
 
-  it("RACE (CLI): two concurrent processes — only one claims the task", () => {
+  it("RACE (CLI): two concurrent processes — only one claims the task", async () => {
     // Enqueue exactly one task.
-    cliEnqueue()
-    const runIdA = cliRegisterRun()
-    const runIdB = cliRegisterRun()
+    await cliEnqueue()
+    const runIdA = await cliRegisterRun()
+    const runIdB = await cliRegisterRun()
 
-    // Spawn both claim processes concurrently using spawnSync (sequential but
-    // verifies atomicity: once a task is claimed, it can't be claimed again).
-    const resultA = spawnSync(
+    // Run both claim processes sequentially, verifying atomicity:
+    // once a task is claimed, it can't be claimed again.
+    const resultA = await runCli(
       BIN,
       ["claim", "--run", runIdA, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    const resultB = spawnSync(
+    const resultB = await runCli(
       BIN,
       ["claim", "--run", runIdB, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
 
     // Exactly one should succeed and one should get no_claimable_work.
-    const statuses = [resultA.status, resultB.status].sort()
+    const statuses = [resultA.exitCode, resultB.exitCode].sort()
     expect(statuses).toEqual([0, 5])
 
     // Verify DB has exactly one claimed task.
@@ -503,26 +500,26 @@ describe("pithos claim (CLI process)", () => {
     expect(claimed[0]?.fencing_token).toBe(1)
   })
 
-  it("RACE (CLI): two runs, two tasks — each gets exactly one", () => {
+  it("RACE (CLI): two runs, two tasks — each gets exactly one", async () => {
     // Enqueue two tasks, two runs both claim — each should get one.
-    cliEnqueue("triage")
-    cliEnqueue("triage")
-    const runIdA = cliRegisterRun()
-    const runIdB = cliRegisterRun()
+    await cliEnqueue("triage")
+    await cliEnqueue("triage")
+    const runIdA = await cliRegisterRun()
+    const runIdB = await cliRegisterRun()
 
-    const resultA = spawnSync(
+    const resultA = await runCli(
       BIN,
       ["claim", "--run", runIdA, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    const resultB = spawnSync(
+    const resultB = await runCli(
       BIN,
       ["claim", "--run", runIdB, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
 
-    expect(resultA.status).toBe(0)
-    expect(resultB.status).toBe(0)
+    expect(resultA.exitCode).toBe(0)
+    expect(resultB.exitCode).toBe(0)
 
     const db = new Database(dbPath)
     const claimed = db

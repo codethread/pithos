@@ -7,7 +7,6 @@ import { Effect, Exit, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { execFileSync, spawnSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { heartbeatCommand } from "../src/commands/heartbeat.ts"
@@ -19,6 +18,7 @@ import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
+import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -473,39 +473,36 @@ describe("pithos heartbeat (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  const cliRegisterRun = (): string => {
-    const out = execFileSync(BIN, ["run", "register", "--agent-kind", "envy"], {
-      env,
-      encoding: "utf-8",
-    })
+  const cliRegisterRun = async (): Promise<string> => {
+    const out = await runCliOk(BIN, ["run", "register", "--agent-kind", "envy"], env)
     return (JSON.parse(out) as { run: { id: string } }).run.id
   }
 
-  const cliEnqueue = (capability = "triage"): string => {
-    const out = execFileSync(
+  const cliEnqueue = async (capability = "triage"): Promise<string> => {
+    const out = await runCliOk(
       BIN,
       ["enqueue", "--scope", "global", "--capability", capability, "--title", "Test task"],
-      { env, encoding: "utf-8" },
+      env,
     )
     return (JSON.parse(out) as { task: { id: string } }).task.id
   }
 
-  const cliClaim = (runId: string): { taskId: string; token: number } => {
-    const out = execFileSync(
+  const cliClaim = async (runId: string): Promise<{ taskId: string; token: number }> => {
+    const out = await runCliOk(
       BIN,
       ["claim", "--run", runId, "--scope", "global", "--capability", "triage"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(out) as {
       ok: boolean
@@ -514,13 +511,10 @@ describe("pithos heartbeat (CLI process)", () => {
     return { taskId: parsed.task.id, token: parsed.task.fencing_token }
   }
 
-  it("heartbeats a run and returns ok:true with skipped:false", () => {
-    const runId = cliRegisterRun()
+  it("heartbeats a run and returns ok:true with skipped:false", async () => {
+    const runId = await cliRegisterRun()
 
-    const stdout = execFileSync(BIN, ["heartbeat", "--run", runId], {
-      env,
-      encoding: "utf-8",
-    })
+    const stdout = await runCliOk(BIN, ["heartbeat", "--run", runId], env)
     const parsed = JSON.parse(stdout) as {
       ok: boolean
       skipped: boolean
@@ -532,15 +526,15 @@ describe("pithos heartbeat (CLI process)", () => {
     expect(parsed.run.status).toBe("running")
   })
 
-  it("advances task from claimed to running with valid token", { timeout: 20000 }, () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId, token } = cliClaim(runId)
+  it("advances task from claimed to running with valid token", { timeout: 20000 }, async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId, token } = await cliClaim(runId)
 
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["heartbeat", "--run", runId, "--task", taskId, "--token", String(token)],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as {
       ok: boolean
@@ -550,78 +544,75 @@ describe("pithos heartbeat (CLI process)", () => {
     expect(parsed.task.status).toBe("running")
   })
 
-  it("exits 4 with stale fencing token", { timeout: 20000 }, () => {
-    cliEnqueue()
-    const runId = cliRegisterRun()
-    const { taskId } = cliClaim(runId)
+  it("exits 4 with stale fencing token", { timeout: 20000 }, async () => {
+    await cliEnqueue()
+    const runId = await cliRegisterRun()
+    const { taskId } = await cliClaim(runId)
 
-    const result = spawnSync(
+    const result = await runCli(
       BIN,
       ["heartbeat", "--run", runId, "--task", taskId, "--token", "999"],
-      { env, encoding: "utf-8" },
-    )
-    expect(result.status).toBe(4)
-  })
-
-  it("exits 3 when run does not exist", () => {
-    const result = spawnSync(BIN, ["heartbeat", "--run", "run_nonexistent"], {
       env,
-      encoding: "utf-8",
-    })
-    expect(result.status).toBe(3)
+    )
+    expect(result.exitCode).toBe(4)
   })
 
-  it("exits 2 when --run is missing", () => {
-    const result = spawnSync(BIN, ["heartbeat"], { env, encoding: "utf-8" })
-    expect(result.status).toBe(2)
+  it("exits 3 when run does not exist", async () => {
+    const result = await runCli(BIN, ["heartbeat", "--run", "run_nonexistent"], env)
+    expect(result.exitCode).toBe(3)
   })
 
-  it("exits 2 when --task is given without --token", () => {
-    const runId = cliRegisterRun()
-    const result = spawnSync(
+  it("exits 2 when --run is missing", async () => {
+    const result = await runCli(BIN, ["heartbeat"], env)
+    expect(result.exitCode).toBe(2)
+  })
+
+  it("exits 2 when --task is given without --token", async () => {
+    const runId = await cliRegisterRun()
+    const result = await runCli(
       BIN,
       ["heartbeat", "--run", runId, "--task", "task_xyz"],
-      { env, encoding: "utf-8" },
+      env,
     )
-    expect(result.status).toBe(2)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("returns skipped:true when within throttle window", () => {
-    const runId = cliRegisterRun()
+  it("returns skipped:true when within throttle window", async () => {
+    const runId = await cliRegisterRun()
 
     // First heartbeat
-    execFileSync(BIN, ["heartbeat", "--run", runId], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["heartbeat", "--run", runId], env)
 
     // Second within throttle window
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["heartbeat", "--run", runId, "--throttle-seconds", "3600"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as { ok: boolean; skipped: boolean }
     expect(parsed.ok).toBe(true)
     expect(parsed.skipped).toBe(true)
   })
 
-  it("throttle bypassed for lifecycle hook SessionEnd", () => {
-    const runId = cliRegisterRun()
+  it("throttle bypassed for lifecycle hook SessionEnd", async () => {
+    const runId = await cliRegisterRun()
 
     // First heartbeat
-    execFileSync(BIN, ["heartbeat", "--run", runId], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["heartbeat", "--run", runId], env)
 
     // Lifecycle hook — must not be throttled
-    const stdout = execFileSync(
+    const stdout = await runCliOk(
       BIN,
       ["heartbeat", "--run", runId, "--hook", "SessionEnd", "--throttle-seconds", "3600"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as { ok: boolean; skipped: boolean }
     expect(parsed.ok).toBe(true)
     expect(parsed.skipped).toBe(false)
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["heartbeat", "--help"], { env, encoding: "utf-8" })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["heartbeat", "--help"], env)
     expect(stdout).toContain("pithos heartbeat")
     expect(stdout).toContain("--run")
     expect(stdout).toContain("--throttle-seconds")

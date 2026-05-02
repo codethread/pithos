@@ -7,7 +7,6 @@ import { Effect, Exit, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { execFileSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { runRegisterCommand, runEndCommand } from "../src/commands/run.ts"
@@ -17,6 +16,7 @@ import { makeIdServiceTest, IdServiceLive } from "../src/layers/ids.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { scopeUpsertCommand } from "../src/commands/scope.ts"
 import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { runCli, runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -356,22 +356,22 @@ describe("pithos run register (CLI process)", () => {
   let dbPath: string
   let env: NodeJS.ProcessEnv
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
+    await runCliOk(BIN, ["init"], env)
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it("registers a run and returns JSON with ok:true", () => {
-    const stdout = execFileSync(
+  it("registers a run and returns JSON with ok:true", async () => {
+    const stdout = await runCliOk(
       BIN,
       ["run", "register", "--agent-kind", "envy"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as { ok: boolean; run: { id: string; status: string } }
     expect(parsed.ok).toBe(true)
@@ -379,33 +379,27 @@ describe("pithos run register (CLI process)", () => {
     expect(parsed.run.status).toBe("starting")
   })
 
-  it("exits 2 when --agent-kind is missing", () => {
-    let status: number | undefined
-    try {
-      execFileSync(BIN, ["run", "register"], { env, encoding: "utf-8" })
-    } catch (e: unknown) {
-      status = (e as { status?: number }).status
-    }
-    expect(status).toBe(2)
+  it("exits 2 when --agent-kind is missing", async () => {
+    const result = await runCli(BIN, ["run", "register"], env)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["run", "register", "--help"], { env, encoding: "utf-8" })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["run", "register", "--help"], env)
     expect(stdout).toContain("pithos run register")
     expect(stdout).toContain("--agent-kind")
   })
 
-  it("is idempotent with explicit --run ID", () => {
-    const opts = { env, encoding: "utf-8" } as const
-    const out1 = execFileSync(
+  it("is idempotent with explicit --run ID", async () => {
+    const out1 = await runCliOk(
       BIN,
       ["run", "register", "--agent-kind", "envy", "--run", "run_cli_idem"],
-      opts,
+      env,
     )
-    const out2 = execFileSync(
+    const out2 = await runCliOk(
       BIN,
       ["run", "register", "--agent-kind", "toil", "--run", "run_cli_idem"],
-      opts,
+      env,
     )
     const r1 = JSON.parse(out1) as { run: { agent_kind: string } }
     const r2 = JSON.parse(out2) as { run: { agent_kind: string } }
@@ -421,15 +415,15 @@ describe("pithos run end (CLI process)", () => {
   let env: NodeJS.ProcessEnv
   let runId: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
-    const out = execFileSync(
+    await runCliOk(BIN, ["init"], env)
+    const out = await runCliOk(
       BIN,
       ["run", "register", "--agent-kind", "envy"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(out) as { run: { id: string } }
     runId = parsed.run.id
@@ -439,11 +433,8 @@ describe("pithos run end (CLI process)", () => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it("ends a run and returns JSON with ok:true and ended_at set", () => {
-    const stdout = execFileSync(BIN, ["run", "end", "--run", runId], {
-      env,
-      encoding: "utf-8",
-    })
+  it("ends a run and returns JSON with ok:true and ended_at set", async () => {
+    const stdout = await runCliOk(BIN, ["run", "end", "--run", runId], env)
     const parsed = JSON.parse(stdout) as {
       ok: boolean
       run: { status: string; ended_at: string | null }
@@ -453,52 +444,34 @@ describe("pithos run end (CLI process)", () => {
     expect(parsed.run.ended_at).not.toBeNull()
   })
 
-  it("ends a run with --status failed", () => {
-    const stdout = execFileSync(
+  it("ends a run with --status failed", async () => {
+    const stdout = await runCliOk(
       BIN,
       ["run", "end", "--run", runId, "--status", "failed", "--summary", "something went wrong"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(stdout) as { run: { status: string; last_summary: string } }
     expect(parsed.run.status).toBe("failed")
     expect(parsed.run.last_summary).toBe("something went wrong")
   })
 
-  it("exits 2 when --run is missing", () => {
-    let status: number | undefined
-    try {
-      execFileSync(BIN, ["run", "end"], { env, encoding: "utf-8" })
-    } catch (e: unknown) {
-      status = (e as { status?: number }).status
-    }
-    expect(status).toBe(2)
+  it("exits 2 when --run is missing", async () => {
+    const result = await runCli(BIN, ["run", "end"], env)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("exits 3 for unknown run ID", () => {
-    let status: number | undefined
-    try {
-      execFileSync(BIN, ["run", "end", "--run", "run_nonexistent"], { env, encoding: "utf-8" })
-    } catch (e: unknown) {
-      status = (e as { status?: number }).status
-    }
-    expect(status).toBe(3)
+  it("exits 3 for unknown run ID", async () => {
+    const result = await runCli(BIN, ["run", "end", "--run", "run_nonexistent"], env)
+    expect(result.exitCode).toBe(3)
   })
 
-  it("exits 2 for an invalid --status value", () => {
-    let status: number | undefined
-    try {
-      execFileSync(BIN, ["run", "end", "--run", runId, "--status", "typo"], {
-        env,
-        encoding: "utf-8",
-      })
-    } catch (e: unknown) {
-      status = (e as { status?: number }).status
-    }
-    expect(status).toBe(2)
+  it("exits 2 for an invalid --status value", async () => {
+    const result = await runCli(BIN, ["run", "end", "--run", runId, "--status", "typo"], env)
+    expect(result.exitCode).toBe(2)
   })
 
-  it("shows help on --help", () => {
-    const stdout = execFileSync(BIN, ["run", "end", "--help"], { env, encoding: "utf-8" })
+  it("shows help on --help", async () => {
+    const stdout = await runCliOk(BIN, ["run", "end", "--help"], env)
     expect(stdout).toContain("pithos run end")
     expect(stdout).toContain("--run")
   })
@@ -510,15 +483,15 @@ describe("pithos inspect run (CLI process)", () => {
   let env: NodeJS.ProcessEnv
   let runId: string
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     env = { ...process.env, PITHOS_DB: dbPath }
-    execFileSync(BIN, ["init"], { env, encoding: "utf-8" })
-    const out = execFileSync(
+    await runCliOk(BIN, ["init"], env)
+    const out = await runCliOk(
       BIN,
       ["run", "register", "--agent-kind", "envy"],
-      { env, encoding: "utf-8" },
+      env,
     )
     const parsed = JSON.parse(out) as { run: { id: string } }
     runId = parsed.run.id
@@ -528,29 +501,24 @@ describe("pithos inspect run (CLI process)", () => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it("returns a registered run", () => {
-    const stdout = execFileSync(BIN, ["inspect", "run", runId], { env, encoding: "utf-8" })
+  it("returns a registered run", async () => {
+    const stdout = await runCliOk(BIN, ["inspect", "run", runId], env)
     const parsed = JSON.parse(stdout) as { ok: boolean; run: { id: string; agent_kind: string } }
     expect(parsed.ok).toBe(true)
     expect(parsed.run.id).toBe(runId)
     expect(parsed.run.agent_kind).toBe("envy")
   })
 
-  it("returns updated state after run end", () => {
-    execFileSync(BIN, ["run", "end", "--run", runId], { env, encoding: "utf-8" })
-    const stdout = execFileSync(BIN, ["inspect", "run", runId], { env, encoding: "utf-8" })
+  it("returns updated state after run end", async () => {
+    await runCliOk(BIN, ["run", "end", "--run", runId], env)
+    const stdout = await runCliOk(BIN, ["inspect", "run", runId], env)
     const parsed = JSON.parse(stdout) as { run: { status: string; ended_at: string | null } }
     expect(parsed.run.status).toBe("ended")
     expect(parsed.run.ended_at).not.toBeNull()
   })
 
-  it("exits 3 for unknown run ID", () => {
-    let status: number | undefined
-    try {
-      execFileSync(BIN, ["inspect", "run", "run_unknown"], { env, encoding: "utf-8" })
-    } catch (e: unknown) {
-      status = (e as { status?: number }).status
-    }
-    expect(status).toBe(3)
+  it("exits 3 for unknown run ID", async () => {
+    const result = await runCli(BIN, ["inspect", "run", "run_unknown"], env)
+    expect(result.exitCode).toBe(3)
   })
 })

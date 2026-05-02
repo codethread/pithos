@@ -8,12 +8,12 @@ import { Effect, Layer } from "effect"
 import { mkdtempSync, existsSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir, homedir } from "node:os"
-import { execFileSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { initCommand } from "../src/commands/init.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeOutputServiceSilent } from "../src/layers/output.ts"
+import { runCliOk } from "./_helpers/exec.ts"
 
 const silentOutput = makeOutputServiceSilent()
 
@@ -139,34 +139,28 @@ describe("pithos init (CLI process — real SQLite)", () => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it("PITHOS_DB=<temp> pithos init exits 0 and outputs valid JSON", () => {
+  it("PITHOS_DB=<temp> pithos init exits 0 and outputs valid JSON", async () => {
     const binPath = join(import.meta.dirname, "../bin/pithos")
-    const stdout = execFileSync(binPath, ["init"], {
-      env: { ...process.env, PITHOS_DB: dbPath },
-      encoding: "utf-8",
-    })
+    const stdout = await runCliOk(binPath, ["init"], { ...process.env, PITHOS_DB: dbPath })
     const parsed: unknown = JSON.parse(stdout)
     expect(parsed).toMatchObject({ ok: true, initialized: true })
   })
 
-  it("PITHOS_DB=<temp> pithos init twice exits 0 both times (idempotent)", () => {
+  it("PITHOS_DB=<temp> pithos init twice exits 0 both times (idempotent)", async () => {
     const binPath = join(import.meta.dirname, "../bin/pithos")
     const env = { ...process.env, PITHOS_DB: dbPath }
 
-    const out1 = execFileSync(binPath, ["init"], { env, encoding: "utf-8" })
-    const out2 = execFileSync(binPath, ["init"], { env, encoding: "utf-8" })
+    const out1 = await runCliOk(binPath, ["init"], env)
+    const out2 = await runCliOk(binPath, ["init"], env)
 
     expect(JSON.parse(out1)).toMatchObject({ ok: true })
     expect(JSON.parse(out2)).toMatchObject({ ok: true })
   })
 
-  it("creates DB in a nested directory that does not yet exist", () => {
+  it("creates DB in a nested directory that does not yet exist", async () => {
     const nestedDbPath = join(tempDir, "nested", "sub", "pithos.sqlite")
     const binPath = join(import.meta.dirname, "../bin/pithos")
-    execFileSync(binPath, ["init"], {
-      env: { ...process.env, PITHOS_DB: nestedDbPath },
-      encoding: "utf-8",
-    })
+    await runCliOk(binPath, ["init"], { ...process.env, PITHOS_DB: nestedDbPath })
     expect(existsSync(nestedDbPath)).toBe(true)
   })
 })

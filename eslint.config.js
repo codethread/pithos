@@ -72,6 +72,12 @@ export default tsEslint.config(
     },
     rules: {
       ...vitestPlugin.configs.recommended.rules,
+      // Recognise project-level assertion helpers so vitest/expect-expect
+      // does not flag tests that delegate assertions to named helpers.
+      "vitest/expect-expect": [
+        "error",
+        { assertFunctionNames: ["expect", "assertRequiredSections"] },
+      ],
     },
   },
   prettierConfig,

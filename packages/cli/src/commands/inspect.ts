@@ -94,6 +94,9 @@ Usage:
   pithos inspect run <id>
   pithos inspect task <id>
 
+Options:
+  --help, -h    Show this help
+
 Subcommands:
   scope <id>    Show a scope by ID
   run <id>      Show a run by ID

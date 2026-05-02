@@ -6,7 +6,7 @@ import type { IdService } from "../services/ids.ts"
 import type { FsService } from "../services/fs.ts"
 import { OutputService } from "../services/output.ts"
 import { VERSION } from "../version.ts"
-import { initCommand } from "../commands/init.ts"
+import { initCommand, INIT_HELP } from "../commands/init.ts"
 import { scopeUpsertCommand, SCOPE_UPSERT_HELP } from "../commands/scope.ts"
 import { inspectScopeCommand, inspectRunCommand, inspectTaskCommand, INSPECT_HELP } from "../commands/inspect.ts"
 import {
@@ -74,6 +74,8 @@ Run \`pithos <command> --help\` for command-specific usage.
 
 const helpFor = (topic: string | undefined): string => {
   switch (topic) {
+    case "init":
+      return INIT_HELP
     case "scope":
     case "scope:upsert":
       return SCOPE_UPSERT_HELP

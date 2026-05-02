@@ -18,8 +18,7 @@ export interface LogEntry {
 
 /**
  * Map PITHOS_LOG_LEVEL env string to an Effect LogLevel.
- * Defaults to Warning so debug/info logs are suppressed unless explicitly
- * turned up.
+ * Defaults to None (fully silent) so diagnostic output is strictly opt-in.
  */
 const getEnvLogLevel = (): LogLevel.LogLevel => {
   const raw = process.env.PITHOS_LOG_LEVEL?.toLowerCase()
@@ -40,7 +39,7 @@ const getEnvLogLevel = (): LogLevel.LogLevel => {
     case "none":
       return LogLevel.None
     default:
-      return LogLevel.Warning
+      return LogLevel.None // silent by default; opt in with PITHOS_LOG_LEVEL=debug|info|warning|error
   }
 }
 
@@ -89,8 +88,8 @@ const pithosStderrLogger = Logger.make<unknown, void>(
  *
  * The minimum log level is controlled by the `PITHOS_LOG_LEVEL` environment
  * variable (trace | debug | info | warning | error | fatal | none).
- * Defaults to `warning` so debug/info breadcrumbs are suppressed unless the
- * caller explicitly opts in.
+ * Defaults to `none` (fully silent) so diagnostic output is strictly
+ * opt-in and never pollutes the machine-readable stderr error channel.
  *
  * Combine with `OutputService` in the provider stack so diagnostics (logger)
  * stay on a separate channel from user-visible command output (OutputService).

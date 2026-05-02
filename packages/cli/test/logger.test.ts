@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { Exit, Effect, Layer, LogLevel } from "effect"
+import { Exit, Effect, Layer, Logger, LogLevel } from "effect"
 import { makeLogCapture, LoggerSilent } from "../src/layers/logger.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
 import { OutputService } from "../src/services/output.ts"
@@ -99,17 +99,23 @@ describe("makeLogCapture", () => {
 // ---------------------------------------------------------------------------
 
 describe("LoggerSilent", () => {
-  it("discards all log output — no entries appear in a capture paired at None level", async () => {
-    // Make a capture at Trace but merge with Silent so Silent wins
-    const cap = makeLogCapture(LogLevel.None)
+  it("suppresses a simple (non-nested) logger layer when placed after it in merge", async () => {
+    // LoggerSilent wins when merged as the RIGHT side over a simple Logger.replace layer.
+    // This mirrors what happens in production: the default Effect logger (console.log) is
+    // suppressed by LoggerSilent so diagnostic breadcrumbs don't pollute Vitest output.
+    let fired = 0
+    const countingLogger = Logger.make<unknown, void>(() => { fired++ })
+    const simpleCountingLayer = Logger.replace(Logger.defaultLogger, countingLogger)
+
     await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* Effect.logDebug("should be silent")
-        yield* Effect.logWarning("also silent")
-      }).pipe(Effect.provide(Layer.merge(LoggerSilent, cap.layer))),
+      Effect.logDebug("diagnostic").pipe(
+        Effect.provide(Layer.merge(simpleCountingLayer, LoggerSilent)),
+      ),
     )
-    // Nothing captured because the minimum level is None
-    expect(cap.entries()).toHaveLength(0)
+
+    // LoggerSilent (RIGHT) wins the FiberRef race → minimumLogLevel=None →
+    // no log passes the level gate → countingLogger never fires
+    expect(fired).toBe(0)
   })
 
   it("silences logs while OutputService still emits normally", async () => {

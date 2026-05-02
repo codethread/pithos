@@ -219,6 +219,9 @@ export const heartbeatCommand = (
     }
 
     if (txResult.kind === "stale_token") {
+      yield* Effect.logWarning("stale fencing token rejected on heartbeat").pipe(
+        Effect.annotateLogs({ runId, taskId: String(opts.task ?? ""), token: String(opts.token ?? "") }),
+      )
       yield* Effect.fail(
         new PithosError({
           code: "STALE_TOKEN",

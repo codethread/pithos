@@ -22,6 +22,7 @@ import { completeCommand, COMPLETE_HELP } from "../commands/complete.ts"
 import { failCommand, FAIL_HELP } from "../commands/fail.ts"
 import { artifactAddCommand, ARTIFACT_ADD_HELP } from "../commands/artifact.ts"
 import { tailCommand, TAIL_HELP } from "../commands/tail.ts"
+import { sweepCommand, SWEEP_HELP } from "../commands/sweep.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -100,6 +101,8 @@ const helpFor = (topic: string | undefined): string => {
       return INSPECT_HELP
     case "tail":
       return TAIL_HELP
+    case "sweep":
+      return SWEEP_HELP
     default:
       return HELP_TEXT
   }
@@ -226,6 +229,13 @@ export const dispatch = (
 
       case "tail":
         yield* tailCommand({ limit: args.limit })
+        break
+
+      case "sweep":
+        yield* sweepCommand({
+          leaseGraceSeconds: args.leaseGraceSeconds,
+          runStaleMinutes: args.runStaleMinutes,
+        })
         break
 
       case "unknown": {

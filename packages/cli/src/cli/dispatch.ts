@@ -19,6 +19,7 @@ import { claimCommand, CLAIM_HELP } from "../commands/claim.ts"
 import { heartbeatCommand, HEARTBEAT_HELP } from "../commands/heartbeat.ts"
 import { completeCommand, COMPLETE_HELP } from "../commands/complete.ts"
 import { failCommand, FAIL_HELP } from "../commands/fail.ts"
+import { artifactAddCommand, ARTIFACT_ADD_HELP } from "../commands/artifact.ts"
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -87,6 +88,9 @@ const helpFor = (topic: string | undefined): string => {
       return COMPLETE_HELP
     case "fail":
       return FAIL_HELP
+    case "artifact":
+    case "artifact:add":
+      return ARTIFACT_ADD_HELP
     case "inspect":
     case "inspect:scope":
     case "inspect:run":
@@ -138,6 +142,16 @@ export const dispatch = (
           run: args.run,
           status: args.status,
           summary: args.summary,
+        })
+        break
+
+      case "artifact:add":
+        yield* artifactAddCommand({
+          task: args.task,
+          run: args.run,
+          kind: args.kind,
+          title: args.title,
+          bodyFile: args.bodyFile,
         })
         break
 

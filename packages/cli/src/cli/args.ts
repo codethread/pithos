@@ -61,6 +61,14 @@ export type ParsedArgs =
       token: number | undefined
       reason: string | undefined
     }
+  | {
+      command: "artifact:add"
+      task: string | undefined
+      run: string | undefined
+      kind: string | undefined
+      title: string | undefined
+      bodyFile: string | undefined
+    }
   | { command: "inspect:scope"; id: string }
   | { command: "inspect:run"; id: string }
   | { command: "inspect:task"; id: string }
@@ -201,6 +209,23 @@ export const parseArgs = (argv: readonly string[]): Effect.Effect<ParsedArgs, Pi
       const token = tokenRaw !== undefined ? parseInt(tokenRaw, 10) : undefined
       const reason = flagValue(argv, "--reason")
       return { command: "fail", taskId, run, token, reason } as const
+    }
+
+    if (first === "artifact") {
+      if (!second || second === "--help" || second === "-h") {
+        return { command: "help", topic: "artifact" } as const
+      }
+      if (second === "add") {
+        const remaining = [second, ...rest]
+        if (hasHelp(remaining)) return { command: "help", topic: "artifact:add" } as const
+        const task = flagValue(argv, "--task")
+        const run = flagValue(argv, "--run")
+        const kind = flagValue(argv, "--kind")
+        const title = flagValue(argv, "--title")
+        const bodyFile = flagValue(argv, "--body-file")
+        return { command: "artifact:add", task, run, kind, title, bodyFile } as const
+      }
+      return { command: "unknown", raw: argv } as const
     }
 
     if (first === "inspect") {

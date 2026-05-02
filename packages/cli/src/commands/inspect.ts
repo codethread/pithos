@@ -29,7 +29,7 @@ export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError
 /**
  * `pithos inspect task <id>`
  *
- * Fetches the task row and prints it as JSON.
+ * Fetches the task row and its associated artifacts, then prints as JSON.
  * Exits with code 3 (NOT_FOUND) if the task does not exist.
  */
 export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError, DbService> =>
@@ -45,8 +45,13 @@ export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError,
       return
     }
 
+    const artifacts = yield* db.query(
+      `SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at ASC`,
+      [id],
+    )
+
     yield* Effect.sync(() => {
-      console.log(JSON.stringify({ ok: true, task: rows[0] }))
+      console.log(JSON.stringify({ ok: true, task: rows[0], artifacts }))
     })
   })
 
@@ -84,12 +89,12 @@ Usage:
 Subcommands:
   scope <id>    Show a scope by ID
   run <id>      Show a run by ID
-  task <id>     Show a task by ID
+  task <id>     Show a task by ID (includes artifacts array)
 
 Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
   { "ok": true, "run": { "id": "...", "agent_kind": "...", ... } }
-  { "ok": true, "task": { "id": "...", "status": "queued", ... } }
+  { "ok": true, "task": { "id": "...", "status": "queued", ... }, "artifacts": [ ... ] }
 
 Examples:
   pithos inspect scope global

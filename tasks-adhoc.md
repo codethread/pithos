@@ -47,3 +47,9 @@
    **Type:** AFK  
    **Blocked by:** 5  
    **Vertical slice:** Replace the hand-rolled `better-sqlite3` layer with `@effect/sql-sqlite-node` (the official Effect SQLite adapter). Use `Schema.Class<T>` from `@effect/sql` for typed row decoding at the DB boundary — eliminating manual `unknown` casts and ad-hoc row validation. Note: `updateValues` is not supported by the adapter; raw SQL must be used for those queries. This task is blocked by task 5 (Effect.Schema adoption) so row schemas are defined consistently before wiring them into the SQL layer.
+
+8. **Title:** Add a declarative CLI parser layer  
+   **Status:** Unimplemented  
+   **Type:** AFK  
+   **Blocked by:** none  
+   **Vertical slice:** Replace the hand-written `parseArgs` + hardcoded help strings in `dispatch.ts` with a declarative CLI parser library. Prefer `@effect/cli` (Effect's official CLI toolkit — generates both parsing and help text from a single command schema). If `@effect/cli` is too immature or missing features at time of implementation, fall back to `clipanion` (typed, generates `--help`, well-maintained). Once done: (a) drop `help-cli.integration.test.ts` — the library owns help correctness, and (b) delete all per-command `--help` snapshot tests. Keep only the agent-usability invariants (every command has `--help`/`-h`, help mentions required sections) as lightweight contract checks against the library's output.

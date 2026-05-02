@@ -15,7 +15,7 @@
     "@effect/platform-node": "^0.106.0",
     "@effect/sql": "^0.51.1",
     "@effect/sql-sqlite-node": "^0.52.0",
-    "better-sqlite3": "^9.6.0",
+    "better-sqlite3": "^12.9.0",
     "effect": "^3.21.2"
   },
   "devDependencies": {

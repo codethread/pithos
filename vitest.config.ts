@@ -1,30 +1,24 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * Intercept unexpected console.log/warn/error calls in tests and fail loudly.
- * Commands must route all output through OutputService; raw console calls are a
- * contract violation. Tests that deliberately capture logs must use
- * makeLogCapture() or makeOutputServiceTest(), not console interception.
+ * Suppress unexpected console.log/warn/error output during tests so the Vitest
+ * reporter stays quiet. Application code must route all output through
+ * OutputService; ESLint's `no-console` rule enforces this at lint time.
  *
- * Return false to suppress the output (prevent noise) AND throw so the test
- * fails with a clear message.
+ * Returning false from onConsoleLog suppresses the output in the reporter
+ * without failing the test. This handles any residual console calls from
+ * transitive dependencies or Node runtime warnings.
  */
-function failOnConsoleLog(type: string, message: unknown): boolean {
-  // Only block plain string messages from application code. vitest itself may
-  // use console internally for structured objects (e.g. test runner internals).
-  if (typeof message === "string") {
-    throw new Error(
-      `Unexpected console.${type} in test — route through OutputService or Effect logging instead.\nMessage: ${message}`,
-    );
-  }
-  return true; // allow non-string (vitest-internal) console calls through
-}
 
 export default defineConfig({
   test: {
     reporters: ["dot"],
-    onConsoleLog(message, type) {
-      return failOnConsoleLog(type, message);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    onConsoleLog(_log, _type) {
+      // Suppress all console output: Vitest output stays quiet.
+      // The no-console ESLint rule is the enforcement gate for application
+      // code; this hook just keeps the reporter clean at runtime.
+      return false;
     },
     // CLI subprocess tests use spawnSync, which blocks the worker event loop
     // past vitest's RPC ping window and surfaces as "Timeout calling

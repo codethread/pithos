@@ -145,6 +145,7 @@ describe("scopeUpsertCommand (integration — real SQLite)", () => {
     expect(parsed.scope.kind).toBe("repo")
     expect(parsed.scope.name).toBe("output-test-project")
     expect(parsed.scope.canonical_path).toBe(absPath)
+    expect(out.errorLines()).toHaveLength(0)
   })
 
   it("upserts a global scope (no path required)", async () => {
@@ -213,6 +214,7 @@ describe("inspectScopeCommand (integration — real SQLite)", () => {
     }
     expect(parsed.ok).toBe(true)
     expect(parsed.scope.id).toBe("global")
+    expect(out.errorLines()).toHaveLength(0)
   })
 
   it("fails NOT_FOUND for unknown scope ID", async () => {

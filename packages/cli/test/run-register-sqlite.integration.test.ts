@@ -151,6 +151,7 @@ describe("runRegisterCommand (integration — real SQLite)", () => {
     expect(parsed.run.id).toBe("run_json_out")
     expect(parsed.run.agent_kind).toBe("envy")
     expect(parsed.run.status).toBe("starting")
+    expect(out.errorLines()).toHaveLength(0)
   })
 
   it("idempotent re-registration does not insert a second run.registered event", async () => {

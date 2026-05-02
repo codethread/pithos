@@ -157,6 +157,7 @@ describe("runEndCommand (integration — real SQLite)", () => {
     expect(parsed.ok).toBe(true)
     expect(parsed.run.id).toBe("run_to_end")
     expect(parsed.run.status).toBe("ended")
+    expect(out.errorLines()).toHaveLength(0)
   })
 
   it("supports cancellation status", async () => {

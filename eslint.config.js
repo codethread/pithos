@@ -55,6 +55,12 @@ export default tsEslint.config(
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": "error",
 
+      // Ban raw console calls — all output must go through OutputService
+      // (live layer → process.stdout/stderr; test layer → captured arrays).
+      // This catches accidental console.log in application and command code
+      // before it reaches the test suite or Vitest output.
+      "no-console": "error",
+
       // Turn off base rule in favour of ts version
       "no-unused-vars": "off",
     },

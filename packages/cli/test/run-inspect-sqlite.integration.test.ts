@@ -59,6 +59,7 @@ describe("inspectRunCommand (integration — real SQLite)", () => {
     expect(parsed.ok).toBe(true)
     expect(parsed.run.id).toBe("run_inspect")
     expect(parsed.run.agent_kind).toBe("envy")
+    expect(out.errorLines()).toHaveLength(0)
   })
 
   it("returns the run after registration", async () => {

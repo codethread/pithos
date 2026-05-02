@@ -184,6 +184,7 @@ describe("enqueueCommand (integration — real SQLite)", () => {
     expect(parsed.task.status).toBe("queued")
     expect(parsed.task.scope_id).toBe("global")
     expect(parsed.task.capability).toBe("triage")
+    expect(out.errorLines()).toHaveLength(0)
   })
 
   it("fails NOT_FOUND when scope does not exist", async () => {

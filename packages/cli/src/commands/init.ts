@@ -23,5 +23,6 @@ export const initCommand: Effect.Effect<void, PithosError, DbService | OutputSer
       `INSERT OR IGNORE INTO scopes (id, kind, name) VALUES ('global', 'global', 'global')`,
     )
 
+    yield* Effect.logDebug("database initialized")
     yield* output.print(JSON.stringify({ ok: true, initialized: true }))
-  })
+  }).pipe(Effect.withLogSpan("pithos.init"))

@@ -7,6 +7,7 @@ import { DbServiceLive } from "./layers/db.ts"
 import { IdServiceLive } from "./layers/ids.ts"
 import { FsServiceLive } from "./layers/fs.ts"
 import { OutputServiceLive } from "./layers/output.ts"
+import { LoggerLive } from "./layers/logger.ts"
 import { OutputService } from "./services/output.ts"
 
 const program = Effect.gen(function* () {
@@ -23,7 +24,7 @@ const program = Effect.gen(function* () {
       process.exit(exitCodeFor(err.code))
     }),
   ),
-  Effect.provide(Layer.mergeAll(DbServiceLive, IdServiceLive, FsServiceLive, OutputServiceLive)),
+  Effect.provide(Layer.mergeAll(DbServiceLive, IdServiceLive, FsServiceLive, OutputServiceLive, LoggerLive)),
 )
 
 NodeRuntime.runMain(program)

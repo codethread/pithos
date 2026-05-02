@@ -80,8 +80,11 @@ export const runRegisterCommand = (
 
     const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id])
 
+    yield* Effect.logDebug("run registered").pipe(
+      Effect.annotateLogs({ runId: id, agentKind }),
+    )
     yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
-  })
+  }).pipe(Effect.withLogSpan("pithos.run.register"))
 
 // ---------------------------------------------------------------------------
 // pithos run end
@@ -162,8 +165,11 @@ export const runEndCommand = (
 
     const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [runId])
 
+    yield* Effect.logDebug("run ended").pipe(
+      Effect.annotateLogs({ runId, status }),
+    )
     yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
-  })
+  }).pipe(Effect.withLogSpan("pithos.run.end"))
 
 // ---------------------------------------------------------------------------
 // Help texts

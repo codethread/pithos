@@ -127,6 +127,9 @@ export const completeCommand = (
     })
 
     if (txResult.kind === "stale_token") {
+      yield* Effect.logWarning("stale fencing token rejected on complete").pipe(
+        Effect.annotateLogs({ taskId, runId, token: String(token) }),
+      )
       yield* Effect.fail(
         new PithosError({
           code: "STALE_TOKEN",
@@ -136,8 +139,11 @@ export const completeCommand = (
       return
     }
 
+    yield* Effect.logDebug("task completed").pipe(
+      Effect.annotateLogs({ taskId, runId }),
+    )
     yield* output.print(JSON.stringify({ ok: true, task: txResult.task }))
-  })
+  }).pipe(Effect.withLogSpan("pithos.complete"))
 
 // ---------------------------------------------------------------------------
 // Help text

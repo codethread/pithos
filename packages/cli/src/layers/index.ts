@@ -7,6 +7,8 @@ export { DbServiceLive, makeDbServiceLive } from "./db.ts"
 export { ClaudeHarnessServiceLive } from "./harness.ts"
 export { OutputServiceLive, makeOutputServiceTest, makeOutputServiceSilent } from "./output.ts"
 export type { OutputCapture } from "./output.ts"
+export { LoggerLive, LoggerSilent, makeLogCapture } from "./logger.ts"
+export type { LogEntry, LogCapture } from "./logger.ts"
 
 // Test factory functions
 export { makeClockServiceTest } from "./clock.ts"

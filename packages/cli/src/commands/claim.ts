@@ -133,14 +133,20 @@ export const claimCommand = (
     })
 
     if (claimedTask === null) {
+      yield* Effect.logDebug("no claimable work").pipe(
+        Effect.annotateLogs({ scope, capability }),
+      )
       yield* Effect.fail(
         new PithosError({ code: "NO_CLAIMABLE_WORK", message: "no claimable work found" }),
       )
       return
     }
 
+    yield* Effect.logDebug("task claimed").pipe(
+      Effect.annotateLogs({ taskId: String(claimedTask.id), runId }),
+    )
     yield* output.print(JSON.stringify({ ok: true, task: claimedTask }))
-  })
+  }).pipe(Effect.withLogSpan("pithos.claim"))
 
 // ---------------------------------------------------------------------------
 // Help text

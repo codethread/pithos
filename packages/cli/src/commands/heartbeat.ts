@@ -233,19 +233,28 @@ export const heartbeatCommand = (
     const run = runRows[0]!
 
     if (txResult.kind === "throttled") {
+      yield* Effect.logDebug("heartbeat throttled").pipe(
+        Effect.annotateLogs({ runId, throttleSeconds: String(opts.throttleSeconds ?? "") }),
+      )
       yield* output.print(JSON.stringify({ ok: true, skipped: true, run }))
       return
     }
 
     if (txResult.kind === "success_with_task") {
+      yield* Effect.logDebug("heartbeat written with task advance").pipe(
+        Effect.annotateLogs({ runId, taskId: String(opts.task ?? "") }),
+      )
       yield* output.print(
         JSON.stringify({ ok: true, skipped: false, run, task: txResult.task }),
       )
       return
     }
 
+    yield* Effect.logDebug("heartbeat written").pipe(
+      Effect.annotateLogs({ runId }),
+    )
     yield* output.print(JSON.stringify({ ok: true, skipped: false, run }))
-  })
+  }).pipe(Effect.withLogSpan("pithos.heartbeat"))
 
 // ---------------------------------------------------------------------------
 // Help text

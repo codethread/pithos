@@ -23,10 +23,11 @@ export interface BriefingOptions {
 // ---------------------------------------------------------------------------
 
 export const BRIEFING_SQL = {
-  WATERMARK: `SELECT MAX(id) AS max_id FROM events`,
   TASKS: `SELECT * FROM tasks WHERE status NOT IN ('cancelled') ORDER BY created_at ASC`,
-  STALE_RUNS: `SELECT * FROM runs WHERE status = 'stale' ORDER BY updated_at DESC`,
+  /** Stale runs: already marked stale OR active with heartbeat older than 15 minutes. */
+  STALE_RUNS: `SELECT * FROM runs WHERE status = 'stale' OR (status IN ('starting', 'running', 'idle') AND ((last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) < datetime('now', '-15 minutes')) OR (last_heartbeat_at IS NULL AND datetime(created_at) < datetime('now', '-15 minutes')))) ORDER BY updated_at DESC`,
   ARTIFACTS: `SELECT * FROM artifacts WHERE kind IN ('worker-completion', 'design-brief', 'question') ORDER BY created_at DESC LIMIT 50`,
+  WATERMARK: `SELECT MAX(id) AS max_id FROM events`,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -105,23 +106,33 @@ export const briefingCommand = (
     const db = yield* DbService
     const output = yield* OutputService
 
-    // Watermark: the max event ID at the time the briefing is generated.
-    const watermarkRows = yield* db.query(BRIEFING_SQL.WATERMARK, [])
-    const firstRow = watermarkRows[0]
-    const rawMaxId = firstRow !== undefined ? firstRow.max_id : null
-    const maxEventId: number | null = typeof rawMaxId === "number" ? rawMaxId : null
+    // All reads happen inside one transaction so the watermark and the
+    // rendered rows share a consistent SQLite snapshot. Watermark is read
+    // last: it captures the max event ID as of the moment all task/run/
+    // artifact rows were fetched, preserving the incremental-sync contract.
+    const { maxEventId, allTasks, staleRuns, artifacts } = yield* db.withTransaction(
+      Effect.gen(function* () {
+        // All non-cancelled tasks.
+        const rawTaskRows = yield* db.query(BRIEFING_SQL.TASKS, [])
+        const tasks = yield* Effect.forEach(rawTaskRows, decodeTaskRow)
 
-    // All non-cancelled tasks.
-    const rawTaskRows = yield* db.query(BRIEFING_SQL.TASKS, [])
-    const allTasks = yield* Effect.forEach(rawTaskRows, decodeTaskRow)
+        // Stale/expired runs: already marked stale OR active with old heartbeat.
+        const rawRunRows = yield* db.query(BRIEFING_SQL.STALE_RUNS, [])
+        const runs = yield* Effect.forEach(rawRunRows, decodeRunRow)
 
-    // Stale runs.
-    const rawRunRows = yield* db.query(BRIEFING_SQL.STALE_RUNS, [])
-    const staleRuns = yield* Effect.forEach(rawRunRows, decodeRunRow)
+        // Recent relevant artifacts.
+        const rawArtifactRows = yield* db.query(BRIEFING_SQL.ARTIFACTS, [])
+        const arts = yield* Effect.forEach(rawArtifactRows, decodeArtifactRow)
 
-    // Recent relevant artifacts.
-    const rawArtifactRows = yield* db.query(BRIEFING_SQL.ARTIFACTS, [])
-    const artifacts = yield* Effect.forEach(rawArtifactRows, decodeArtifactRow)
+        // Watermark last: max event ID consistent with the rows just read.
+        const watermarkRows = yield* db.query(BRIEFING_SQL.WATERMARK, [])
+        const firstRow = watermarkRows[0]
+        const rawMaxId = firstRow !== undefined ? firstRow.max_id : null
+        const maxId: number | null = typeof rawMaxId === "number" ? rawMaxId : null
+
+        return { maxEventId: maxId, allTasks: tasks, staleRuns: runs, artifacts: arts }
+      }),
+    )
 
     // Index artifacts by task_id for O(1) lookup.
     const artifactsByTaskId = new Map<string, ArtifactRow[]>()
@@ -285,11 +296,13 @@ Output (markdown):
   - queued, claimed, and running tasks (work in the pipeline)
 
   ### Stale / failed
-  - stale runs and failed tasks
+  - runs marked stale or with heartbeat older than 15 minutes, plus failed tasks
 
 Notes:
   - as_of_event_id is the latest event ID at render time; use it as a briefing watermark.
+  - All DB reads run inside a single transaction so the watermark and rows are consistent.
   - Cancelled tasks are excluded.
+  - Stale run detection uses the same 15-minute heartbeat threshold as pithos sweep.
   - The renderer formats raw facts; Pandora interprets them. No summarisation in code.
 
 Examples:

@@ -45,7 +45,7 @@ Commands:
   fail                  Fail task if run owns current fencing token
   artifact add          Attach a completion report/design brief/status artifact
   inspect               Inspect task/run/scope/artifact
-  briefing              Render concise briefing for Pandora or a scope
+  briefing              Render Pandora briefing with as_of_event_id watermark
   tail                  Show recent events
   sweep                 Expire leases, mark stale runs, requeue eligible tasks
 

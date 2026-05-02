@@ -221,7 +221,7 @@ describe("briefingCommand (integration — real SQLite)", () => {
   // Stale / failed tests
   // ---------------------------------------------------------------------------
 
-  it("shows stale run in Stale / failed section", async () => {
+  it("shows stale run (explicitly marked) in Stale / failed section", async () => {
     await registerRun("run_stale_br")
     const db = new Database(dbPath)
     db.prepare(`UPDATE runs SET status = 'stale' WHERE id = 'run_stale_br'`).run()
@@ -231,6 +231,29 @@ describe("briefingCommand (integration — real SQLite)", () => {
     expect(text).toContain("[stale run]")
     expect(text).toContain("run_stale_br")
     expect(text).toContain("envy")
+  })
+
+  it("shows active run with expired heartbeat (stale-by-age) in Stale / failed section", async () => {
+    await registerRun("run_hb_expired")
+    // Back-date heartbeat to 20 minutes ago — past the 15-minute threshold.
+    const db = new Database(dbPath)
+    db.prepare(`UPDATE runs SET last_heartbeat_at = strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '-20 minutes')) WHERE id = 'run_hb_expired'`).run()
+    db.close()
+
+    const text = await runBriefing()
+    expect(text).toContain("[stale run]")
+    expect(text).toContain("run_hb_expired")
+  })
+
+  it("does not show active run with fresh heartbeat in Stale / failed", async () => {
+    await registerRun("run_fresh_hb")
+    // Only 5 minutes old — well within the 15-minute threshold.
+    const db = new Database(dbPath)
+    db.prepare(`UPDATE runs SET last_heartbeat_at = strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '-5 minutes')) WHERE id = 'run_fresh_hb'`).run()
+    db.close()
+
+    const text = await runBriefing()
+    expect(text).not.toContain("run_fresh_hb")
   })
 
   it("shows failed task in Stale / failed section", async () => {

@@ -91,7 +91,7 @@
     **Vertical slice:** Implement `pithos complete` and `pithos fail` with fencing-token checks, result JSON/reason storage, completed/failed events, stale-token exit code, tests for success and stale completion rejection.
 
 11. **Title:** Attach a worker completion artifact  
-    **Status:** Unbuilt  
+    **Status:** Built  
     **Type:** AFK  
     **Blocked by:** 7, 10  
     **User stories covered:** US5, US6  

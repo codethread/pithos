@@ -1,0 +1,97 @@
+# Agent rules
+
+Pithos is an Effect-TS CLI. These rules are non-negotiable. Examples are
+real code — keep them in sync.
+
+## 1. Checks pass between commits
+
+Typecheck, lint, tests, build — all green before every commit. No "leftover
+issues", no "next commit". If it's broken, you broke it, you fix it now.
+
+Never `--no-verify`. Never disable a failing test to make the bar green.
+
+## 2. Fail loudly
+
+No silent fallbacks. No swallowed exceptions. No defaulting to empty / zero
+/ null when the real value is missing. Crash, raise, halt.
+
+Errors are tagged and carry a machine-readable code, not free-form strings:
+
+```ts
+// src/errors/errors.ts
+export class PithosError extends Data.TaggedError("PithosError")<{
+  readonly code: ErrorCode
+  readonly message: string
+}> {}
+```
+
+### Database integrity is paramount
+
+The DB is the source of truth. Corruption compounds — every subsequent write
+builds on the lie. Better everything stops than the DB drifts.
+
+Validate fencing/preconditions, then write inside a transaction, and if a
+race is detected mid-transaction, throw to roll back — never "best-effort":
+
+```ts
+// src/commands/heartbeat.ts
+if (taskRows.length === 0) {
+  // pre-check passed but UPDATE found no row: concurrent reclaim invalidated
+  // the token. Throw to roll back the whole transaction.
+  throw new Error("PITHOS_STALE_TOKEN_RACE")
+}
+```
+
+## 3. Strict types at the IO boundary
+
+Anything crossing IO (stdin, CLI args, DB rows, files, subprocess output)
+gets parsed into a known shape before the rest of the code touches it. No
+`any`, no leaked `unknown`. Parse, don't validate-later. Failures `Effect.fail`.
+
+```ts
+// src/cli/args.ts — explicit allowlist, fails loudly on unknown input
+if (rawKind !== undefined && rawKind !== "global" && rawKind !== "repo" && rawKind !== "worktree") {
+  return yield* Effect.fail(new PithosError({
+    code: "VALIDATION_ERROR",
+    message: `Invalid --kind value: '${rawKind}'. Valid values: global, repo, worktree`,
+  }))
+}
+```
+
+### Discriminated unions over optional bags
+
+If two states cannot coexist, the type must say so. Tagged variants, not
+wide interfaces full of optionals.
+
+```ts
+// src/cli/args.ts
+export type ParsedArgs =
+  | { command: "version" }
+  | { command: "help"; topic?: string }
+  | { command: "init" }
+  | { command: "scope:upsert"; kind: ScopeKind; path: string | undefined }
+  // ...
+```
+
+## 4. Agent-first observability
+
+The runtime is headless. Agents have no debugger, no UI — only what the
+system writes down. Write things down.
+
+- **Structured logs only.** Use `Effect.log*` with `Effect.annotateLogs` for
+  context (ids, inputs, outcomes). No `console.log`, no bare strings.
+  ```ts
+  // src/commands/complete.ts
+  yield* Effect.logDebug("task completed").pipe(
+    Effect.annotateLogs({ taskId, runId }),
+  )
+  ```
+  The logger emits JSON to stderr with span labels, level, timestamp, and
+  annotations — see `src/layers/logger.ts`.
+- **Wrap non-trivial units of work in `Effect.withSpan`.** Spans give the
+  causal tree; logs alone are flat. Span labels appear in every log line
+  emitted inside the span.
+- **Errors carry context.** A `PithosError` with `code` + `message` an agent
+  can grep beats a generic stack trace. No interactive-only debug paths —
+  if the only way to understand a failure is attaching a debugger, add the
+  log / span / structured error first.

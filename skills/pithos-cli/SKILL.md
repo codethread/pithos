@@ -87,5 +87,5 @@ pithos run end --run "$run_id" --status ended
 - **Fencing token**: `claim` returns a token. Pass it to `heartbeat`, `complete`, and `fail`. A stale token (exit 4) means another run reclaimed the task.
 - **Scope IDs** are home-relative: `~/work/foo` → `repo:work/foo`. Use `pithos scope upsert --path <path>` to register and get the canonical ID.
 - **`pithos sweep`** requeues expired leases (up to `max_attempts`) and dead-letters exhausted tasks. Run it from cron or manually.
-- **All mutation commands** return JSON with `"ok": true/false`. Check exit code first; non-zero exit means `ok` is false.
+- **All mutation commands** emit JSON with `"ok": true` on **stdout** on success. On failure, a JSON error payload `{ "ok": false, "error": { "code": "...", "message": "..." } }` is written to **stderr** and the process exits non-zero. Always check the exit code first; parse stderr for structured error details on failure.
 - **Do not write to the DB directly.** `pithos` enforces all transitions and events.

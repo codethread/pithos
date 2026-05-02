@@ -72,14 +72,80 @@ Exit codes:
 Run \`pithos <command> --help\` for command-specific usage.
 `
 
+// ---------------------------------------------------------------------------
+// Namespace help texts (for `pithos scope`, `pithos run`, `pithos artifact`)
+// ---------------------------------------------------------------------------
+
+const SCOPE_HELP = `pithos scope - Manage pithos scopes
+
+Usage:
+  pithos scope <subcommand> [options]
+
+Subcommands:
+  upsert    Register or update a global/repo/worktree scope
+
+Options:
+  --help, -h    Show this help
+
+Examples:
+  pithos scope upsert --path ~/work/perkbox-services/protobuf
+  pithos scope upsert --kind global
+
+Run \`pithos scope <subcommand> --help\` for subcommand-specific usage.
+
+Exit codes: 0 success | 2 validation error
+`
+
+const RUN_HELP = `pithos run - Manage pithos runs (Claude Code / worker / agent sessions)
+
+Usage:
+  pithos run <subcommand> [options]
+
+Subcommands:
+  register    Register a new run and return its ID
+  end         Mark a run ended/failed/cancelled
+
+Options:
+  --help, -h    Show this help
+
+Examples:
+  pithos run register --agent-kind envy --scope repo:work/perkbox-services/protobuf
+  pithos run end --run run_abc --status ended
+
+Run \`pithos run <subcommand> --help\` for subcommand-specific usage.
+
+Exit codes: 0 success | 2 validation error | 3 not found
+`
+
+const ARTIFACT_HELP = `pithos artifact - Manage pithos artifacts
+
+Usage:
+  pithos artifact <subcommand> [options]
+
+Subcommands:
+  add    Attach a completion report, design brief, or status artifact to a task
+
+Options:
+  --help, -h    Show this help
+
+Examples:
+  pithos artifact add --task task_abc --run run_xyz --kind worker-completion --title "Report" --body-file report.md
+
+Run \`pithos artifact <subcommand> --help\` for subcommand-specific usage.
+
+Exit codes: 0 success | 2 validation error | 3 not found
+`
+
 const helpFor = (topic: string | undefined): string => {
   switch (topic) {
     case "init":
       return INIT_HELP
     case "scope":
+      return SCOPE_HELP
     case "scope:upsert":
       return SCOPE_UPSERT_HELP
     case "run":
+      return RUN_HELP
     case "run:register":
       return RUN_REGISTER_HELP
     case "run:end":
@@ -95,6 +161,7 @@ const helpFor = (topic: string | undefined): string => {
     case "fail":
       return FAIL_HELP
     case "artifact":
+      return ARTIFACT_HELP
     case "artifact:add":
       return ARTIFACT_ADD_HELP
     case "inspect":

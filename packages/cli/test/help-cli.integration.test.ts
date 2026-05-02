@@ -144,9 +144,26 @@ describe("pithos scope --help", () => {
     expect(exitCode).toBe(0)
   })
 
+  it("lists scope subcommands", async () => {
+    const { stdout } = await help(["scope", "--help"])
+    expect(stdout).toContain("upsert")
+  })
+
+  it("matches snapshot", async () => {
+    const { stdout } = await help(["scope", "--help"])
+    expect(stdout).toMatchSnapshot()
+  })
+
   it("exits 0 for scope upsert --help", async () => {
     const { exitCode } = await help(["scope", "upsert", "--help"])
     expect(exitCode).toBe(0)
+  })
+
+  it("scope upsert shows its own help (not namespace overview)", async () => {
+    const { stdout: namespace } = await help(["scope", "--help"])
+    const { stdout: sub } = await help(["scope", "upsert", "--help"])
+    expect(namespace).not.toBe(sub)
+    expect(sub).toContain("pithos scope upsert")
   })
 
   it("contains required sections", async () => {
@@ -154,7 +171,7 @@ describe("pithos scope --help", () => {
     assertRequiredSections(stdout, "scope upsert --help")
   })
 
-  it("matches snapshot", async () => {
+  it("scope upsert --help matches snapshot", async () => {
     const { stdout } = await help(["scope", "upsert", "--help"])
     expect(stdout).toMatchSnapshot()
   })
@@ -170,9 +187,27 @@ describe("pithos run --help", () => {
     expect(exitCode).toBe(0)
   })
 
+  it("lists run subcommands", async () => {
+    const { stdout } = await help(["run", "--help"])
+    expect(stdout).toContain("register")
+    expect(stdout).toContain("end")
+  })
+
+  it("matches snapshot", async () => {
+    const { stdout } = await help(["run", "--help"])
+    expect(stdout).toMatchSnapshot()
+  })
+
   it("run register --help exits 0", async () => {
     const { exitCode } = await help(["run", "register", "--help"])
     expect(exitCode).toBe(0)
+  })
+
+  it("run register shows its own help (not namespace overview)", async () => {
+    const { stdout: namespace } = await help(["run", "--help"])
+    const { stdout: sub } = await help(["run", "register", "--help"])
+    expect(namespace).not.toBe(sub)
+    expect(sub).toContain("pithos run register")
   })
 
   it("run register --help contains required sections", async () => {
@@ -188,6 +223,13 @@ describe("pithos run --help", () => {
   it("run end --help exits 0", async () => {
     const { exitCode } = await help(["run", "end", "--help"])
     expect(exitCode).toBe(0)
+  })
+
+  it("run end shows its own help (not namespace overview)", async () => {
+    const { stdout: namespace } = await help(["run", "--help"])
+    const { stdout: sub } = await help(["run", "end", "--help"])
+    expect(namespace).not.toBe(sub)
+    expect(sub).toContain("pithos run end")
   })
 
   it("run end --help contains required sections", async () => {
@@ -336,9 +378,26 @@ describe("pithos artifact --help", () => {
     expect(exitCode).toBe(0)
   })
 
+  it("lists artifact subcommands", async () => {
+    const { stdout } = await help(["artifact", "--help"])
+    expect(stdout).toContain("add")
+  })
+
+  it("matches snapshot", async () => {
+    const { stdout } = await help(["artifact", "--help"])
+    expect(stdout).toMatchSnapshot()
+  })
+
   it("artifact add --help exits 0", async () => {
     const { exitCode } = await help(["artifact", "add", "--help"])
     expect(exitCode).toBe(0)
+  })
+
+  it("artifact add shows its own help (not namespace overview)", async () => {
+    const { stdout: namespace } = await help(["artifact", "--help"])
+    const { stdout: sub } = await help(["artifact", "add", "--help"])
+    expect(namespace).not.toBe(sub)
+    expect(sub).toContain("pithos artifact add")
   })
 
   it("artifact add --help contains required sections", async () => {
@@ -459,6 +518,11 @@ describe("agent-usability invariants", () => {
   it("every command help mentions --help/-h option", async () => {
     const commands = [
       ["init", "--help"],
+      // Namespace help pages
+      ["scope", "--help"],
+      ["run", "--help"],
+      ["artifact", "--help"],
+      // Leaf subcommand help pages
       ["scope", "upsert", "--help"],
       ["run", "register", "--help"],
       ["run", "end", "--help"],

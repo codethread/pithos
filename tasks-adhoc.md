@@ -7,7 +7,7 @@
 ## Slices
 
 1. **Title:** Centralize CLI output behind an Effect service  
-   **Status:** Unimplemented  
+   **Status:** Implemented  
    **Type:** AFK  
    **Blocked by:** none  
    **Vertical slice:** Route command JSON/text emission through a shared `Output` service with live stdout/stderr sinks and test sinks that can buffer or write to temp files. Replace direct `console.log` calls in the command path so tests can silence or capture output without noisy global interception.

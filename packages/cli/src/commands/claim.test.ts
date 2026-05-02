@@ -6,7 +6,6 @@ import { describe, it, expect } from "vitest"
 import { Effect, Exit, Layer } from "effect"
 
 import { claimCommand } from "./claim.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import { makeOutputServiceSilent } from "../layers/output.ts"
 
@@ -72,50 +71,3 @@ describe("claimCommand (unit — fake DB)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 3. parseArgs — claim routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — claim", () => {
-  it("parses required flags", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["claim", "--run", "run_abc", "--scope", "global", "--capability", "triage"]),
-    )
-    expect(result).toMatchObject({
-      command: "claim",
-      run: "run_abc",
-      scope: "global",
-      capability: "triage",
-      leaseMinutes: undefined,
-    })
-  })
-
-  it("parses --lease-minutes as a number", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "claim",
-        "--run",
-        "run_abc",
-        "--scope",
-        "global",
-        "--capability",
-        "triage",
-        "--lease-minutes",
-        "20",
-      ]),
-    )
-    expect(result).toMatchObject({ command: "claim", leaseMinutes: 20 })
-  })
-
-  it("routes 'claim --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["claim", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "claim" })
-  })
-
-  it("returns undefined for optional flags when absent", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["claim", "--run", "run_abc", "--scope", "global", "--capability", "triage"]),
-    )
-    expect(result).toMatchObject({ command: "claim", leaseMinutes: undefined })
-  })
-})

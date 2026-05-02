@@ -6,7 +6,6 @@ import { describe, it, expect } from "vitest"
 import { Effect, Exit, Layer } from "effect"
 
 import { artifactAddCommand } from "./artifact.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import { makeIdServiceTest } from "../layers/ids.ts"
 import { makeFsServiceTest } from "../layers/fs.ts"
@@ -107,76 +106,3 @@ describe("artifactAddCommand (unit — fake DB)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 3. parseArgs — artifact:add routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — artifact add", () => {
-  it("parses all required flags", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "artifact",
-        "add",
-        "--task",
-        "task_abc",
-        "--run",
-        "run_xyz",
-        "--kind",
-        "worker-completion",
-        "--title",
-        "Worker report",
-      ]),
-    )
-    expect(result).toMatchObject({
-      command: "artifact:add",
-      task: "task_abc",
-      run: "run_xyz",
-      kind: "worker-completion",
-      title: "Worker report",
-      bodyFile: undefined,
-    })
-  })
-
-  it("parses --body-file flag", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "artifact",
-        "add",
-        "--task",
-        "task_abc",
-        "--run",
-        "run_xyz",
-        "--kind",
-        "worker-completion",
-        "--title",
-        "Report",
-        "--body-file",
-        "/tmp/report.md",
-      ]),
-    )
-    expect(result).toMatchObject({
-      command: "artifact:add",
-      bodyFile: "/tmp/report.md",
-    })
-  })
-
-  it("routes 'artifact add --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["artifact", "add", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "artifact:add" })
-  })
-
-  it("routes 'artifact --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["artifact", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "artifact" })
-  })
-
-  it("routes 'artifact' with no subcommand to help", async () => {
-    const result = await Effect.runPromise(parseArgs(["artifact"]))
-    expect(result).toMatchObject({ command: "help" })
-  })
-
-  it("routes unknown artifact subcommand to unknown", async () => {
-    const result = await Effect.runPromise(parseArgs(["artifact", "remove"]))
-    expect(result).toMatchObject({ command: "unknown" })
-  })
-})

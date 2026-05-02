@@ -6,7 +6,6 @@ import { describe, it, expect } from "vitest"
 import { Effect, Exit, Layer } from "effect"
 
 import { heartbeatCommand } from "./heartbeat.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import { makeOutputServiceSilent } from "../layers/output.ts"
 
@@ -69,59 +68,3 @@ describe("heartbeatCommand (unit — fake DB)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 3. parseArgs — heartbeat routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — heartbeat", () => {
-  it("parses required --run flag", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["heartbeat", "--run", "run_abc"]),
-    )
-    expect(result).toMatchObject({ command: "heartbeat", run: "run_abc" })
-  })
-
-  it("parses all optional flags", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "heartbeat",
-        "--run",
-        "run_abc",
-        "--task",
-        "task_xyz",
-        "--token",
-        "3",
-        "--hook",
-        "PreToolUse",
-        "--throttle-seconds",
-        "60",
-      ]),
-    )
-    expect(result).toMatchObject({
-      command: "heartbeat",
-      run: "run_abc",
-      task: "task_xyz",
-      token: 3,
-      hook: "PreToolUse",
-      throttleSeconds: 60,
-    })
-  })
-
-  it("routes 'heartbeat --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["heartbeat", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "heartbeat" })
-  })
-
-  it("returns undefined for optional flags when absent", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["heartbeat", "--run", "run_abc"]),
-    )
-    expect(result).toMatchObject({
-      command: "heartbeat",
-      task: undefined,
-      token: undefined,
-      hook: undefined,
-      throttleSeconds: undefined,
-    })
-  })
-})

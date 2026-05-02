@@ -7,7 +7,6 @@ import { Effect, Exit, Layer } from "effect"
 
 import { completeCommand } from "./complete.ts"
 import { failCommand } from "./fail.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import { makeFsServiceTest } from "../layers/fs.ts"
 import { makeOutputServiceSilent } from "../layers/output.ts"
@@ -120,85 +119,3 @@ describe("failCommand (unit — fake DB)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 3. parseArgs — complete/fail routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — complete", () => {
-  it("parses required flags", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["complete", "task_abc", "--run", "run_xyz", "--token", "1"]),
-    )
-    expect(result).toMatchObject({
-      command: "complete",
-      taskId: "task_abc",
-      run: "run_xyz",
-      token: 1,
-      resultFile: undefined,
-    })
-  })
-
-  it("parses --result-file flag", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "complete",
-        "task_abc",
-        "--run",
-        "run_xyz",
-        "--token",
-        "2",
-        "--result-file",
-        "/tmp/res.json",
-      ]),
-    )
-    expect(result).toMatchObject({
-      command: "complete",
-      taskId: "task_abc",
-      token: 2,
-      resultFile: "/tmp/res.json",
-    })
-  })
-
-  it("routes 'complete --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["complete", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "complete" })
-  })
-
-  it("parses --token as a number", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["complete", "task_abc", "--run", "run_xyz", "--token", "42"]),
-    )
-    expect(result).toMatchObject({ command: "complete", token: 42 })
-  })
-})
-
-describe("parseArgs — fail", () => {
-  it("parses required flags", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["fail", "task_abc", "--run", "run_xyz", "--token", "1"]),
-    )
-    expect(result).toMatchObject({
-      command: "fail",
-      taskId: "task_abc",
-      run: "run_xyz",
-      token: 1,
-      reason: undefined,
-    })
-  })
-
-  it("parses --reason flag", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["fail", "task_abc", "--run", "run_xyz", "--token", "1", "--reason", "timeout"]),
-    )
-    expect(result).toMatchObject({
-      command: "fail",
-      taskId: "task_abc",
-      reason: "timeout",
-    })
-  })
-
-  it("routes 'fail --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["fail", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "fail" })
-  })
-})

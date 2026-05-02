@@ -7,7 +7,6 @@ import { Effect, Exit, Layer } from "effect"
 
 import { runRegisterCommand, runEndCommand } from "./run.ts"
 import { inspectRunCommand } from "./inspect.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import { makeIdServiceTest } from "../layers/ids.ts"
 import { makeOutputServiceSilent } from "../layers/output.ts"
@@ -98,93 +97,3 @@ describe("inspectRunCommand (unit — fake DB)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 3. parseArgs — run and inspect run routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — run and inspect run", () => {
-  it("parses 'run register --agent-kind envy'", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["run", "register", "--agent-kind", "envy"]),
-    )
-    expect(result).toMatchObject({ command: "run:register", agentKind: "envy" })
-  })
-
-  it("parses all optional flags for run register", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "run",
-        "register",
-        "--agent-kind",
-        "envy",
-        "--scope",
-        "repo:work/foo",
-        "--cwd",
-        "/home/user/foo",
-        "--session-id",
-        "sess123",
-        "--parent-run",
-        "run_parent",
-      ]),
-    )
-    expect(result).toMatchObject({
-      command: "run:register",
-      agentKind: "envy",
-      scopeId: "repo:work/foo",
-      cwd: "/home/user/foo",
-      sessionId: "sess123",
-      parentRun: "run_parent",
-    })
-  })
-
-  it("parses 'run end --run run_abc' with no --status (defaults to undefined)", async () => {
-    const result = await Effect.runPromise(parseArgs(["run", "end", "--run", "run_abc"]))
-    expect(result).toMatchObject({ command: "run:end", run: "run_abc", status: undefined })
-  })
-
-  it("parses 'run end --run run_abc --status failed --summary foo'", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["run", "end", "--run", "run_abc", "--status", "failed", "--summary", "foo"]),
-    )
-    expect(result).toMatchObject({
-      command: "run:end",
-      run: "run_abc",
-      status: "failed",
-      summary: "foo",
-    })
-  })
-
-  it("defaults run:end status to 'ended' when --status is not provided", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["run", "end", "--run", "run_abc"]),
-    )
-    expect(result).toMatchObject({ command: "run:end", status: undefined })
-  })
-
-  it("passes the raw --status value through (validation happens in command)", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["run", "end", "--run", "run_abc", "--status", "unknown_val"]),
-    )
-    expect(result).toMatchObject({ command: "run:end", status: "unknown_val" })
-  })
-
-  it("routes 'run register --help' to help", async () => {
-    const result = await Effect.runPromise(parseArgs(["run", "register", "--help"]))
-    expect(result).toMatchObject({ command: "help" })
-  })
-
-  it("routes 'run end --help' to help", async () => {
-    const result = await Effect.runPromise(parseArgs(["run", "end", "--help"]))
-    expect(result).toMatchObject({ command: "help" })
-  })
-
-  it("parses 'inspect run <id>'", async () => {
-    const result = await Effect.runPromise(parseArgs(["inspect", "run", "run_abc"]))
-    expect(result).toMatchObject({ command: "inspect:run", id: "run_abc" })
-  })
-
-  it("routes 'inspect run --help' to help", async () => {
-    const result = await Effect.runPromise(parseArgs(["inspect", "run", "--help"]))
-    expect(result).toMatchObject({ command: "help" })
-  })
-})

@@ -1,5 +1,5 @@
 /**
- * Unit tests for pithos tailCommand and related parseArgs routing.
+ * Unit tests for pithos tailCommand.
  * Integration coverage lives in test/tail-sqlite.integration.test.ts and
  * test/tail-cli.integration.test.ts.
  */
@@ -8,7 +8,6 @@ import { describe, it, expect } from "vitest"
 import { Effect, Exit, Layer } from "effect"
 
 import { tailCommand } from "./tail.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../layers/output.ts"
 
@@ -80,37 +79,3 @@ describe("tailCommand (unit — fake DB)", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 2. parseArgs — tail routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — tail", () => {
-  it("parses 'tail' with no flags", async () => {
-    const result = await Effect.runPromise(parseArgs(["tail"]))
-    expect(result).toMatchObject({ command: "tail", limit: undefined })
-  })
-
-  it("parses --limit flag as integer", async () => {
-    const result = await Effect.runPromise(parseArgs(["tail", "--limit", "50"]))
-    expect(result).toMatchObject({ command: "tail", limit: 50 })
-  })
-
-  it("parses --limit 1", async () => {
-    const result = await Effect.runPromise(parseArgs(["tail", "--limit", "1"]))
-    expect(result).toMatchObject({ command: "tail", limit: 1 })
-  })
-
-  it("routes 'tail --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["tail", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "tail" })
-  })
-
-  it("routes 'tail -h' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["tail", "-h"]))
-    expect(result).toMatchObject({ command: "help", topic: "tail" })
-  })
-
-  it("fails VALIDATION_ERROR when --limit is not a number", async () => {
-    const exit = await runEff(parseArgs(["tail", "--limit", "abc"]))
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-})

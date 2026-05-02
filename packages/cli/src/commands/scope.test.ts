@@ -10,7 +10,6 @@ import { homedir } from "node:os"
 import { canonicalizePath, deriveScopeId, nameFromPath } from "../domain/scope.ts"
 import { scopeUpsertCommand } from "./scope.ts"
 import { inspectScopeCommand } from "./inspect.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import { makeOutputServiceSilent } from "../layers/output.ts"
 
@@ -131,51 +130,3 @@ describe("inspectScopeCommand (unit — fake DB)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 4. parseArgs — scope and inspect routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — scope and inspect", () => {
-  it("parses 'scope upsert --path /foo' with default kind=repo", async () => {
-    const result = await Effect.runPromise(parseArgs(["scope", "upsert", "--path", "/foo"]))
-    expect(result).toMatchObject({ command: "scope:upsert", kind: "repo", path: "/foo" })
-  })
-
-  it("parses 'scope upsert --kind worktree --path /foo'", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["scope", "upsert", "--kind", "worktree", "--path", "/foo"]),
-    )
-    expect(result).toMatchObject({ command: "scope:upsert", kind: "worktree", path: "/foo" })
-  })
-
-  it("parses 'scope upsert --kind global' (no path)", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["scope", "upsert", "--kind", "global"]),
-    )
-    expect(result).toMatchObject({ command: "scope:upsert", kind: "global", path: undefined })
-  })
-
-  it("routes 'scope upsert --help' to help", async () => {
-    const result = await Effect.runPromise(parseArgs(["scope", "upsert", "--help"]))
-    expect(result).toMatchObject({ command: "help" })
-  })
-
-  it("parses 'inspect scope <id>'", async () => {
-    const result = await Effect.runPromise(parseArgs(["inspect", "scope", "repo:work/foo"]))
-    expect(result).toMatchObject({ command: "inspect:scope", id: "repo:work/foo" })
-  })
-
-  it("routes 'inspect scope --help' to help", async () => {
-    const result = await Effect.runPromise(parseArgs(["inspect", "scope", "--help"]))
-    expect(result).toMatchObject({ command: "help" })
-  })
-
-  it("treats a flag token after --path as missing (returns undefined path)", async () => {
-    // --path --kind is invalid; --path value must not be a flag
-    const result = await Effect.runPromise(
-      parseArgs(["scope", "upsert", "--path", "--kind", "worktree"]),
-    )
-    // path is undefined; kind falls back to repo
-    expect(result).toMatchObject({ command: "scope:upsert", path: undefined })
-  })
-})

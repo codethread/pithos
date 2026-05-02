@@ -1,5 +1,5 @@
 /**
- * Unit tests for pithos briefingCommand and parseArgs routing.
+ * Unit tests for pithos briefingCommand.
  * Integration coverage lives in test/briefing-sqlite.integration.test.ts and
  * test/briefing-cli.integration.test.ts.
  */
@@ -8,7 +8,6 @@ import { describe, it, expect } from "vitest"
 import { Effect, Exit, Layer } from "effect"
 
 import { briefingCommand, BRIEFING_SQL } from "./briefing.ts"
-import { parseArgs } from "../cli/args.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import type { DbRow } from "../services/db.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../layers/output.ts"
@@ -356,28 +355,3 @@ describe("briefingCommand (unit — fake DB)", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// parseArgs — briefing routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — briefing", () => {
-  it("parses 'briefing' with no flags", async () => {
-    const result = await Effect.runPromise(parseArgs(["briefing"]))
-    expect(result).toMatchObject({ command: "briefing", agent: undefined })
-  })
-
-  it("parses --agent pandora", async () => {
-    const result = await Effect.runPromise(parseArgs(["briefing", "--agent", "pandora"]))
-    expect(result).toMatchObject({ command: "briefing", agent: "pandora" })
-  })
-
-  it("routes 'briefing --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["briefing", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "briefing" })
-  })
-
-  it("routes 'briefing -h' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["briefing", "-h"]))
-    expect(result).toMatchObject({ command: "help", topic: "briefing" })
-  })
-})

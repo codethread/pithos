@@ -1,7 +1,7 @@
+import { Command, CliConfig } from "@effect/cli"
+import { NodeContext, NodeRuntime } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
-import { NodeRuntime } from "@effect/platform-node"
-import { parseArgs } from "./cli/args.ts"
-import { dispatch } from "./cli/dispatch.ts"
+import { pithosCommand } from "./cli/commands.ts"
 import { exitCodeFor } from "./errors/errors.ts"
 import { DbServiceLive, makeDbServiceTest } from "./layers/db.ts"
 import { IdServiceLive } from "./layers/ids.ts"
@@ -9,35 +9,44 @@ import { FsServiceLive } from "./layers/fs.ts"
 import { OutputServiceLive } from "./layers/output.ts"
 import { LoggerLive } from "./layers/logger.ts"
 import { OutputService } from "./services/output.ts"
+import { VERSION } from "./version.ts"
 
 // ---------------------------------------------------------------------------
-// Help / version fast path: skip DB acquisition so `pithos --help` never
-// needs a valid database file.
+// Help / version fast path
 // ---------------------------------------------------------------------------
 
 const rawArgs = process.argv.slice(2)
 
 /**
- * Returns true when the raw argv is a help or version invocation.
- * These commands never touch the DB, so we avoid opening SQLite entirely.
+ * Returns true when the invocation will never reach a command handler that
+ * needs the DB. @effect/cli handles --help, --version, and no-args internally
+ * without calling command handlers, so we skip the heavyweight SqliteClient
+ * acquisition and provide a no-op stub instead.
  */
-const isHelpOrVersion = (argv: readonly string[]): boolean => {
-  const first = argv[0]
-  if (!first) return true // no args → show help
-  if (first === "--help" || first === "-h" || first === "--version" || first === "-v" || first === "help") return true
-  // Subcommand help: --help or -h appears anywhere in the args
-  return argv.includes("--help") || argv.includes("-h")
-}
+const isNoDbNeeded = (argv: readonly string[]): boolean =>
+  argv.length === 0 ||
+  argv.includes("--help") ||
+  argv.includes("-h") ||
+  argv.includes("--version")
+
+// ---------------------------------------------------------------------------
+// CLI runner
+// ---------------------------------------------------------------------------
+
+const cli = Command.run(pithosCommand, {
+  name: "Pithos",
+  version: VERSION,
+  executable: "pithos",
+})
 
 // ---------------------------------------------------------------------------
 // Program
 // ---------------------------------------------------------------------------
 
-const program = Effect.gen(function* () {
-  const args = yield* parseArgs(rawArgs)
-  yield* dispatch(args)
-}).pipe(
-  // catchTag runs inside the provided context so OutputService is available.
+const program = cli(process.argv).pipe(
+  // Catch PithosError to emit structured JSON on stderr and use our exit codes.
+  // ValidationError from the parser is handled by @effect/cli itself (prints
+  // to stderr and exits 1 via NodeRuntime.runMain's default teardown).
   Effect.catchTag("PithosError", (err) =>
     Effect.gen(function* () {
       const output = yield* OutputService
@@ -49,13 +58,15 @@ const program = Effect.gen(function* () {
   ),
   Effect.provide(
     Layer.mergeAll(
-      // For help/version commands, provide a no-op stub so dispatch type-checks
-      // without opening SQLite. The stub is never called for those commands.
-      isHelpOrVersion(rawArgs) ? makeDbServiceTest() : DbServiceLive,
+      isNoDbNeeded(rawArgs) ? makeDbServiceTest() : DbServiceLive,
       IdServiceLive,
       FsServiceLive,
       OutputServiceLive,
       LoggerLive,
+      // Provides FileSystem, Path, Terminal required by @effect/cli internals.
+      NodeContext.layer,
+      // Keep built-ins visible (--help/-h, --version) in OPTIONS section.
+      CliConfig.layer({ showBuiltIns: true }),
     ),
   ),
 )

@@ -101,6 +101,11 @@ describe("pithos tail (CLI process)", () => {
     expect(result.exitCode).toBe(2)
   })
 
+  it("exits 2 when --limit exceeds 1000", async () => {
+    const result = await runCli(BIN, ["tail", "--limit", "1001"], env)
+    expect(result.exitCode).toBe(2)
+  })
+
   it("shows help on --help", async () => {
     const stdout = await runCliOk(BIN, ["tail", "--help"], env)
     expect(stdout).toContain("pithos tail")

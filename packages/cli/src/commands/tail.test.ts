@@ -58,6 +58,12 @@ describe("tailCommand (unit — fake DB)", () => {
     expect(Exit.isFailure(exit)).toBe(true)
   })
 
+  it("fails VALIDATION_ERROR when limit exceeds MAX_LIMIT (1000)", async () => {
+    const layer = Layer.merge(makeDbServiceTest(), silentOutput)
+    const exit = await runEff(Effect.provide(tailCommand({ limit: 1001 }), layer))
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
   it("output includes ok, count, and events fields", async () => {
     const out = makeOutputServiceTest()
     const layer = Layer.merge(makeDbServiceTest(), out.layer)

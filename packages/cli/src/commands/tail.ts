@@ -3,6 +3,7 @@ import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 import { withCommandObservability } from "../layers/metrics.ts"
+import { EventRow } from "../db/rows.ts"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -62,7 +63,17 @@ export const tailCommand = (
       return
     }
 
-    const limit = Math.min(limitVal, MAX_LIMIT)
+    if (limitVal > MAX_LIMIT) {
+      yield* Effect.fail(
+        new PithosError({
+          code: "VALIDATION_ERROR",
+          message: `--limit exceeds maximum of ${MAX_LIMIT}, got: ${limitVal}`,
+        }),
+      )
+      return
+    }
+
+    const limit = limitVal
 
     const db = yield* DbService
     const output = yield* OutputService
@@ -70,16 +81,31 @@ export const tailCommand = (
     // Fetch the N most recent events, then return them oldest-first for stable
     // chronological reading. The subquery selects DESC (newest first, for the
     // LIMIT cut), then the outer query re-orders ASC.
-    const rows = yield* db.query(
+    const rawRows = yield* db.query(
       `SELECT * FROM (SELECT * FROM events ORDER BY id DESC LIMIT ?) ORDER BY id ASC`,
       [limit],
     )
 
-    yield* Effect.logDebug("tail complete").pipe(
-      Effect.annotateLogs({ limit: String(limit), count: String(rows.length) }),
+    // Decode each row against EventRow schema — DB rows are an IO boundary.
+    // A shape violation is an infrastructure/contract fault (INTERNAL_ERROR),
+    // not a user mistake, so we don't use VALIDATION_ERROR here.
+    const events = yield* Effect.forEach(rawRows, (row) =>
+      Schema.decodeUnknown(EventRow)(row).pipe(
+        Effect.mapError(
+          () =>
+            new PithosError({
+              code: "INTERNAL_ERROR",
+              message: `Unexpected event row shape from DB`,
+            }),
+        ),
+      ),
     )
 
-    yield* output.print(JSON.stringify({ ok: true, count: rows.length, events: rows }))
+    yield* Effect.logDebug("tail complete").pipe(
+      Effect.annotateLogs({ limit: String(limit), count: String(events.length) }),
+    )
+
+    yield* output.print(JSON.stringify({ ok: true, count: events.length, events }))
   }).pipe(
     Effect.withLogSpan("pithos.tail"),
     withCommandObservability("tail"),

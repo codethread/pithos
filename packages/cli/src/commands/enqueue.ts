@@ -112,19 +112,21 @@ export const enqueueCommand = (
 
     const id = yield* ids.generate("task")
 
-    yield* db.transaction((tx) => {
-      tx.run(
-        `INSERT INTO tasks
-           (id, scope_id, capability, status, title, body, parent_id, created_by_run_id)
-         VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`,
-        [id, scope, capability, title, body, opts.parentId ?? null, opts.run ?? null],
-      )
-      tx.run(
-        `INSERT INTO events (task_id, actor_run_id, type, payload_json)
-         VALUES (?, ?, 'task.created', ?)`,
-        [id, opts.run ?? null, JSON.stringify({ scope_id: scope, capability, title })],
-      )
-    })
+    yield* db.withTransaction(
+      Effect.gen(function* () {
+        yield* db.run(
+          `INSERT INTO tasks
+             (id, scope_id, capability, status, title, body, parent_id, created_by_run_id)
+           VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`,
+          [id, scope, capability, title, body, opts.parentId ?? null, opts.run ?? null],
+        )
+        yield* db.run(
+          `INSERT INTO events (task_id, actor_run_id, type, payload_json)
+           VALUES (?, ?, 'task.created', ?)`,
+          [id, opts.run ?? null, JSON.stringify({ scope_id: scope, capability, title })],
+        )
+      }),
+    )
 
     const rows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [id])
 

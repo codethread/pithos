@@ -1,7 +1,8 @@
-import { Effect, Metric } from "effect"
+import { Effect, Metric, Schema } from "effect"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { TaskRow } from "../db/rows.ts"
 import { tasksClaimedCounter, withCommandObservability } from "../layers/metrics.ts"
 
 // ---------------------------------------------------------------------------
@@ -84,54 +85,60 @@ export const claimCommand = (
     }
 
     // Atomic claim: single transaction, no select-then-update race.
-    // tx.query uses .all() which returns rows — correct for UPDATE ... RETURNING.
-    const claimedTask = yield* db.transaction((tx) => {
-      const rows = tx.query(
-        `UPDATE tasks
-         SET
-           status             = 'claimed',
-           lease_owner_run_id = ?,
-           lease_until        = strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '+' || ? || ' minutes')),
-           fencing_token      = fencing_token + 1,
-           attempts           = attempts + 1,
-           updated_at         = datetime('now')
-         WHERE id = (
-           SELECT id FROM tasks
-           WHERE status     = 'queued'
-             AND scope_id   = ?
-             AND capability = ?
-           ORDER BY created_at ASC, id ASC
-           LIMIT 1
-         )
-         RETURNING *`,
-        [runId, leaseMinutes, scope, capability],
-      )
+    const claimedTask = yield* db.withTransaction(
+      Effect.gen(function* () {
+        const rows = yield* db.query(
+          `UPDATE tasks
+           SET
+             status             = 'claimed',
+             lease_owner_run_id = ?,
+             lease_until        = strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '+' || ? || ' minutes')),
+             fencing_token      = fencing_token + 1,
+             attempts           = attempts + 1,
+             updated_at         = datetime('now')
+           WHERE id = (
+             SELECT id FROM tasks
+             WHERE status     = 'queued'
+               AND scope_id   = ?
+               AND capability = ?
+             ORDER BY created_at ASC, id ASC
+             LIMIT 1
+           )
+           RETURNING *`,
+          [runId, leaseMinutes, scope, capability],
+        )
 
-      if (rows.length === 0) return null
+        if (rows.length === 0) return null
 
-      const task = rows[0]!
+        // Decode the returned row via Schema to get typed field access.
+        const task = yield* Schema.decodeUnknown(TaskRow)(rows[0]!).pipe(
+          Effect.mapError(
+            () => new PithosError({ code: "INTERNAL_ERROR", message: "TaskRow shape violation from DB" }),
+          ),
+        )
 
-      tx.run(
-        `UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`,
-        [task.id, runId],
-      )
+        yield* db.run(
+          `UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`,
+          [task.id, runId],
+        )
 
-      tx.run(
-        `INSERT INTO events (task_id, actor_run_id, type, payload_json)
-         VALUES (?, ?, 'task.claimed', ?)`,
-        [
-          task.id,
-          runId,
-          JSON.stringify({
-            run_id: runId,
-            fencing_token: task.fencing_token,
-            lease_until: task.lease_until,
-          }),
-        ],
-      )
+        yield* db.run(
+          `INSERT INTO events (task_id, actor_run_id, type, payload_json)
+           VALUES (?, ?, 'task.claimed', ?)`,
+          [
+            task.id,
+            runId,
+            JSON.stringify({
+              run_id: runId,
+              fencing_token: task.fencing_token,
+              lease_until: task.lease_until,
+            }),
+          ],
+        )
 
-      return task
-    })
+        return task
+      }),
+    )
 
     if (claimedTask === null) {
       yield* Effect.logDebug("no claimable work").pipe(
@@ -145,7 +152,7 @@ export const claimCommand = (
 
     yield* Metric.increment(tasksClaimedCounter)
     yield* Effect.logDebug("task claimed").pipe(
-      Effect.annotateLogs({ taskId: String(claimedTask.id), runId }),
+      Effect.annotateLogs({ taskId: claimedTask.id, runId }),
     )
     yield* output.print(JSON.stringify({ ok: true, task: claimedTask }))
   }).pipe(

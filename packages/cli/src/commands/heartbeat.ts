@@ -2,6 +2,7 @@ import { Effect, Metric, Schema } from "effect"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
+import { RunRow } from "../db/rows.ts"
 import {
   heartbeatsWrittenCounter,
   heartbeatsThrottledCounter,
@@ -118,83 +119,97 @@ export const heartbeatCommand = (
     const db = yield* DbService
     const output = yield* OutputService
 
-    type TxResult =
-      | { readonly kind: "not_found" }
-      | { readonly kind: "throttled" }
-      | { readonly kind: "stale_token" }
-      | { readonly kind: "success" }
-      | { readonly kind: "success_with_task"; readonly task: Record<string, unknown> }
-
-    const txResult = yield* db.transaction((tx): TxResult => {
-      // 1. Check run exists
-      const runRows = tx.query(
-        "SELECT id, status, last_heartbeat_at FROM runs WHERE id = ?",
-        [runId],
-      )
-      if (runRows.length === 0) return { kind: "not_found" }
-
-      const run = runRows[0]!
-      const lastHeartbeatAt = run.last_heartbeat_at as string | null
-
-      // 2. If task+token provided, validate fencing token BEFORE throttle and
-      //    BEFORE any writes — stale token is always rejected even when throttled.
-      if (opts.task !== undefined && opts.token !== undefined) {
-        const tokenRows = tx.query(
-          `SELECT id FROM tasks
-           WHERE id = ?
-             AND lease_owner_run_id = ?
-             AND fencing_token = ?
-             AND status IN ('claimed', 'running')`,
-          [opts.task, runId, opts.token],
+    const txResult = yield* db.withTransaction(
+      Effect.gen(function* () {
+        // 1. Check run exists and decode for typed field access.
+        const runRows = yield* db.query(
+          "SELECT * FROM runs WHERE id = ?",
+          [runId],
         )
-        if (tokenRows.length === 0) return { kind: "stale_token" }
-      }
+        if (runRows.length === 0) return { kind: "not_found" }
 
-      // 3. Check throttle — skip writes if within window and not a lifecycle boundary
-      if (opts.throttleSeconds !== undefined && lastHeartbeatAt !== null) {
-        const isLifecycle = hook !== null && LIFECYCLE_HOOKS.has(hook)
-        if (!isLifecycle) {
-          const elapsedSeconds =
-            (Date.now() - new Date(normalizeSqliteUtc(lastHeartbeatAt)).getTime()) / 1000
-          if (elapsedSeconds < opts.throttleSeconds) {
-            return { kind: "throttled" }
+        const run = yield* Schema.decodeUnknown(RunRow)(runRows[0]!).pipe(
+          Effect.mapError(
+            () =>
+              new PithosError({ code: "INTERNAL_ERROR", message: "RunRow shape violation from DB" }),
+          ),
+        )
+        const lastHeartbeatAt = run.last_heartbeat_at
+
+        // 2. If task+token provided, validate fencing token BEFORE throttle and
+        //    BEFORE any writes — stale token is always rejected even when throttled.
+        if (opts.task !== undefined && opts.token !== undefined) {
+          const tokenRows = yield* db.query(
+            `SELECT id FROM tasks
+             WHERE id = ?
+               AND lease_owner_run_id = ?
+               AND fencing_token = ?
+               AND status IN ('claimed', 'running')`,
+            [opts.task, runId, opts.token],
+          )
+          if (tokenRows.length === 0) return { kind: "stale_token" }
+        }
+
+        // 3. Check throttle — skip writes if within window and not a lifecycle boundary.
+        if (opts.throttleSeconds !== undefined && lastHeartbeatAt !== null) {
+          const isLifecycle = hook !== null && LIFECYCLE_HOOKS.has(hook)
+          if (!isLifecycle) {
+            const elapsedSeconds =
+              (Date.now() - new Date(normalizeSqliteUtc(lastHeartbeatAt)).getTime()) / 1000
+            if (elapsedSeconds < opts.throttleSeconds) {
+              return { kind: "throttled" }
+            }
           }
         }
-      }
 
-      // 4. If task+token provided, UPDATE task FIRST so the run write only
-      //    happens after we know the token is still valid.  If the UPDATE
-      //    finds 0 rows (token invalidated between the pre-check and now),
-      //    throw a sentinel so better-sqlite3 rolls back the whole transaction
-      //    (nothing has been written yet at this point).
-      if (opts.task !== undefined && opts.token !== undefined) {
-        const taskRows = tx.query(
-          `UPDATE tasks
-           SET
-             status      = 'running',
-             lease_until = strftime('%Y-%m-%dT%H:%M:%SZ',
-                             datetime('now', '+${String(LEASE_EXTENSION_MINUTES)} minutes')),
-             updated_at  = datetime('now')
-           WHERE id = ?
-             AND lease_owner_run_id = ?
-             AND fencing_token = ?
-             AND status IN ('claimed', 'running')
-           RETURNING *`,
-          [opts.task, runId, opts.token],
-        )
-        if (taskRows.length === 0) {
-          // Pre-check passed but UPDATE found no row: concurrent reclaim/sweep
-          // invalidated the token between steps 2 and 4.  Throw to roll back
-          // the entire transaction (no writes committed yet).
-          // Throw intentionally: this callback runs inside db.transaction() which
-          // is the only rollback mechanism for better-sqlite3 synchronous
-          // transactions.  The throw is caught by the transaction's catch handler
-          // and converted to a PithosError{STALE_TOKEN}.
-          throw new Error("PITHOS_STALE_TOKEN_RACE")
+        // 4. If task+token provided, UPDATE task FIRST so the run write only
+        //    happens after we know the token is still valid.  If the UPDATE
+        //    finds 0 rows (token invalidated between the pre-check and now),
+        //    fail the Effect to trigger a rollback (no writes committed yet).
+        if (opts.task !== undefined && opts.token !== undefined) {
+          const taskRows = yield* db.query(
+            `UPDATE tasks
+             SET
+               status      = 'running',
+               lease_until = strftime('%Y-%m-%dT%H:%M:%SZ',
+                               datetime('now', '+${String(LEASE_EXTENSION_MINUTES)} minutes')),
+               updated_at  = datetime('now')
+             WHERE id = ?
+               AND lease_owner_run_id = ?
+               AND fencing_token = ?
+               AND status IN ('claimed', 'running')
+             RETURNING *`,
+            [opts.task, runId, opts.token],
+          )
+          if (taskRows.length === 0) {
+            // Pre-check passed but UPDATE found no row: concurrent reclaim/sweep
+            // invalidated the token between steps 2 and 4.  Fail to roll back
+            // the entire transaction (no writes committed yet).
+            return yield* Effect.fail(
+              new PithosError({
+                code: "STALE_TOKEN",
+                message: "concurrent reclaim invalidated the token",
+              }),
+            )
+          }
+
+          // 5. Task write succeeded — now update run heartbeat.
+          yield* db.run(
+            `UPDATE runs
+             SET
+               status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
+               last_heartbeat_at = datetime('now'),
+               last_hook         = ?,
+               updated_at        = datetime('now')
+             WHERE id = ?`,
+            [hook, runId],
+          )
+
+          return { kind: "success_with_task", task: taskRows[0]! }
         }
 
-        // 5. Task write succeeded — now update run heartbeat.
-        tx.run(
+        // 4b. No task — update run heartbeat unconditionally.
+        yield* db.run(
           `UPDATE runs
            SET
              status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
@@ -205,26 +220,12 @@ export const heartbeatCommand = (
           [hook, runId],
         )
 
-        return { kind: "success_with_task", task: taskRows[0]! }
-      }
-
-      // 4b. No task — update run heartbeat unconditionally.
-      tx.run(
-        `UPDATE runs
-         SET
-           status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
-           last_heartbeat_at = datetime('now'),
-           last_hook         = ?,
-           updated_at        = datetime('now')
-         WHERE id = ?`,
-        [hook, runId],
-      )
-
-      return { kind: "success" }
-    }).pipe(
-      // Catch the mid-transaction race: the throw-to-rollback sentinel is converted
-      // by db.transaction into PithosError{STALE_TOKEN}. Increment the counter so
-      // the race path is visible in metrics, then re-raise the error unchanged.
+        return { kind: "success" }
+      }),
+    ).pipe(
+      // Catch the mid-transaction STALE_TOKEN error from the concurrent-reclaim
+      // path: increment the counter so the race path is visible in metrics,
+      // then re-raise the error unchanged.
       Effect.tapError((e) =>
         e.code === "STALE_TOKEN"
           ? Effect.all([

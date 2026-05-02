@@ -1,6 +1,8 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { DbService } from "../services/db.ts"
+import { MigrationRow } from "./rows.ts"
 import type { PithosError } from "../errors/errors.ts"
+import { PithosError as PE } from "../errors/errors.ts"
 
 // ---------------------------------------------------------------------------
 // Migration definitions
@@ -125,19 +127,39 @@ export const runMigrations: Effect.Effect<void, PithosError, DbService> = Effect
 
     // Determine which versions have already been applied.
     const appliedRows = yield* db.query("SELECT version FROM schema_migrations")
-    const appliedVersions = new Set(appliedRows.map((r) => r.version as number))
+
+    // Decode version numbers via Schema to eliminate the `as number` cast.
+    const appliedVersions = new Set(
+      yield* Effect.all(
+        appliedRows.map((r) =>
+          Schema.decodeUnknown(MigrationRow)(r).pipe(
+            Effect.map((row) => row.version),
+            Effect.mapError(
+              () =>
+                new PE({
+                  code: "INTERNAL_ERROR",
+                  message: "schema_migrations row shape violation",
+                }),
+            ),
+          ),
+        ),
+      ),
+    )
 
     // Apply each unapplied migration inside a single atomic transaction.
     for (const migration of MIGRATIONS) {
       if (!appliedVersions.has(migration.version)) {
-        yield* db.transaction((tx) => {
-          for (const sql of migration.statements) {
-            tx.run(sql)
-          }
-          tx.run("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", [
-            migration.version,
-          ])
-        })
+        yield* db.withTransaction(
+          Effect.gen(function* () {
+            for (const sql of migration.statements) {
+              yield* db.run(sql)
+            }
+            yield* db.run(
+              "INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)",
+              [migration.version],
+            )
+          }),
+        )
       }
     }
   },

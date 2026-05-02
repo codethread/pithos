@@ -86,27 +86,29 @@ export const artifactAddCommand = (
     const output = yield* OutputService
     const artifactId = yield* ids.generate("artifact")
 
-    const artifact = yield* db.transaction((tx): Record<string, unknown> => {
-      const rows = tx.query(
-        `INSERT INTO artifacts (id, task_id, run_id, kind, title, body)
-         VALUES (?, ?, ?, ?, ?, ?)
-         RETURNING *`,
-        [artifactId, opts.task, opts.run, opts.kind, opts.title, body],
+    const artifactRows = yield* db.withTransaction(
+      Effect.gen(function* () {
+        return yield* db.query(
+          `INSERT INTO artifacts (id, task_id, run_id, kind, title, body)
+           VALUES (?, ?, ?, ?, ?, ?)
+           RETURNING *`,
+          [artifactId, opts.task, opts.run, opts.kind, opts.title, body],
+        )
+      }),
+    )
+
+    if (artifactRows.length === 0) {
+      // Should never happen — RETURNING * always returns the inserted row.
+      yield* Effect.fail(
+        new PithosError({
+          code: "INTERNAL_ERROR",
+          message: "artifact insert returned no rows",
+        }),
       )
+      return
+    }
 
-      if (rows.length === 0) {
-        // Should never happen — RETURNING * always returns the inserted row.
-        // Throw intentionally: this callback runs inside db.transaction() which
-        // is adapted by Effect.try; throwing is the only way to signal failure
-        // from a synchronous non-generator callback and is caught by the
-        // transaction's catch handler, which converts it to a PithosError.
-        throw new Error("artifact insert returned no rows")
-      }
-
-      return rows[0]!
-    })
-
-    yield* output.print(JSON.stringify({ ok: true, artifact }))
+    yield* output.print(JSON.stringify({ ok: true, artifact: artifactRows[0] }))
   }).pipe(
     Effect.withLogSpan("pithos.artifact.add"),
     withCommandObservability("artifact.add"),

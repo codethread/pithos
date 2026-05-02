@@ -263,7 +263,7 @@ describe("DbService placeholder", () => {
     expect(result).toEqual([])
   })
 
-  it("fake run returns zero changes", async () => {
+  it("fake run returns void", async () => {
     const result = await runWith(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -271,18 +271,21 @@ describe("DbService placeholder", () => {
       }),
       makeDbServiceTest(),
     )
-    expect(result.changes).toBe(0)
+    // db.run returns void — just verify it succeeds
+    expect(result).toBeUndefined()
   })
 
-  it("fake transaction wraps a synchronous function with TxDb access", async () => {
+  it("fake withTransaction passes through the inner Effect result", async () => {
     const seeded = [{ id: "task_tx", status: "queued" }]
     const result = await runWith(
       Effect.gen(function* () {
         const db = yield* DbService
-        return yield* db.transaction((tx) => {
-          const rows = tx.query("SELECT * FROM tasks")
-          return rows.length
-        })
+        return yield* db.withTransaction(
+          Effect.gen(function* () {
+            const rows = yield* db.query("SELECT * FROM tasks")
+            return rows.length
+          }),
+        )
       }),
       makeDbServiceTest(new Map([["SELECT * FROM tasks", seeded]])),
     )

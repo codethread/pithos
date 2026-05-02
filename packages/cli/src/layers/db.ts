@@ -1,7 +1,8 @@
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
-import Database from "better-sqlite3"
+import { SqlClient } from "@effect/sql"
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { DbService } from "../services/db.ts"
 import type { DbRow } from "../services/db.ts"
 import { PithosError } from "../errors/errors.ts"
@@ -11,99 +12,81 @@ import { resolveDbPath } from "../db/connection.ts"
 // Helpers
 // ---------------------------------------------------------------------------
 
-const wrapDbError =
-  (context: string) =>
-  (e: unknown): PithosError =>
-    new PithosError({ code: "USER_ERROR", message: `DB error (${context}): ${String(e)}` })
+const wrapSqlError = (e: unknown): PithosError =>
+  e instanceof PithosError
+    ? e
+    : new PithosError({
+        code: "USER_ERROR",
+        message: `DB error: ${e instanceof Error ? e.message : "unexpected DB failure"}`,
+      })
 
 // ---------------------------------------------------------------------------
 // Live layer
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a live SQLite DbService layer backed by better-sqlite3.
+ * Creates a live SQLite DbService layer backed by @effect/sql-sqlite-node.
  *
- * Uses `Layer.scoped` so the connection is properly closed when the scope
- * exits (process end, test teardown, etc.). The parent directory is created
- * recursively if it does not exist. Foreign-key enforcement is enabled for
- * every connection so REFERENCES constraints are actually enforced.
+ * The parent directory is created before the connection is opened.
+ * Foreign-key enforcement is enabled on the underlying connection.
+ * The SqliteClient scope is tied to the DbService scope so the connection
+ * is closed when the layer is released (process exit / test teardown).
  */
 export const makeDbServiceLive = (dbPath: string): Layer.Layer<DbService, PithosError> =>
   Layer.scoped(
     DbService,
     Effect.gen(function* () {
-      // Ensure the parent directory exists before opening the file.
+      // 1. Ensure the parent directory exists before opening the file.
       yield* Effect.try({
         try: () => mkdirSync(dirname(dbPath), { recursive: true }),
-        catch: wrapDbError("mkdir"),
+        catch: (e) =>
+          new PithosError({ code: "USER_ERROR", message: `DB mkdir error: ${String(e)}` }),
       })
 
-      // Acquire the DB connection; release it when the scope closes.
-      const db = yield* Effect.acquireRelease(
-        Effect.try({
-          try: () => {
-            const conn = new Database(dbPath)
-            conn.pragma("foreign_keys = ON")
-            return conn
-          },
-          catch: wrapDbError("open"),
-        }),
-        (conn) => Effect.sync(() => conn.close()),
+      // 2. Build the SqliteClient layer scoped to this layer's lifetime.
+      //    Layer.build returns Effect<Context<...>, E, Scope>; the Scope
+      //    is provided by Layer.scoped so the connection closes on release.
+      const sqliteCtx = yield* Layer.build(
+        SqliteClient.layer({ filename: dbPath }).pipe(
+          Layer.mapError(
+            (e) => new PithosError({ code: "USER_ERROR", message: `DB open error: ${e instanceof Error ? e.message : "open failed"}` }),
+          ),
+        ),
+      )
+      const sql = Context.get(sqliteCtx, SqlClient.SqlClient)
+
+      // 3. Enable foreign-key enforcement on the underlying connection.
+      //    PRAGMA foreign_keys = ON is a per-connection setting.
+      yield* sql.unsafe("PRAGMA foreign_keys = ON").pipe(
+        Effect.mapError(wrapSqlError),
       )
 
       return {
-        query: (sql, params) =>
-          Effect.try({
-            try: () => db.prepare(sql).all(...(params ?? [])) as DbRow[],
-            catch: wrapDbError(`query: ${sql.slice(0, 60)}`),
-          }),
+        query: (sqlStr, params) =>
+          // params cast: @effect/sql expects Primitive[] at the library boundary;
+          // our interface accepts unknown[] since all command values are valid SQLite
+          // primitives (string | number | null). The cast is intentional here.
+          sql.unsafe<DbRow>(sqlStr, params as never).pipe(
+            Effect.mapError(wrapSqlError),
+          ),
 
-        run: (sql, params) =>
-          Effect.try({
-            try: () => {
-              const result = db.prepare(sql).run(...(params ?? []))
-              return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
-            },
-            catch: wrapDbError(`run: ${sql.slice(0, 60)}`),
-          }),
+        run: (sqlStr, params) =>
+          sql.unsafe(sqlStr, params as never).pipe(
+            Effect.asVoid,
+            Effect.mapError(wrapSqlError),
+          ),
 
-        transaction: (fn) =>
-          Effect.try({
-            try: () => {
-              const txDb = {
-                query: (sql: string, params?: readonly unknown[]) =>
-                  db.prepare(sql).all(...(params ?? [])) as DbRow[],
-                run: (sql: string, params?: readonly unknown[]) => {
-                  const result = db.prepare(sql).run(...(params ?? []))
-                  return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
-                },
-              }
-              return db.transaction(() => fn(txDb))()
-            },
-            catch: (e) => {
-              if (e instanceof Error && e.message === "PITHOS_STALE_TOKEN_RACE") {
-                return new PithosError({
-                  code: "STALE_TOKEN",
-                  message: "Stale fencing token (race condition)",
-                })
-              }
-              // Any other throw from a transaction body signals an internal
-              // invariant violation (e.g. INSERT RETURNING * returned no rows),
-              // not a user mistake.  Classify as INTERNAL_ERROR so automated
-              // triage and agents are not misled into treating it as user error.
-              return new PithosError({
-                code: "INTERNAL_ERROR",
-                message: `DB integrity error (transaction): ${String(e)}`,
-              })
-            },
-          }),
+        withTransaction: (effect) =>
+          sql.withTransaction(effect).pipe(
+            Effect.mapError(wrapSqlError),
+          ),
       }
     }),
   )
 
 /**
  * Convenience live layer using the default/env-configured DB path.
- * Prefer `makeDbServiceLive(path)` in tests to control isolation.
+ * Prefer `makeDbServiceLive(path)` in tests for isolation.
  */
 export const DbServiceLive: Layer.Layer<DbService, PithosError> = makeDbServiceLive(resolveDbPath())
 
@@ -111,6 +94,15 @@ export const DbServiceLive: Layer.Layer<DbService, PithosError> = makeDbServiceL
 // Test helpers (kept in this module for co-location)
 // ---------------------------------------------------------------------------
 
+/**
+ * Fake DbService for unit tests.
+ *
+ * `query` returns seeded rows keyed by the raw SQL string (params ignored).
+ * `run` is a no-op (returns void).
+ * `withTransaction` runs the inner Effect directly with no real transaction.
+ *
+ * This allows fast unit tests of command validation/logic without SQLite.
+ */
 export const makeDbServiceTest = (
   seedRows: ReadonlyMap<string, readonly DbRow[]> = new Map(),
 ): Layer.Layer<DbService> => {
@@ -118,16 +110,9 @@ export const makeDbServiceTest = (
 
   return Layer.succeed(DbService, {
     query: (sql) => Effect.sync(() => rowStore.get(sql) ?? []),
-    run: () => Effect.succeed({ changes: 0, lastInsertRowid: 0 }),
-    transaction: (fn) =>
-      Effect.try({
-        try: () =>
-          fn({
-            query: (sql) => rowStore.get(sql) ?? [],
-            run: () => ({ changes: 0, lastInsertRowid: 0 }),
-          }),
-        catch: (e) =>
-          new PithosError({ code: "INTERNAL_ERROR", message: `Transaction failed: ${String(e)}` }),
-      }),
+    run: () => Effect.void,
+    // No-op transaction: runs the effect without BEGIN/COMMIT/ROLLBACK.
+    // Unit tests use this to verify logic without a real SQLite connection.
+    withTransaction: (effect) => effect,
   })
 }

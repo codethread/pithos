@@ -87,43 +87,41 @@ export const completeCommand = (
 
     const db = yield* DbService
 
-    type TxResult =
-      | { readonly kind: "stale_token" }
-      | { readonly kind: "success"; readonly task: Record<string, unknown> }
+    const txResult = yield* db.withTransaction(
+      Effect.gen(function* () {
+        const rows = yield* db.query(
+          `UPDATE tasks
+           SET
+             status       = 'done',
+             result_json  = ?,
+             completed_at = datetime('now'),
+             updated_at   = datetime('now')
+           WHERE id = ?
+             AND lease_owner_run_id = ?
+             AND fencing_token = ?
+             AND status IN ('claimed', 'running')
+           RETURNING *`,
+          [resultJson, taskId, runId, token],
+        )
 
-    const txResult = yield* db.transaction((tx): TxResult => {
-      const rows = tx.query(
-        `UPDATE tasks
-         SET
-           status       = 'done',
-           result_json  = ?,
-           completed_at = datetime('now'),
-           updated_at   = datetime('now')
-         WHERE id = ?
-           AND lease_owner_run_id = ?
-           AND fencing_token = ?
-           AND status IN ('claimed', 'running')
-         RETURNING *`,
-        [resultJson, taskId, runId, token],
-      )
+        if (rows.length === 0) return { kind: "stale_token" as const }
 
-      if (rows.length === 0) return { kind: "stale_token" }
+        const task = rows[0]!
 
-      const task = rows[0]!
+        yield* db.run(
+          `INSERT INTO events (task_id, actor_run_id, type, payload_json)
+           VALUES (?, ?, 'task.completed', ?)`,
+          [task.id, runId, JSON.stringify({ run_id: runId, fencing_token: token })],
+        )
 
-      tx.run(
-        `INSERT INTO events (task_id, actor_run_id, type, payload_json)
-         VALUES (?, ?, 'task.completed', ?)`,
-        [task.id, runId, JSON.stringify({ run_id: runId, fencing_token: token })],
-      )
+        yield* db.run(
+          `UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
+          [runId, taskId],
+        )
 
-      tx.run(
-        `UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
-        [runId, taskId],
-      )
-
-      return { kind: "success", task }
-    })
+        return { kind: "success" as const, task }
+      }),
+    )
 
     if (txResult.kind === "stale_token") {
       yield* Metric.increment(staleTokensCompleteCounter)

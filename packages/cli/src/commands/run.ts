@@ -59,30 +59,34 @@ export const runRegisterCommand = (
 
     const id = opts.run ?? (yield* ids.generate("run"))
 
-    // Use INSERT OR IGNORE so concurrent calls with the same explicit --run ID
-    // are race-safe: exactly one insertion wins; the loser silently skips.
-    // The lifecycle event is only appended for the winning insertion.
-    yield* db.transaction((tx) => {
-      const result = tx.run(
-        `INSERT OR IGNORE INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'starting')`,
-        [
-          id,
-          agentKind,
-          opts.scopeId ?? null,
-          opts.cwd ?? null,
-          opts.sessionId ?? null,
-          opts.parentRun ?? null,
-        ],
-      )
-      if (result.changes > 0) {
-        tx.run(
-          `INSERT INTO events (run_id, actor_run_id, type, payload_json)
-           VALUES (?, ?, 'run.registered', '{}')`,
-          [id, id],
+    // Use INSERT OR IGNORE ... RETURNING id so concurrent calls with the same
+    // explicit --run ID are race-safe: exactly one insertion wins; the loser
+    // gets an empty result. The lifecycle event is only appended for the
+    // winning insertion (rows.length > 0).
+    yield* db.withTransaction(
+      Effect.gen(function* () {
+        const insertedRows = yield* db.query(
+          `INSERT OR IGNORE INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, 'starting')
+           RETURNING id`,
+          [
+            id,
+            agentKind,
+            opts.scopeId ?? null,
+            opts.cwd ?? null,
+            opts.sessionId ?? null,
+            opts.parentRun ?? null,
+          ],
         )
-      }
-    })
+        if (insertedRows.length > 0) {
+          yield* db.run(
+            `INSERT INTO events (run_id, actor_run_id, type, payload_json)
+             VALUES (?, ?, 'run.registered', '{}')`,
+            [id, id],
+          )
+        }
+      }),
+    )
 
     const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id])
 
@@ -136,32 +140,36 @@ export const runEndCommand = (
     // Atomically check existence, update status, and insert lifecycle event.
     // Returns false when the run ID does not exist so we can emit NOT_FOUND
     // without a racy follow-up SELECT.
-    const exists = yield* db.transaction((tx) => {
-      const check = tx.query(`SELECT id FROM runs WHERE id = ?`, [runId])
-      if (check.length === 0) return false
-      const result = tx.run(
-        `UPDATE runs
-         SET   status       = ?,
-               last_summary = ?,
-               ended_at     = datetime('now'),
-               updated_at   = datetime('now')
-         WHERE id = ?
-           AND status NOT IN ('ended', 'failed', 'cancelled')`,
-        [status, opts.summary ?? null, runId],
-      )
-      if (result.changes > 0) {
-        tx.run(
-          `INSERT INTO events (run_id, actor_run_id, type, payload_json)
-           VALUES (?, ?, 'run.ended', ?)`,
-          [
-            runId,
-            runId,
-            JSON.stringify({ status, summary: opts.summary ?? null }),
-          ],
+    const exists = yield* db.withTransaction(
+      Effect.gen(function* () {
+        const check = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId])
+        if (check.length === 0) return false
+
+        const updatedRows = yield* db.query(
+          `UPDATE runs
+           SET   status       = ?,
+                 last_summary = ?,
+                 ended_at     = datetime('now'),
+                 updated_at   = datetime('now')
+           WHERE id = ?
+             AND status NOT IN ('ended', 'failed', 'cancelled')
+           RETURNING id`,
+          [status, opts.summary ?? null, runId],
         )
-      }
-      return true
-    })
+        if (updatedRows.length > 0) {
+          yield* db.run(
+            `INSERT INTO events (run_id, actor_run_id, type, payload_json)
+             VALUES (?, ?, 'run.ended', ?)`,
+            [
+              runId,
+              runId,
+              JSON.stringify({ status, summary: opts.summary ?? null }),
+            ],
+          )
+        }
+        return true
+      }),
+    )
 
     if (!exists) {
       yield* Effect.fail(

@@ -112,7 +112,7 @@
     **Vertical slice:** Implement `pithos sweep`, requeue expired tasks under `max_attempts`, dead-letter exhausted tasks, mark stale runs by heartbeat age, append events, tests for requeue and dead-letter paths.
 
 14. **Title:** Render a minimal Pandora briefing  
-    **Status:** Unbuilt  
+    **Status:** Built  
     **Type:** AFK  
     **Blocked by:** 7, 10, 11, 12, 13  
     **User stories covered:** US7  

@@ -95,7 +95,11 @@ export const artifactAddCommand = (
       )
 
       if (rows.length === 0) {
-        // Should never happen — RETURNING * always returns the inserted row
+        // Should never happen — RETURNING * always returns the inserted row.
+        // Throw intentionally: this callback runs inside db.transaction() which
+        // is adapted by Effect.try; throwing is the only way to signal failure
+        // from a synchronous non-generator callback and is caught by the
+        // transaction's catch handler, which converts it to a PithosError.
         throw new Error("artifact insert returned no rows")
       }
 

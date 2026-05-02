@@ -186,6 +186,10 @@ export const heartbeatCommand = (
           // Pre-check passed but UPDATE found no row: concurrent reclaim/sweep
           // invalidated the token between steps 2 and 4.  Throw to roll back
           // the entire transaction (no writes committed yet).
+          // Throw intentionally: this callback runs inside db.transaction() which
+          // is the only rollback mechanism for better-sqlite3 synchronous
+          // transactions.  The throw is caught by the transaction's catch handler
+          // and converted to a PithosError{STALE_TOKEN}.
           throw new Error("PITHOS_STALE_TOKEN_RACE")
         }
 

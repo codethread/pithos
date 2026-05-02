@@ -19,7 +19,7 @@
    **Vertical slice:** Add a small logging boundary for structured diagnostics, using Effect logging/spans for breadcrumbs, warnings, and debug context. Keep it distinct from CLI output so command contracts stay stable while observability can be turned up on demand.
 
 3. **Title:** Add metrics and spans for high-observability runs  
-   **Status:** Unimplemented  
+   **Status:** Implemented  
    **Type:** AFK  
    **Blocked by:** 1, 2  
    **Vertical slice:** Wire Effect metrics and spans into a first-class observability layer. Track command durations, task claim/heartbeat counts, stale-token failures, and sweep outcomes with OTLP-friendly composition.

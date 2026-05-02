@@ -48,8 +48,14 @@
    **Blocked by:** 5  
    **Vertical slice:** Replace the hand-rolled `better-sqlite3` layer with `@effect/sql-sqlite-node` (the official Effect SQLite adapter). Use `Schema.Class<T>` from `@effect/sql` for typed row decoding at the DB boundary — eliminating manual `unknown` casts and ad-hoc row validation. Note: `updateValues` is not supported by the adapter; raw SQL must be used for those queries. This task is blocked by task 5 (Effect.Schema adoption) so row schemas are defined consistently before wiring them into the SQL layer.
 
-8. **Title:** Add a declarative CLI parser layer  
+8. **Title:** Spike declarative CLI parser APIs  
    **Status:** Unimplemented  
    **Type:** AFK  
    **Blocked by:** none  
-   **Vertical slice:** Replace the hand-written `parseArgs` + hardcoded help strings in `dispatch.ts` with a declarative CLI parser library. Prefer `@effect/cli` (Effect's official CLI toolkit — generates both parsing and help text from a single command schema). If `@effect/cli` is too immature or missing features at time of implementation, fall back to `clipanion` (typed, generates `--help`, well-maintained). Once done: (a) drop `help-cli.integration.test.ts` — the library owns help correctness, and (b) delete all per-command `--help` snapshot tests. Keep only the agent-usability invariants (every command has `--help`/`-h`, help mentions required sections) as lightweight contract checks against the library's output.
+   **Vertical slice:** Create explicitly throwaway scratch code to investigate both `@effect/cli` and `clipanion` for Pithos-shaped command trees: nested subcommands (`scope upsert`, `run register`, `artifact add`, `inspect task <id>`), options, positional arguments, generated help, unknown-command behavior, and whether command execution can call Effect programs cleanly. This spike is allowed to add scratch files that are not wired into production and do not need to pass the normal test suite; the output is a short written recommendation in the queue item or an adjacent note explaining which library/API to use and why. Do not migrate production parser code in this slice.
+
+9. **Title:** Add a declarative CLI parser layer  
+   **Status:** Blocked  
+   **Type:** AFK  
+   **Blocked by:** 8  
+   **Vertical slice:** Replace the hand-written `parseArgs` + hardcoded help strings in `dispatch.ts` with the declarative CLI parser library selected by slice 8. Prefer `@effect/cli` if the spike proves it supports Pithos-shaped subcommands and generated help cleanly; otherwise use `clipanion` only with its full command-execution API, not a hybrid parser adapter. Once done: (a) drop `help-cli.integration.test.ts` — the library owns help correctness, and (b) delete all per-command `--help` snapshot tests. Keep only the agent-usability invariants (every command has `--help`/`-h`, help mentions required sections) as lightweight contract checks against the library's output.

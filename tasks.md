@@ -119,7 +119,7 @@
     **Vertical slice:** Implement `pithos briefing --agent pandora`, markdown output with `as_of_event_id`, sections for active/done/failed/stale based on current DB rows, tests for watermark and inclusion of completed artifact summary.
 
 15. **Title:** Provide agent-usable CLI help contracts  
-    **Status:** Unbuilt  
+    **Status:** Built  
     **Type:** AFK  
     **Blocked by:** 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14  
     **User stories covered:** US10  

@@ -1,5 +1,5 @@
 /**
- * Unit tests for pithos artifact. Integration coverage lives in test/artifact.integration.test.ts.
+ * Unit tests for pithos artifact. Integration coverage lives in test/artifact-*.integration.test.ts.
  */
 
 import { describe, it, expect } from "vitest"

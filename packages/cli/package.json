@@ -7,7 +7,7 @@
     "pithos": "./bin/pithos"
   },
   "scripts": {
-    "build": "tsc --build"
+    "build": "node scripts/build.mjs"
   },
   "dependencies": {
     "effect": "^3.21.2",

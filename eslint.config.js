@@ -7,7 +7,7 @@ import vitestPlugin from "@vitest/eslint-plugin";
 
 export default tsEslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "**/*.js.map"],
+    ignores: ["**/dist/**", "**/node_modules/**", "**/*.js.map", "**/scripts/*.mjs"],
   },
   eslintJs.configs.recommended,
   ...tsEslint.configs.recommendedTypeChecked,
@@ -16,7 +16,7 @@ export default tsEslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["eslint.config.js", "vitest.config.ts"],
+          allowDefaultProject: ["eslint.config.js", "vitest.config.ts", "vitest.global-setup.ts"],
         },
         tsconfigRootDir: import.meta.dirname,
       },

@@ -1,5 +1,5 @@
 /**
- * Unit tests for pithos claim. Integration coverage lives in test/claim.integration.test.ts.
+ * Unit tests for pithos claim. Integration coverage lives in test/claim-*.integration.test.ts.
  */
 
 import { describe, it, expect } from "vitest"

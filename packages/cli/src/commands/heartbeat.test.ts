@@ -1,5 +1,5 @@
 /**
- * Unit tests for pithos heartbeat. Integration coverage lives in test/heartbeat.integration.test.ts.
+ * Unit tests for pithos heartbeat. Integration coverage lives in test/heartbeat-*.integration.test.ts.
  */
 
 import { describe, it, expect } from "vitest"

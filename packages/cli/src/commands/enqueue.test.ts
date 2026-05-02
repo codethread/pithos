@@ -1,5 +1,5 @@
 /**
- * Unit tests for pithos enqueue. Integration coverage lives in test/enqueue.integration.test.ts.
+ * Unit tests for pithos enqueue. Integration coverage lives in test/enqueue-cli.integration.test.ts and test/enqueue-sqlite.integration.test.ts.
  */
 
 import { describe, it, expect } from "vitest"

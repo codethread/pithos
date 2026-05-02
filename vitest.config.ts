@@ -24,6 +24,7 @@ export default defineConfig({
           pool: "forks",
           testTimeout: 15000,
           teardownTimeout: 30000,
+          globalSetup: ["./vitest.global-setup.ts"],
         },
       },
     ],

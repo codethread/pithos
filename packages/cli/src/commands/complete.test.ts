@@ -1,5 +1,5 @@
 /**
- * Unit tests for pithos complete. Integration coverage lives in test/complete.integration.test.ts.
+ * Unit tests for pithos complete. Integration coverage lives in test/complete-cli.integration.test.ts and test/complete-sqlite.integration.test.ts.
  */
 
 import { describe, it, expect } from "vitest"

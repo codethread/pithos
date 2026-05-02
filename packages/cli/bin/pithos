@@ -1,8 +1,28 @@
 #!/usr/bin/env bash
-# pithos CLI entry point
-# Runs via tsx (development). Compile to dist/ for production packaging.
+# pithos CLI entry point — runs the pre-built ESM bundle in dist/.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-TSX="$WORKSPACE_ROOT/node_modules/.bin/tsx"
+PKG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUNDLE="$PKG_DIR/dist/main.js"
 
-exec "$TSX" "$SCRIPT_DIR/../src/main.ts" "$@"
+build() {
+  (cd "$PKG_DIR" && node scripts/build.mjs)
+}
+
+if [ ! -f "$BUNDLE" ]; then
+  echo "pithos: building dist/main.js..." >&2
+  build || { echo "pithos: build failed" >&2; exit 1; }
+else
+  # Warn when any build input is newer than the bundle so developers aren't
+  # silently running stale code. Inputs: TS sources, the build script itself,
+  # and the package manifest (dependency/script changes).
+  STALE=$(find \
+    "$PKG_DIR/src" \
+    "$PKG_DIR/scripts/build.mjs" \
+    "$PKG_DIR/package.json" \
+    -newer "$BUNDLE" -print -quit 2>/dev/null)
+  if [ -n "$STALE" ]; then
+    echo "pithos: dist/main.js is stale — run 'pnpm --filter @pithos/cli build'" >&2
+  fi
+fi
+
+exec node "$BUNDLE" "$@"

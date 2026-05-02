@@ -91,6 +91,9 @@ export const sweepCommand = (
 
           if (task.attempts < task.max_attempts) {
             // Requeue: clear lease fields and reset status to 'queued'.
+            // Fence on lease_until matching the value we read: if a concurrent
+            // heartbeat extended the lease after the SELECT, the UPDATE will
+            // find no rows (safe skip — the task is no longer expired).
             const requeuedRows = yield* db.query(
               `UPDATE tasks
                SET
@@ -100,19 +103,18 @@ export const sweepCommand = (
                  updated_at         = datetime('now')
                WHERE id = ?
                  AND status IN ('claimed', 'running')
+                 AND lease_until = ?
                RETURNING id`,
-              [task.id],
+              [task.id, task.lease_until],
             )
 
             if (requeuedRows.length === 0) {
-              // Concurrent modification invalidated the row between SELECT and UPDATE.
-              // Throw to roll back the whole transaction.
-              return yield* Effect.fail(
-                new PithosError({
-                  code: "INTERNAL_ERROR",
-                  message: `Concurrent modification during sweep requeue of task: ${task.id}`,
-                }),
+              // Lease was renewed by a concurrent heartbeat between SELECT and
+              // UPDATE; the task is no longer expired — safe to skip.
+              yield* Effect.logDebug("sweep: task lease renewed between select and update, skipping").pipe(
+                Effect.annotateLogs({ taskId: task.id }),
               )
+              continue
             }
 
             yield* db.run(
@@ -131,6 +133,7 @@ export const sweepCommand = (
             requeued++
           } else {
             // Dead-letter: attempts exhausted.
+            // Same lease_until fence as above.
             const deadRows = yield* db.query(
               `UPDATE tasks
                SET
@@ -138,18 +141,17 @@ export const sweepCommand = (
                  updated_at = datetime('now')
                WHERE id = ?
                  AND status IN ('claimed', 'running')
+                 AND lease_until = ?
                RETURNING id`,
-              [task.id],
+              [task.id, task.lease_until],
             )
 
             if (deadRows.length === 0) {
-              // Concurrent modification invalidated the row between SELECT and UPDATE.
-              return yield* Effect.fail(
-                new PithosError({
-                  code: "INTERNAL_ERROR",
-                  message: `Concurrent modification during sweep dead-letter of task: ${task.id}`,
-                }),
+              // Lease was renewed by a concurrent heartbeat — safe to skip.
+              yield* Effect.logDebug("sweep: task lease renewed between select and update (dead-letter path), skipping").pipe(
+                Effect.annotateLogs({ taskId: task.id }),
               )
+              continue
             }
 
             yield* db.run(
@@ -172,6 +174,13 @@ export const sweepCommand = (
         // Step 2: Mark stale runs.
         // A run is stale when it is in an active state and its last heartbeat
         // (or created_at if no heartbeat has been recorded) is older than runStaleMinutes.
+        //
+        // Use datetime(column) to normalize both storage formats:
+        //   - heartbeat writes: datetime('now') → 'YYYY-MM-DD HH:MM:SS'
+        //   - schema DEFAULT CURRENT_TIMESTAMP → 'YYYY-MM-DD HH:MM:SS'
+        //   - claim/heartbeat task writes: strftime('%Y-%m-%dT%H:%M:%SZ', ...) → 'YYYY-MM-DDTHH:MM:SSZ'
+        // Comparing them directly as TEXT is incorrect (' ' < 'T' lexicographically).
+        // datetime(col) normalizes both to 'YYYY-MM-DD HH:MM:SS' for correct comparison.
         const staleRunRows = yield* db.query(
           `UPDATE runs
            SET
@@ -180,10 +189,10 @@ export const sweepCommand = (
            WHERE status IN ('starting', 'running', 'idle')
              AND (
                (last_heartbeat_at IS NOT NULL
-                AND last_heartbeat_at < strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '-' || ? || ' minutes')))
+                AND datetime(last_heartbeat_at) < datetime('now', '-' || ? || ' minutes'))
                OR
                (last_heartbeat_at IS NULL
-                AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '-' || ? || ' minutes')))
+                AND datetime(created_at) < datetime('now', '-' || ? || ' minutes'))
              )
            RETURNING id`,
           [runStaleMinutes, runStaleMinutes],

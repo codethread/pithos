@@ -49,6 +49,9 @@ The implementation should be built from scratch. Existing `pandora/bin/*` script
 - **Decision:** Commands default to JSON output, with markdown only for human renderers.
   - **Rationale:** Agents and hooks need stable machine-readable output. Pandora briefings are the main markdown interface.
 
+- **Decision:** Keep user-visible output, diagnostic logging, metrics, and tracing separate but composable.
+  - **Rationale:** `Output` owns stdout/stderr and test sinks; Effect logging and spans carry structured diagnostics; `Metric` captures counters and timers. This preserves stable CLI contracts while letting agents opt into high observability on demand.
+
 - **Decision:** Do not create an `agents` table in MVP.
   - **Rationale:** MVP only needs concrete runs. Agent kind, scope, and capability live on tasks/runs. A desired-agent registry belongs with a future daemon.
 
@@ -94,7 +97,7 @@ pithos/
         main.ts               # CLI entrypoint
         cli/
           args.ts             # small parser; defer @effect/cli unless needed
-          output.ts           # json/text output helpers
+          output.ts           # json/text output helpers; live/test sinks
         domain/              # pure types/functions
         services/            # Effect service tags/interfaces
         layers/              # live/test layer composition
@@ -518,6 +521,7 @@ Project pattern:
 - translate infra errors at boundaries
 - run entrypoints with `NodeRuntime.runMain`
 - use `@effect/platform/Command` for subprocesses when process execution grows beyond trivial wrappers
+- keep `Effect.log*`, spans, and `Metric` in the observability path; do not smuggle diagnostics through command output
 
 ### ESLint baseline
 

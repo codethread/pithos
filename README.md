@@ -16,13 +16,13 @@ Pithos is the from-scratch dedicated repo/CLI for Pandora's Box:
 When asked to continue Pithos implementation:
 
 1. Read this file.
-2. Read `tasks.md`.
-3. Pick the first unbuilt task whose `Blocked by` dependencies are complete.
+2. Read `tasks-adhoc.md` first, then `tasks.md`.
+3. Pick the first unimplemented task in `tasks-adhoc.md` whose `Blocked by` dependencies are complete; if none are available, pick the first unbuilt task in `tasks.md` whose `Blocked by` dependencies are complete.
 4. Read only the supporting docs needed for that task:
    - `mvp-spec.md` for product/domain intent
    - `technical-design.md` for implementation contracts
    - `ambition.md` only for direction beyond MVP
-5. If `tasks.md` and supporting specs conflict, follow `tasks.md` and flag the conflict in the report.
+5. If the active queue file (`tasks-adhoc.md` or `tasks.md`) and supporting specs conflict, follow the queue file and flag the conflict in the report.
 6. Implement exactly that slice in `~/dev/pithos`.
 7. Validate the slice's `Vertical slice` acceptance criteria plus standard checks:
    - `pnpm lint`
@@ -33,7 +33,7 @@ When asked to continue Pithos implementation:
    - fix any findings unless you think they are unfounded
    - repeat the linting and testing as needed
    - re-review, unless fix was trivial
-10. Update `tasks.md`, changing the completed slice from `Status: Unbuilt` to `Status: Built`.
+10. Update the source queue file (`tasks-adhoc.md` or `tasks.md`), changing the completed slice from `Status: Unimplemented` / `Status: Unbuilt` to `Status: Built`.
 11. Commit the task-status update in this repo.
 12. Stop and report what changed, including commit hashes.
     - IMPORTANT: if you complete the last task, or hit a fatal blocker you can't resolve, or hit a 'human in the loop' task, return the repose `COMPLETE` and nothing else
@@ -53,6 +53,7 @@ When asked to continue Pithos implementation:
 
 | File                  | Purpose                                                          |
 | --------------------- | ---------------------------------------------------------------- |
+| `tasks-adhoc.md`      | Ad hoc observability/repair slices; actioned before the primary queue |
 | `tasks.md`            | Numbered tracer-bullet implementation slices; primary work queue |
 | `mvp-spec.md`         | MVP product/domain spec                                          |
 | `technical-design.md` | Technical contracts and implementation details                   |
@@ -61,4 +62,4 @@ When asked to continue Pithos implementation:
 
 ## Current next action
 
-Start with the first unchecked/unbuilt slice in `tasks.md`.
+Start with the first unimplemented slice in `tasks-adhoc.md`; if none are available, continue with the first unchecked/unbuilt slice in `tasks.md`.

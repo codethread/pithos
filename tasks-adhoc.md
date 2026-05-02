@@ -37,7 +37,7 @@
    **Vertical slice:** Replace manual if/else allowlist checks at IO boundaries (CLI args, DB rows, subprocess output) with `Schema.Literal` / `Schema.Struct` / `Schema.decodeUnknown` pipelines. No hand-rolled type guards where a schema can do it. Error codes must reflect the source: `VALIDATION_ERROR` for untrusted external/user input (CLI args, stdin); `INTERNAL_ERROR` or a more specific code for DB row shape violations or unexpected subprocess output, which signal contract/integrity failures rather than user mistakes.
 
 6. **Title:** Replace bare `throw` with `Effect.fail`  
-   **Status:** Unimplemented  
+   **Status:** Implemented  
    **Type:** AFK  
    **Blocked by:** none  
    **Vertical slice:** Audit the codebase for bare `throw new Error(...)` / `throw someValue` in application/domain/command code and replace each with `return yield * Effect.fail(new PithosError(...))`. Legitimate surviving throws: (a) SQLite transaction callbacks where throw is the only rollback mechanism, and (b) non-generator callbacks adapted by an `Effect.try` / `Effect.tryPromise` boundary, where the throw is intentionally bridging an exception-based API into Effect. Document each surviving throw with a comment explaining the constraint.

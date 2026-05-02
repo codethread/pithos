@@ -223,10 +223,6 @@ export const dispatch = (
 
       case "unknown": {
         const cmd = args.raw[0] ?? "(none)"
-        const output = yield* OutputService
-        yield* output.printError(
-          `pithos: unknown command '${cmd}'\nRun \`pithos --help\` for usage.`,
-        )
         yield* Effect.fail(
           new PithosError({ code: "USER_ERROR", message: `Unknown command: ${cmd}` }),
         )

@@ -55,7 +55,7 @@
    **Vertical slice:** Create explicitly throwaway scratch code to investigate both `@effect/cli` and `clipanion` for Pithos-shaped command trees: nested subcommands (`scope upsert`, `run register`, `artifact add`, `inspect task <id>`), options, positional arguments, generated help, unknown-command behavior, and whether command execution can call Effect programs cleanly. This spike is allowed to add scratch files that are not wired into production and do not need to pass the normal test suite; the output is a short written recommendation in the queue item or an adjacent note explaining which library/API to use and why. Do not migrate production parser code in this slice. Outcome: see `notes/cli-parser-spike.md`. Final recommendation: use `@effect/cli` for slice 9; its first-class Effect/Schema integration and typed parser boundary outweigh Clipanion's help/UX advantages for this codebase.
 
 9. **Title:** Add a declarative CLI parser layer  
-   **Status:** Unimplemented  
+   **Status:** Built  
    **Type:** AFK  
    **Blocked by:** 8  
    **Vertical slice:** Replace the hand-written `parseArgs` + hardcoded help strings in `dispatch.ts` with the declarative CLI parser library selected by slice 8. Prefer `@effect/cli` if the spike proves it supports Pithos-shaped subcommands and generated help cleanly; otherwise use `clipanion` only with its full command-execution API, not a hybrid parser adapter. Once done: (a) drop `help-cli.integration.test.ts` — the library owns help correctness, and (b) delete all per-command `--help` snapshot tests. Keep only the agent-usability invariants (every command has `--help`/`-h`, help mentions required sections) as lightweight contract checks against the library's output.

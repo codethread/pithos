@@ -84,7 +84,7 @@
    **Vertical slice:** Implement `pithos heartbeat --run [--task --token --hook]`, update mutable run heartbeat, move claimed task to running when token matches, extend lease, reject stale token, and implement `--throttle-seconds` by comparing against `runs.last_heartbeat_at`. Tests cover throttled/no-event heartbeat behaviour.
 
 10. **Title:** Complete or fail a claimed task safely  
-    **Status:** Unbuilt  
+    **Status:** Built  
     **Type:** AFK  
     **Blocked by:** 8  
     **User stories covered:** US5  

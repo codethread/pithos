@@ -1,14 +1,10 @@
 /**
- * Tests for `pithos init`.
- *
- * Two layers:
- *  1. Unit tests — fake DbService, validate command logic and output.
- *  2. Integration tests — real SQLite in a temp directory, validate actual SQL
- *     and idempotency. No real ~/.pandora/pithos.sqlite is touched.
+ * Integration tests for `pithos init` — real SQLite + CLI subprocess.
+ * Unit coverage lives in src/commands/init.test.ts.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { mkdtempSync, existsSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir, homedir } from "node:os"
@@ -16,15 +12,10 @@ import { execFileSync } from "node:child_process"
 import Database from "better-sqlite3"
 
 import { initCommand } from "../src/commands/init.ts"
-import { runMigrations } from "../src/db/migrate.ts"
-import { makeDbServiceTest, makeDbServiceLive } from "../src/layers/db.ts"
+import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeOutputServiceSilent } from "../src/layers/output.ts"
 
 const silentOutput = makeOutputServiceSilent()
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), "pithos-init-"))
@@ -36,51 +27,6 @@ function runWith<A, E, LE, R>(
 ): Promise<A> {
   return Effect.runPromise(Effect.provide(effect, layer))
 }
-
-// ---------------------------------------------------------------------------
-// Unit tests — fake DB
-// ---------------------------------------------------------------------------
-
-describe("initCommand (unit — fake DB)", () => {
-  it("succeeds with a fresh fake DB", async () => {
-    const exit = await Effect.runPromiseExit(
-      Effect.provide(initCommand, Layer.merge(makeDbServiceTest(), silentOutput)),
-    )
-    expect(Exit.isSuccess(exit)).toBe(true)
-  })
-
-  it("succeeds a second time (idempotent with fake DB)", async () => {
-    const layer = Layer.merge(makeDbServiceTest(), silentOutput)
-    const first = await Effect.runPromiseExit(Effect.provide(initCommand, layer))
-    const second = await Effect.runPromiseExit(Effect.provide(initCommand, layer))
-    expect(Exit.isSuccess(first)).toBe(true)
-    expect(Exit.isSuccess(second)).toBe(true)
-  })
-})
-
-describe("runMigrations (unit — fake DB)", () => {
-  it("applies migration 1 when schema_migrations returns no rows", async () => {
-    // Fake DB: query always returns [], run always succeeds.
-    // The migration should run without error.
-    const exit = await Effect.runPromiseExit(
-      Effect.provide(runMigrations, makeDbServiceTest()),
-    )
-    expect(Exit.isSuccess(exit)).toBe(true)
-  })
-
-  it("skips migration 1 when it is already recorded in schema_migrations", async () => {
-    // Fake DB seeded so that 'SELECT version FROM schema_migrations' returns [{version:1}].
-    const seeded = new Map([["SELECT version FROM schema_migrations", [{ version: 1 }]]])
-    const exit = await Effect.runPromiseExit(
-      Effect.provide(runMigrations, makeDbServiceTest(seeded)),
-    )
-    expect(Exit.isSuccess(exit)).toBe(true)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Integration tests — real SQLite in temp dir
-// ---------------------------------------------------------------------------
 
 describe("initCommand (integration — real SQLite)", () => {
   let tempDir: string
@@ -179,10 +125,6 @@ describe("initCommand (integration — real SQLite)", () => {
     expect(mtimeAfter).toBe(mtimeBefore)
   })
 })
-
-// ---------------------------------------------------------------------------
-// CLI process smoke test
-// ---------------------------------------------------------------------------
 
 describe("pithos init (CLI process — real SQLite)", () => {
   let tempDir: string

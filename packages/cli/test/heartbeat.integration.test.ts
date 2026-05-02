@@ -1,11 +1,5 @@
 /**
- * Tests for Slice 9: Heartbeat an active run and task.
- *
- * Layers:
- *  1. Unit  — validation with fake DB service
- *  2. Integration — real SQLite in temp dir
- *  3. parseArgs  — heartbeat routing
- *  4. CLI process — smoke tests
+ * Integration tests for pithos heartbeat — real SQLite + CLI subprocess. Unit coverage lives in src/commands/heartbeat.test.ts.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
@@ -20,8 +14,7 @@ import { heartbeatCommand } from "../src/commands/heartbeat.ts"
 import { claimCommand } from "../src/commands/claim.ts"
 import { enqueueCommand } from "../src/commands/enqueue.ts"
 import { runRegisterCommand } from "../src/commands/run.ts"
-import { parseArgs } from "../src/cli/args.ts"
-import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
+import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
@@ -42,59 +35,6 @@ function makeTempDir(): string {
 async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Exit<A, E>> {
   return Effect.runPromiseExit(effect)
 }
-
-// ---------------------------------------------------------------------------
-// 1. Unit — fake DB / validation only
-// ---------------------------------------------------------------------------
-
-describe("heartbeatCommand (unit — fake DB)", () => {
-  it("fails VALIDATION_ERROR when --run is missing", async () => {
-    const exit = await runEff(
-      Effect.provide(heartbeatCommand({ run: undefined }), Layer.merge(makeDbServiceTest(), silentOutput)),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --task is given without --token", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        heartbeatCommand({ run: "run_abc", task: "task_xyz", token: undefined }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --token is NaN", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        heartbeatCommand({ run: "run_abc", task: "task_xyz", token: NaN }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --throttle-seconds is NaN", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        heartbeatCommand({ run: "run_abc", throttleSeconds: NaN }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --throttle-seconds is negative", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        heartbeatCommand({ run: "run_abc", throttleSeconds: -5 }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // 2. Integration — real SQLite
@@ -521,63 +461,6 @@ describe("heartbeatCommand (integration — real SQLite)", () => {
     expect(parsed.run.id).toBe(runId)
     expect(parsed.task.id).toBe(taskId)
     expect(parsed.task.status).toBe("running")
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 3. parseArgs — heartbeat routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — heartbeat", () => {
-  it("parses required --run flag", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["heartbeat", "--run", "run_abc"]),
-    )
-    expect(result).toMatchObject({ command: "heartbeat", run: "run_abc" })
-  })
-
-  it("parses all optional flags", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "heartbeat",
-        "--run",
-        "run_abc",
-        "--task",
-        "task_xyz",
-        "--token",
-        "3",
-        "--hook",
-        "PreToolUse",
-        "--throttle-seconds",
-        "60",
-      ]),
-    )
-    expect(result).toMatchObject({
-      command: "heartbeat",
-      run: "run_abc",
-      task: "task_xyz",
-      token: 3,
-      hook: "PreToolUse",
-      throttleSeconds: 60,
-    })
-  })
-
-  it("routes 'heartbeat --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["heartbeat", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "heartbeat" })
-  })
-
-  it("returns undefined for optional flags when absent", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["heartbeat", "--run", "run_abc"]),
-    )
-    expect(result).toMatchObject({
-      command: "heartbeat",
-      task: undefined,
-      token: undefined,
-      hook: undefined,
-      throttleSeconds: undefined,
-    })
   })
 })
 

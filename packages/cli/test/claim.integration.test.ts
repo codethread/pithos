@@ -1,11 +1,5 @@
 /**
- * Tests for Slice 8: Claim a queued task with a fenced lease.
- *
- * Layers:
- *  1. Unit  — validation with fake DB service
- *  2. Integration — real SQLite in temp dir
- *  3. parseArgs  — claim routing
- *  4. CLI process — smoke tests including concurrency/race
+ * Integration tests for pithos claim — real SQLite + CLI subprocess. Unit coverage lives in src/commands/claim.test.ts.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
@@ -19,8 +13,7 @@ import Database from "better-sqlite3"
 import { claimCommand } from "../src/commands/claim.ts"
 import { enqueueCommand } from "../src/commands/enqueue.ts"
 import { runRegisterCommand } from "../src/commands/run.ts"
-import { parseArgs } from "../src/cli/args.ts"
-import { makeDbServiceLive, makeDbServiceTest } from "../src/layers/db.ts"
+import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
 import { initCommand } from "../src/commands/init.ts"
@@ -41,62 +34,6 @@ function makeTempDir(): string {
 async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Exit<A, E>> {
   return Effect.runPromiseExit(effect)
 }
-
-// ---------------------------------------------------------------------------
-// 1. Unit — fake DB / validation only
-// ---------------------------------------------------------------------------
-
-describe("claimCommand (unit — fake DB)", () => {
-  it("fails VALIDATION_ERROR when --run is missing", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        claimCommand({ run: undefined, scope: "global", capability: "triage" }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --scope is missing", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        claimCommand({ run: "run_abc", scope: undefined, capability: "triage" }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --capability is missing", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        claimCommand({ run: "run_abc", scope: "global", capability: undefined }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --lease-minutes is NaN (e.g. 'abc')", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        claimCommand({ run: "run_abc", scope: "global", capability: "triage", leaseMinutes: NaN }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-
-  it("fails VALIDATION_ERROR when --lease-minutes is zero", async () => {
-    const exit = await runEff(
-      Effect.provide(
-        claimCommand({ run: "run_abc", scope: "global", capability: "triage", leaseMinutes: 0 }),
-        Layer.merge(makeDbServiceTest(), silentOutput),
-      ),
-    )
-    expect(Exit.isFailure(exit)).toBe(true)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // 2. Integration — real SQLite
@@ -380,54 +317,6 @@ describe("claimCommand (integration — real SQLite)", () => {
     expect(parsed.task.lease_owner_run_id).toBe("run_output1")
   })
 
-})
-
-// ---------------------------------------------------------------------------
-// 3. parseArgs — claim routing
-// ---------------------------------------------------------------------------
-
-describe("parseArgs — claim", () => {
-  it("parses required flags", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["claim", "--run", "run_abc", "--scope", "global", "--capability", "triage"]),
-    )
-    expect(result).toMatchObject({
-      command: "claim",
-      run: "run_abc",
-      scope: "global",
-      capability: "triage",
-      leaseMinutes: undefined,
-    })
-  })
-
-  it("parses --lease-minutes as a number", async () => {
-    const result = await Effect.runPromise(
-      parseArgs([
-        "claim",
-        "--run",
-        "run_abc",
-        "--scope",
-        "global",
-        "--capability",
-        "triage",
-        "--lease-minutes",
-        "20",
-      ]),
-    )
-    expect(result).toMatchObject({ command: "claim", leaseMinutes: 20 })
-  })
-
-  it("routes 'claim --help' to help topic", async () => {
-    const result = await Effect.runPromise(parseArgs(["claim", "--help"]))
-    expect(result).toMatchObject({ command: "help", topic: "claim" })
-  })
-
-  it("returns undefined for optional flags when absent", async () => {
-    const result = await Effect.runPromise(
-      parseArgs(["claim", "--run", "run_abc", "--scope", "global", "--capability", "triage"]),
-    )
-    expect(result).toMatchObject({ command: "claim", leaseMinutes: undefined })
-  })
 })
 
 // ---------------------------------------------------------------------------

@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest"
 import { Exit, Effect, Layer, Logger, LogLevel } from "effect"
-import { makeLogCapture, LoggerSilent } from "../src/layers/logger.ts"
-import { makeOutputServiceSilent, makeOutputServiceTest } from "../src/layers/output.ts"
-import { OutputService } from "../src/services/output.ts"
-import { makeDbServiceTest } from "../src/layers/db.ts"
-import { makeFsServiceTest } from "../src/layers/fs.ts"
-import { completeCommand } from "../src/commands/complete.ts"
-import { claimCommand } from "../src/commands/claim.ts"
-import { failCommand } from "../src/commands/fail.ts"
+import { makeLogCapture, LoggerSilent } from "./logger.ts"
+import { makeOutputServiceSilent, makeOutputServiceTest } from "./output.ts"
+import { OutputService } from "../services/output.ts"
+import { makeDbServiceTest } from "./db.ts"
+import { makeFsServiceTest } from "./fs.ts"
+import { completeCommand } from "../commands/complete.ts"
+import { claimCommand } from "../commands/claim.ts"
+import { failCommand } from "../commands/fail.ts"
 
 // ---------------------------------------------------------------------------
 // Helpers

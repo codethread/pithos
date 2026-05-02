@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Exit, Layer } from "effect"
-import { ClockService } from "../src/services/clock.ts"
-import { IdService } from "../src/services/ids.ts"
-import { FsService } from "../src/services/fs.ts"
-import { ProcessService } from "../src/services/process.ts"
-import { DbService } from "../src/services/db.ts"
-import { ClaudeHarnessService } from "../src/services/harness.ts"
+import { ClockService } from "./clock.ts"
+import { IdService } from "./ids.ts"
+import { FsService } from "./fs.ts"
+import { ProcessService } from "./process.ts"
+import { DbService } from "./db.ts"
+import { ClaudeHarnessService } from "./harness.ts"
 import {
   ClockServiceLive,
   IdServiceLive,
@@ -15,7 +15,7 @@ import {
   makeProcessServiceTest,
   makeDbServiceTest,
   makeClaudeHarnessServiceTest,
-} from "../src/layers/index.ts"
+} from "../layers/index.ts"
 
 /** Run an Effect with a provided layer, surfacing errors as rejected promises. */
 function runWith<A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Promise<A> {

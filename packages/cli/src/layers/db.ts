@@ -16,7 +16,9 @@ const wrapSqlError = (e: unknown): PithosError =>
   e instanceof PithosError
     ? e
     : new PithosError({
-        code: "USER_ERROR",
+        // SQL/driver failures are infrastructure faults, not user mistakes.
+        // Classifying as INTERNAL_ERROR preserves correct triage and retry policy.
+        code: "INTERNAL_ERROR",
         message: `DB error: ${e instanceof Error ? e.message : "unexpected DB failure"}`,
       })
 
@@ -40,7 +42,7 @@ export const makeDbServiceLive = (dbPath: string): Layer.Layer<DbService, Pithos
       yield* Effect.try({
         try: () => mkdirSync(dirname(dbPath), { recursive: true }),
         catch: (e) =>
-          new PithosError({ code: "USER_ERROR", message: `DB mkdir error: ${String(e)}` }),
+          new PithosError({ code: "INTERNAL_ERROR", message: `DB mkdir error: ${e instanceof Error ? e.message : "mkdir failed"}` }),
       })
 
       // 2. Build the SqliteClient layer scoped to this layer's lifetime.
@@ -49,7 +51,7 @@ export const makeDbServiceLive = (dbPath: string): Layer.Layer<DbService, Pithos
       const sqliteCtx = yield* Layer.build(
         SqliteClient.layer({ filename: dbPath }).pipe(
           Layer.mapError(
-            (e) => new PithosError({ code: "USER_ERROR", message: `DB open error: ${e instanceof Error ? e.message : "open failed"}` }),
+            (e) => new PithosError({ code: "INTERNAL_ERROR", message: `DB open error: ${e instanceof Error ? e.message : "open failed"}` }),
           ),
         ),
       )

@@ -2,6 +2,22 @@
 
 Pithos is an Effect-TS CLI. These rules are non-negotiable.
 
+## Build and run
+
+```sh
+pnpm install
+pnpm run build
+pithos --help
+```
+
+Fast dev run without the full build/link pipeline:
+
+```sh
+pnpm --filter @pithos/cli start --help
+```
+
+`pnpm run build` builds all workspace packages and links the `@pithos/cli` package bin (`pithos`) onto the global PATH via `package.json#bin`. The package scripts use esbuild directly; no `tsx`.
+
 ## 1. Checks pass between commits
 
 Typecheck, lint, tests, build — all green before every commit. No "leftover issues", no "next commit". If it's broken, you broke it, you fix it now.

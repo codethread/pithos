@@ -1,24 +1,39 @@
 import * as esbuild from "esbuild"
+import { chmod } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import { dirname, resolve } from "node:path"
+import { spawnSync } from "node:child_process"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const pkgRoot = resolve(__dirname, "..")
+const args = new Set(process.argv.slice(2))
+const dev = args.has("--dev")
+const run = args.has("--run")
+const outfile = resolve(pkgRoot, dev ? "bin/pithos-dev" : "bin/pithos")
 
 await esbuild.build({
   entryPoints: [resolve(pkgRoot, "src/main.ts")],
-  outfile: resolve(pkgRoot, "dist/main.js"),
+  outfile,
   platform: "node",
-  target: "node20",
+  target: "es2024",
   format: "esm",
   bundle: true,
-  sourcemap: true,
+  sourcemap: dev ? "inline" : false,
   // Native addons must stay external — esbuild cannot bundle .node binaries.
   external: ["better-sqlite3"],
-  // Transitive CJS deps (e.g. undici via @effect/platform-node) use dynamic
-  // require() which ESM does not support natively. Inject createRequire so
-  // the bundled require shim works at runtime.
+  // Keep the package bin as a single executable file. Transitive CJS deps use
+  // dynamic require(), which ESM does not support natively, so inject
+  // createRequire before esbuild's require shim.
   banner: {
-    js: `import { createRequire } from "node:module"; const require = createRequire(import.meta.url);`,
+    js: `#!/usr/bin/env node\nimport { createRequire } from "node:module"; const require = createRequire(import.meta.url);`,
   },
 })
+
+await chmod(outfile, 0o755)
+
+if (run) {
+  const passthroughIndex = process.argv.indexOf("--")
+  const passthroughArgs = passthroughIndex === -1 ? [] : process.argv.slice(passthroughIndex + 1)
+  const result = spawnSync(outfile, passthroughArgs, { stdio: "inherit" })
+  process.exit(typeof result.status === "number" ? result.status : 1)
+}

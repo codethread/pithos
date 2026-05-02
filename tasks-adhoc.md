@@ -31,7 +31,7 @@
    **Vertical slice:** Replace raw stdout assertions and console interception in tests with output sinks or temp-file captures. Keep Vitest output quiet unless a test explicitly opts into the captured stream.
 
 5. **Title:** Migrate all custom IO validation to Effect.Schema  
-   **Status:** Unimplemented  
+   **Status:** Implemented  
    **Type:** AFK  
    **Blocked by:** none  
    **Vertical slice:** Replace manual if/else allowlist checks at IO boundaries (CLI args, DB rows, subprocess output) with `Schema.Literal` / `Schema.Struct` / `Schema.decodeUnknown` pipelines. No hand-rolled type guards where a schema can do it. Error codes must reflect the source: `VALIDATION_ERROR` for untrusted external/user input (CLI args, stdin); `INTERNAL_ERROR` or a more specific code for DB row shape violations or unexpected subprocess output, which signal contract/integrity failures rather than user mistakes.

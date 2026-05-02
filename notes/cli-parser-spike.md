@@ -56,28 +56,30 @@ Observed validation behavior from the scratch runs:
 
 ## Recommendation
 
-**Provisional recommendation:** use **Clipanion** for slice 9 only if two gates hold: (1) a first migration pass confirms Pithos can preserve its agent-facing help invariants (`Usage`, `Examples`, `Exit codes`, and top-level environment documentation) without awkward custom patching, and (2) the team is willing to accept a parser dependency that is still published as `4.0.0-rc.4`.
+**Final recommendation after source-level recheck:** keep **Clipanion** as the preferred choice for slice 9, still subject to the same two gates: (1) a first migration pass must confirm Pithos can preserve its agent-facing help invariants (`Usage`, `Examples`, `Exit codes`, and top-level environment documentation) without awkward custom patching, and (2) the team must accept a parser dependency that is still published as `4.0.0-rc.4`.
 
-Why this is still provisional:
+What changed after rechecking vendored Effect source:
 
-- This spike compared command-tree fit, generated help style, unknown-command UX, and Effect execution.
-- It did **not** fully model every current help-contract detail from `packages/cli/test/help-cli.integration.test.ts`, especially custom `Exit codes` and top-level env-var sections.
+- The earlier Effect spike **did** underuse some real `@effect/cli` capabilities.
+- In particular, `CliConfig.showBuiltIns` can hide built-ins from help, and the public API offers richer `HelpDoc` composition than the first spike exercised.
+- But even after retesting with those knobs, the important remaining gap did **not** close: nested leaf help still rendered usage like `$ upsert` instead of the full path `pithos scope upsert` for the Pithos-shaped command tree.
 
-Why Clipanion is the current front-runner if those gates are acceptable:
+Why Clipanion remains the winner if those gates are acceptable:
 
 > Caveat: this was not a perfectly normalized help bake-off. The Clipanion spike used richer per-command metadata (`category`, `details`, `examples`) than the Effect spike. So the observed help-quality gap reflects both library defaults and how naturally each spike exposed help metadata.
 
-1. Pithos cares heavily about agent-usable help output; Clipanion's generated help was materially better in the spike.
+1. Pithos cares heavily about agent-usable help output; Clipanion's generated help remained better in the spike and the final source-level recheck.
 2. Pithos also benefits from better unknown-command UX; Clipanion gave suggestions out of the box.
 3. The main downside is validation duplication / non-Effect-native execution. The spike showed Typanion can enforce parser-level enum/integer constraints, but Pithos should still treat Clipanion as argv/help/dispatch only and immediately decode command fields with `Effect.Schema` before command logic.
 
-Fallback if the RC risk is unacceptable: prefer `@effect/cli` and accept weaker built-in help/UX rather than taking a prerelease parser into production.
+Fallback if the RC risk is unacceptable: prefer `@effect/cli` and accept weaker generated help/UX rather than taking a prerelease parser into production.
 
 Why not `@effect/cli` right now:
 
 - It did handle the command tree and native `Effect` execution cleanly.
-- But the help output was not clean enough for Pithos's agent-facing contract in this spike: leaf help lost the full command path, and the built-in option surface was noisy.
-- Its parse failures also do not naturally map to Pithos's tagged error-code contract.
+- Source review showed we had underused some help/config APIs, especially around hiding built-ins.
+- But the most important help issue for Pithos remained after retesting: leaf help lost the full command path.
+- Unknown-command UX also remained weaker at the subcommand level.
 
 ## Suggested adoption shape for slice 9
 

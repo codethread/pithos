@@ -55,7 +55,6 @@ const run = async (): Promise<void> => {
   const pithosHelp = process.env.PANDORA_SPAWN_FAKE_PITHOS_HELP ?? pithos(["--help"])
   const sessionId = process.env.PANDORA_SPAWN_FAKE_SESSION_ID ?? (opts.preview ? "session_PREVIEW" : randomUUID())
   const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? (opts.preview ? "run_PREVIEW" : parseRunId(pithos(["run", "register", "--agent-kind", opts.agent, "--scope", opts.scope, "--cwd", opts.cwd, "--session-id", sessionId])))
-  const toolsCsv = template.manifest.tools.join(",")
   const launcherCommands = template.launcher?.commands
   const launcherMeta = template.manifest.inject_meta && template.launcher !== undefined
     ? `## Launcher meta\n\n\`\`\`json\n${JSON.stringify({ kind: template.launcher.kind, harness: template.launcher.harness, meta: template.launcher.meta }, null, 2)}\n\`\`\``
@@ -64,7 +63,7 @@ const run = async (): Promise<void> => {
     agent: opts.agent,
     capability: template.manifest.capability,
     model: template.manifest.model,
-    tools_csv: toolsCsv,
+    tools_csv: template.manifest.tools.join(","),
     run_id: runId,
     session_id: sessionId,
     scope_id: opts.scope,
@@ -81,13 +80,21 @@ const run = async (): Promise<void> => {
   }
   const prompt = render(template.body, context)
   const env = { PITHOS_RUN_ID: runId, PITHOS_AGENT: opts.agent, PITHOS_SCOPE_ID: opts.scope, PITHOS_OUTPUT: "json", ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}) }
-  const argv = buildClaudeArgv({ sessionId, model: template.manifest.model, toolsCsv, prompt })
+  const argv = buildClaudeArgv({ sessionId, model: template.manifest.model, prompt })
   const description = { env, argv, prompt, cwd: opts.cwd }
   if (opts.preview) {
     writeJson({ ok: true, preview: true, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, ...description })
     return
   }
-  const result = opts.harness === "fake" ? await runFake(description) : await runClaude(description)
+  let result
+  try {
+    result = opts.harness === "fake" ? await runFake(description) : runClaude(description, { agent: opts.agent, sessionId })
+  } catch (error) {
+    if (process.env.PANDORA_SPAWN_FAKE_RUN_ID === undefined) {
+      try { pithos(["run", "end", "--run", runId, "--status", "failed", "--summary", `pandora-spawn ${opts.harness} harness launch failed`]) } catch { /* surface original */ }
+    }
+    throw error
+  }
   writeJson({ ok: result.exitCode === 0, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, pid: result.pid, ...result.output })
   process.exitCode = result.exitCode
 }

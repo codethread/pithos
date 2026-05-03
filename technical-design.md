@@ -83,6 +83,9 @@ The implementation should be built from scratch. Existing `pandora/bin/*` script
 ```text
 pithos/
   README.md
+  CONTRIBUTING.md
+  AGENT_LOOP.md
+  AGENTS.md
   package.json
   pnpm-workspace.yaml
   eslint.config.js

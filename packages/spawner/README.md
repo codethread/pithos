@@ -53,7 +53,7 @@ Rules:
 
 - `agent` is the CLI name: `pandora-spawn --agent envy`.
 - `system_prompt` must be `<agent>.md.tmpl`.
-- `tools` must be non-empty; rendered as `{{tools_csv}}` and passed to Claude `--tools`.
+- `tools` must be non-empty; rendered into the prompt body as `{{tools_csv}}` for the agent's awareness. It is not passed to Claude as a CLI flag — `--dangerously-skip-permissions` + `--permission-mode acceptEdits` are used instead so the agent can act without prompts.
 - `includes` names files in `templates/`; path separators are rejected.
 - Includes are not automatically appended. Each include becomes a template var keyed by filename, so `"includes": ["_common.md"]` makes `{{_common.md}}` available in the system prompt.
 - JSON/template errors exit with code `2`.
@@ -119,8 +119,21 @@ pithos inspect run <run_id from step 4 output>
 
 For fully offline reproduction use `--harness fake`; the run is still registered in
 the Pithos DB via `pithos run register` so `pithos inspect run` works regardless.
+`--harness fake` returns the assembled `{ env, argv, prompt }` JSON instead of
+launching Claude. `--preview` is similar but does **not** register a run and uses
+stable placeholder ids; use it when iterating on templates without touching state.
+
+For the real Claude harness, `pandora-spawn` writes a wrapper bash script and
+launches it via `tmux new-session -d -s pithos-<agent>-<short>` so Claude has a
+TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns
+`tmux_session`, `script_path`, and `pane_pid`; attach with
+`tmux attach -t <tmux_session>` to interact.
 
 ### Install global Claude Code hooks (optional)
+
+On Nix systems where `~/.claude/settings.json` is a read-only home-manager symlink, use the Claude Code plugin instead — see the [plugin install instructions](../../plugin/README.md). The plugin registers the same two hook entries declaratively without touching `settings.json`.
+
+On systems where `~/.claude/settings.json` is writable, the CLI install works directly:
 
 ```sh
 # Merges PreToolUse + SessionEnd entries into ~/.claude/settings.json

@@ -1,0 +1,8 @@
+{
+  "name": "pithos",
+  "description": "Pithos hooks + agent templates for Claude Code. Tracks runs/tasks/artifacts for spawner-launched sessions.",
+  "author": {
+    "name": "codethread"
+  },
+  "keywords": ["pithos", "agents", "hooks", "spawner", "pandora"]
+}

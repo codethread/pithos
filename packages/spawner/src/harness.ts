@@ -1,4 +1,7 @@
-import { spawn } from "node:child_process"
+import { spawnSync } from "node:child_process"
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 export interface SpawnDescription {
   readonly env: Record<string, string>
@@ -7,22 +10,37 @@ export interface SpawnDescription {
   readonly cwd: string
 }
 
+export interface ClaudeRunInput {
+  readonly agent: string
+  readonly sessionId: string
+}
+
 export const buildClaudeArgv = (input: {
   readonly sessionId: string
   readonly model: string
-  readonly toolsCsv: string
   readonly prompt: string
 }): readonly string[] => [
   "claude",
   "--session-id",
   input.sessionId,
+  "--dangerously-skip-permissions",
+  "--permission-mode",
+  "acceptEdits",
   "--model",
   input.model,
-  "--tools",
-  input.toolsCsv,
-  "--append-system-prompt",
   input.prompt,
 ]
+
+export const tmuxSessionName = (agent: string, sessionId: string): string =>
+  `pithos-${agent}-${sessionId.slice(0, 8)}`
+
+const shquote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+
+export interface ClaudeRunOutput {
+  readonly tmux_session: string
+  readonly script_path: string
+  readonly pane_pid: number | null
+}
 
 export const runFake = (description: SpawnDescription): Promise<{ pid: null; output: SpawnDescription; exitCode: 0 }> => Promise.resolve({
   pid: null,
@@ -30,13 +48,24 @@ export const runFake = (description: SpawnDescription): Promise<{ pid: null; out
   exitCode: 0,
 })
 
-export const runClaude = async (description: SpawnDescription): Promise<{ pid: number | null; output: { exit_code: number | null }; exitCode: number }> =>
-  new Promise((resolve, reject) => {
-    const child = spawn(description.argv[0] ?? "claude", description.argv.slice(1), {
-      cwd: description.cwd,
-      env: { ...process.env, ...description.env },
-      stdio: "inherit",
-    })
-    child.on("error", reject)
-    child.on("close", (code) => resolve({ pid: child.pid ?? null, output: { exit_code: code }, exitCode: code ?? 1 }))
-  })
+export const runClaude = (description: SpawnDescription, input: ClaudeRunInput): { pid: number | null; output: ClaudeRunOutput; exitCode: number } => {
+  const session = tmuxSessionName(input.agent, input.sessionId)
+  const dir = mkdtempSync(join(tmpdir(), "pandora-spawn-"))
+  const scriptPath = join(dir, "spawn.sh")
+  const envExports = Object.entries(description.env)
+    .map(([key, value]) => `export ${key}=${shquote(value)}`)
+    .join("\n")
+  const claudeCmd = description.argv.map(shquote).join(" ")
+  const scriptBody = `#!/usr/bin/env bash\nset -euo pipefail\n${envExports}\nexec ${claudeCmd}\n`
+  writeFileSync(scriptPath, scriptBody)
+  chmodSync(scriptPath, 0o755)
+
+  const launch = spawnSync("tmux", ["new-session", "-d", "-s", session, "-c", description.cwd, `bash ${shquote(scriptPath)}`], { stdio: "inherit" })
+  if (launch.status !== 0) throw new Error(`tmux new-session -s ${session} failed (exit ${launch.status ?? "null"})`)
+
+  const panePid = spawnSync("tmux", ["list-panes", "-t", session, "-F", "#{pane_pid}"], { encoding: "utf8" })
+  const pidLine = panePid.stdout.split("\n").find((line) => line.trim().length > 0)
+  const pid = pidLine ? Number(pidLine.trim()) : Number.NaN
+  const finalPid = Number.isFinite(pid) ? pid : null
+  return { pid: finalPid, output: { tmux_session: session, script_path: scriptPath, pane_pid: finalPid }, exitCode: 0 }
+}

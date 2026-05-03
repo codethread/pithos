@@ -13,7 +13,8 @@
       "meta": {
         "status_source": "claude_jsonl",
         "tty_provider": "tmux",
-        "debug_rule": "Use status first. Use tty_status only if status is missing, stale, or debugging harness/TTY issues."
+        "target_format": "pithos-<agent>-<session_id_first_8_chars>",
+        "debug_rule": "Use status first. Use tty_status only if status is missing, stale, or debugging harness/TTY issues. The --target for nudge/kill/tty_status is the tmux_session field returned by spawn, derivable from session_id via target_format."
       }
     }
   },

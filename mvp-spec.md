@@ -94,6 +94,9 @@ Planned dedicated repo, likely `~/dev/pithos`:
 ```text
 pithos/
   README.md
+  CONTRIBUTING.md
+  AGENT_LOOP.md
+  AGENTS.md
   package.json
   pnpm-workspace.yaml
   eslint.config.js

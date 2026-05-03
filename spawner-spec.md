@@ -283,12 +283,18 @@ That's it. No partials engine, no escaping, no helpers. ~6 lines.
 10. Build argv (claude harness):
     claude
       --session-id <uuid>
+      --dangerously-skip-permissions
+      --permission-mode acceptEdits
       --model <frontmatter.model>
-      --tools "<frontmatter.tools csv>"
-      --append-system-prompt <rendered prompt>
-      [--cwd <cwd>]   # if claude supports it; else use spawn() cwd
+      <rendered prompt>          # positional, so claude immediately starts working
+    The frontmatter `tools` list is rendered into the prompt body for the
+    agent's awareness; it is not passed via `--allowed-tools` because
+    `--dangerously-skip-permissions` is in effect.
 11. Execute via the selected harness:
-    - claude harness: spawn process, print JSON, exit with claude's code.
+    - claude harness: write a wrapper bash script (env exports + exec claude),
+      launch via `tmux new-session -d -s pithos-<agent>-<short-uuid>`,
+      return the tmux session name and pane pid. Detached so the spawning
+      process (Pandora's Bash tool, or `pandora-start.sh`) can continue.
     - fake harness:   write { env, argv, prompt } JSON to stdout. No exec.
 ```
 
@@ -311,10 +317,12 @@ type Harness = {
 };
 ```
 
-Two implementations. `claude` shells out via `child_process.spawn`. `fake`
-returns the spawn description and never execs. The fake is reused by
-`tasks.md` slice 18 (fake-Claude harness for deterministic spawn tests),
-so build it once, here.
+Two implementations. `claude` writes a wrapper script and launches it via
+`tmux new-session -d` so claude always has a TTY regardless of how
+`pandora-spawn` was invoked, then returns `{ tmux_session, script_path,
+pane_pid }`. `fake` returns the spawn description and never execs. The
+fake is reused by `tasks.md` slice 18 (fake-Claude harness for
+deterministic spawn tests), so build it once, here.
 
 ## 10. Hooks
 
@@ -361,6 +369,10 @@ uninstall` removes only the entries whose command points at our script.
 
 The `[ -n "$PITHOS_AGENT" ]` guard means Adam's normal Claude sessions are
 unaffected — only spawner-launched sessions trigger heartbeats.
+
+### Alternative install — Claude Code plugin (preferred on Nix)
+
+On systems where `~/.claude/settings.json` is a read-only home-manager symlink, `pandora-spawn hooks install` will fail because it cannot write to that file. The preferred install path on those setups is the Claude Code plugin at `plugin/` in the repo root. The plugin's `hooks/hooks.json` registers the same two entries (`PreToolUse` + `SessionEnd prompt_input_exit`) declaratively via `${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.sh` (a symlink into `packages/spawner/hooks/claude-code/dispatch.sh`), without touching `settings.json`. Install once with `/plugin marketplace add https://github.com/codethread/pithos` then `/plugin install pithos@codethread/pithos`. The CLI path (`pandora-spawn hooks install`) remains the manual fallback for users on writable-settings systems.
 
 ## 11. Templates shipped in MVP
 

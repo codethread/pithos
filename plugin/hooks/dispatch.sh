@@ -1,0 +1,1 @@
+../../packages/spawner/hooks/claude-code/dispatch.sh

@@ -7,11 +7,11 @@ exports[`envy spawn renders deterministic prompt + argv (fake harness) 1`] = `
     "claude",
     "--session-id",
     "session-TEST",
+    "--dangerously-skip-permissions",
+    "--permission-mode",
+    "acceptEdits",
     "--model",
     "opus",
-    "--tools",
-    "Bash,Read,Grep,Glob",
-    "--append-system-prompt",
     "You have access to exactly these tools: Bash,Read,Grep,Glob. No others exist.
 
 You are Envy. Claim one Pithos task with capability \`watch\`, oversee it, attach a worker artifact, complete or fail your task, exit.

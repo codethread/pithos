@@ -1,0 +1,78 @@
+# Contributing
+
+This doc is the build/verify/commit baseline for both humans and agents working on Pithos. Engineering rules that are non-negotiable live in `AGENTS.md`. The autonomous slice-loop process lives in `AGENT_LOOP.md`.
+
+## Prereqs
+
+- Node LTS (workspace pins `24.15.0` via Volta).
+- `pnpm` (workspace pins `10.x` via Volta).
+- macOS or Linux. Git.
+- For the real Claude harness: `tmux` and `claude` (Claude Code CLI) on PATH.
+
+```sh
+pnpm install
+pnpm run build
+```
+
+`pnpm run build` builds every workspace package and links the `pithos` and `pandora-spawn` bins on global PATH via `package.json#bin`.
+
+## Verify before every commit
+
+```sh
+pnpm verify   # lint + typecheck + test + build
+```
+
+Or run them individually:
+
+```sh
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm run build
+```
+
+Checks must be green before every commit. No "leftover issues", no "next commit". Never `--no-verify`. Never disable a failing test to make the bar green.
+
+## Commits
+
+- Atomic. One concern per commit.
+- Conventional-ish prefix: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
+- Message body summarises the **why**, not the what — `git diff` is the what.
+- Pass messages via heredoc:
+
+  ```sh
+  git commit -m "$(cat <<'EOF'
+  feat(spawner): tmux-wrap real claude harness
+
+  Detached tmux gives claude a TTY regardless of caller, and a positional
+  prompt arg makes the agent start working instead of sitting at the input.
+  EOF
+  )"
+  ```
+
+## Doc map
+
+| When you want to…                              | Read…                                |
+| ---------------------------------------------- | ------------------------------------ |
+| Understand product intent                      | `mvp-spec.md`                        |
+| Find the next slice to work on                 | `tasks-adhoc.md`, then `tasks.md`    |
+| Understand engineering rules (fail loudly etc) | `AGENTS.md`                          |
+| Run the autonomous slice loop                  | `AGENT_LOOP.md`                      |
+| Touch DB schema, CLI shape, or migrations      | `technical-design.md`                |
+| Touch templates, hooks, or harness wiring      | `spawner-spec.md`                    |
+| Touch the Claude Code plugin manifest or hooks | `plugin/README.md`                   |
+| Look at prior art                              | `references/` (read-only)            |
+
+## Per-package contributing notes
+
+Each package has its own `CONTRIBUTING.md` with quality bar and add-a-feature checklist:
+
+- `packages/cli/CONTRIBUTING.md` — full Effect quality bar (tagged errors, schemas at IO, structured logs).
+- `packages/spawner/CONTRIBUTING.md` — relaxed bar per `spawner-spec.md` §2 (plain TS glue, one snapshot test).
+
+## Scope discipline
+
+- Don't add daemon/spawn automation/recipe engine before the MVP slices ask for it.
+- Don't expand the spawner package surface beyond `spawner-spec.md`.
+- Don't use real Claude/tmux in AFK tests. Real Claude integration is HITL only (slice 21+).
+- Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness — see `packages/cli/src` for the pattern.

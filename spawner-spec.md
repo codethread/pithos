@@ -9,8 +9,8 @@
 ## 1. Purpose
 
 Pandora-Spawn is a tiny CLI that turns a versioned agent template into a
-running Claude Code session. It owns templates, frontmatter, render context,
-and the harness adapter that builds the `claude` argv.
+running agent session. It owns templates, manifest config, launcher command
+recipes, render context, and the harness adapter that builds the `claude` argv.
 
 Pithos handles state (queue, leases, events, artifacts, briefing).
 Pandora-Spawn handles agent orchestration. The two communicate only via the
@@ -42,6 +42,9 @@ data, or speculative abstractions, stop. This is glue.
 - No template language with conditionals/loops. A `{{var}}` replacer is enough.
 - No multi-harness routing in MVP — claude only, fake for tests. The
   harness module is shaped to accept other adapters later, not now.
+- No separate tmux/zellij/remote adapter package. Launcher details live in
+  source-controlled manifest config until at least two real adapters prove a
+  package boundary is needed.
 - No publishing to npm. Workspace bin only.
 
 ## 4. Package layout
@@ -56,12 +59,14 @@ packages/spawner/
   src/
     main.ts                    # arg parse → dispatch → exit code
     cli.ts                     # tiny hand-rolled parser; no @effect/cli
-    template.ts                # frontmatter parse + {{var}} render
+    template.ts                # agents.json parse + {{var}} render
     harness.ts                 # buildClaudeArgv + spawnFake
     hooks-install.ts           # merge into ~/.claude/settings.json
     paths.ts                   # locate templates dir, hooks dir
   templates/
+    agents.json                # agents + launcher command recipes
     _common.md                 # shared invariants (was the skill body)
+    pandora.md.tmpl
     envy.md.tmpl
     toil.md.tmpl
   hooks/claude-code/
@@ -108,7 +113,71 @@ instead of execing claude.
 Exit codes: `0` success, `1` user error, `2` template/frontmatter error.
 That is the entire surface.
 
-## 6. Template format
+## 6. Manifest and launcher command API
+
+`templates/agents.json` is source-controlled MVP config. It contains both
+agent definitions and launcher command recipes. Pithos does not read this file;
+it remains state-only. Pandora-Spawn reads it to render agent prompts and expose
+intent-level delegation commands.
+
+Agent-facing launcher command names are stable API:
+
+| Command | Intent |
+|---|---|
+| `spawn` | Start/delegate a session. |
+| `status` | Read semantic session history/status. Prefer this for progress/completion checks. |
+| `nudge` | Send follow-up intent/input to an existing session. May become queue-backed later. |
+| `kill` | Forcibly terminate/recycle a session. Not graceful cleanup. |
+| `tty_status` | Raw TTY/pane capture for last-resort harness debugging. |
+
+Command bodies are launcher implementation detail and may use tmux, zellij, a
+remote runner, or another adapter later. Pandora may receive launcher `meta` for
+introspection/debugging; normal specialised agents should not need it.
+
+MVP `status` should reuse the prior-art semantic status behaviour rather than
+raw tmux capture: find Claude JSONL logs under `~/.claude/projects/**/<id>.jsonl`
+(and Pi logs if/when Pi is added), parse recent user/assistant messages, and
+surface tool-only assistant turns as `[tools: ...]`. Use `tty_status` only when
+that semantic status is missing, stale, or debugging the TTY harness itself.
+
+Example manifest shape:
+
+```json
+{
+  "launchers": {
+    "local_claude_tmux": {
+      "kind": "tmux",
+      "harness": "claude-code",
+      "commands": {
+        "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
+        "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
+        "nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
+        "kill": "pandora-spawn kill --target {{target}}",
+        "tty_status": "pandora-spawn tty-status --target {{target}}"
+      },
+      "meta": {
+        "status_source": "claude_jsonl",
+        "tty_provider": "tmux",
+        "debug_rule": "Use status first. Use tty_status only as last resort."
+      }
+    }
+  },
+  "agents": [
+    {
+      "agent": "pandora",
+      "model": "opus",
+      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "capability": "orchestrate",
+      "includes": ["_common.md"],
+      "system_prompt": "pandora.md.tmpl",
+      "launcher": "local_claude_tmux",
+      "inject_meta": true
+    }
+  ]
+}
+```
+
+## 7. Template format
 
 ```markdown
 ---
@@ -144,7 +213,7 @@ Run `pithos <subcommand> --help` for per-command flags.
 {{_common.md}}
 ```
 
-### Frontmatter schema
+### Agent manifest schema
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -153,6 +222,8 @@ Run `pithos <subcommand> --help` for per-command flags.
 | `tools` | string[] | yes | Tool names; passed to `claude --tools` as CSV. Empty array is a validation error — be explicit. |
 | `capability` | string | yes | Pithos capability the agent expects to claim. Rendered into prompt only. |
 | `includes` | string[] | no | Other files in `templates/` whose contents are inlined where the matching `{{filename}}` placeholder appears. |
+| `launcher` | string | no | Key into top-level `launchers`. If present, `cmd_*` vars become available. |
+| `inject_meta` | boolean | no | If true, render launcher metadata into `{{launcher_meta}}`. Intended for Pandora. |
 
 Validate via a tiny schema check on parse; throw with a clear path/field on
 failure. No Effect.Schema needed (this is the spawner, not pithos).
@@ -172,6 +243,13 @@ type RenderContext = {
   task_id: string;            // empty string if --task absent; never null
   cwd: string;
   pithos_help: string;        // captured from `pithos --help` at spawn time
+  session_id: string;
+  cmd_spawn: string;
+  cmd_status: string;
+  cmd_nudge: string;
+  cmd_kill: string;
+  cmd_tty_status: string;
+  launcher_meta: string;
 } & { [includeName: string]: string };  // populated from includes[]
 ```
 
@@ -188,7 +266,7 @@ function render(template: string, ctx: RenderContext): string {
 
 That's it. No partials engine, no escaping, no helpers. ~6 lines.
 
-## 7. Spawn flow
+## 8. Spawn flow
 
 ```
 1. Parse argv. Resolve agent name.
@@ -217,7 +295,7 @@ That's it. No partials engine, no escaping, no helpers. ~6 lines.
 Step 6 may fail (DB not initialised, scope unknown). Surface the `pithos`
 stderr verbatim and exit non-zero — do not paper over it.
 
-## 8. Harness module
+## 9. Harness module
 
 ```ts
 type Spawn = {
@@ -238,7 +316,7 @@ returns the spawn description and never execs. The fake is reused by
 `tasks.md` slice 18 (fake-Claude harness for deterministic spawn tests),
 so build it once, here.
 
-## 9. Hooks
+## 10. Hooks
 
 One script, two registrations. Two responsibilities only:
 
@@ -284,16 +362,17 @@ uninstall` removes only the entries whose command points at our script.
 The `[ -n "$PITHOS_AGENT" ]` guard means Adam's normal Claude sessions are
 unaffected — only spawner-launched sessions trigger heartbeats.
 
-## 10. Templates shipped in MVP
+## 11. Templates shipped in MVP
 
 - `_common.md` — invariants (fencing tokens, exit codes, anti-patterns).
   Content is a trimmed version of today's `skills/pithos-cli/SKILL.md`.
+- `pandora.md.tmpl` — orchestrator role. Receives launcher command API and meta.
 - `envy.md.tmpl` — task-scoped execution coordinator. Capability `watch`.
 - `toil.md.tmpl` — short-lived recipe dispatcher. Capability `triage`.
 
 Greed and worker templates are deferred until a real workflow asks for them.
 
-## 11. Testing
+## 12. Testing
 
 One file: `test/spawn.snap.test.ts`.
 
@@ -327,7 +406,7 @@ the snapshot updates intentionally as part of the same change).
 
 That's the whole test plan. Add more only when something breaks.
 
-## 12. Implementation order
+## 13. Implementation order
 
 1. Scaffold `packages/spawner` package + bin + esbuild script (mirror cli).
 2. Write `template.ts` (parse + render).
@@ -342,7 +421,7 @@ That's the whole test plan. Add more only when something breaks.
 
 Stop. Anything beyond this list is scope creep for this slice.
 
-## 13. Out of scope (for follow-up slices, not this one)
+## 14. Out of scope (for follow-up slices, not this one)
 
 - Real-Claude smoke spawn from inside Vitest (HITL slice 21 territory).
 - Worker template / delegate flow.

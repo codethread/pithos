@@ -1,12 +1,42 @@
 {
+  "launchers": {
+    "local_claude_tmux": {
+      "kind": "tmux",
+      "harness": "claude-code",
+      "commands": {
+        "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
+        "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
+        "nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
+        "kill": "pandora-spawn kill --target {{target}}",
+        "tty_status": "pandora-spawn tty-status --target {{target}}"
+      },
+      "meta": {
+        "status_source": "claude_jsonl",
+        "tty_provider": "tmux",
+        "debug_rule": "Use status first. Use tty_status only if status is missing, stale, or debugging harness/TTY issues."
+      }
+    }
+  },
   "agents": [
+    {
+      "agent": "pandora",
+      "model": "opus",
+      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "capability": "orchestrate",
+      "includes": ["_common.md"],
+      "system_prompt": "pandora.md.tmpl",
+      "launcher": "local_claude_tmux",
+      "inject_meta": true
+    },
     {
       "agent": "envy",
       "model": "opus",
       "tools": ["Bash", "Read", "Grep", "Glob"],
       "capability": "watch",
       "includes": ["_common.md"],
-      "system_prompt": "envy.md.tmpl"
+      "system_prompt": "envy.md.tmpl",
+      "launcher": "local_claude_tmux",
+      "inject_meta": false
     },
     {
       "agent": "toil",
@@ -14,7 +44,9 @@
       "tools": ["Bash", "Read", "Grep", "Glob"],
       "capability": "triage",
       "includes": ["_common.md"],
-      "system_prompt": "toil.md.tmpl"
+      "system_prompt": "toil.md.tmpl",
+      "launcher": "local_claude_tmux",
+      "inject_meta": false
     }
   ]
 }

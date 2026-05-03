@@ -125,33 +125,34 @@
     **User stories covered:** US10  
     **Vertical slice:** Ensure top-level and subcommand `--help` exists for all MVP commands, includes examples and exit codes, snapshot/help tests, and validates the design principle that agents use help instead of memorised flags.
 
-16. **Title:** Add minimal Claude agent files and pithos Skill  
-    **Status:** Unbuilt  
-    **Type:** HITL  
-    **Blocked by:** 15  
-    **User stories covered:** US10  
-    **Vertical slice:** Add `.claude/agents/envy.md`, `.claude/agents/toil.md`, minimal `skills/pithos-cli/SKILL.md`, preload Skill in frontmatter, and human-review prompts for tone/scope so agents do not overreach.
+16. **Title:** Scaffold `@pithos/spawner` package with templates and dispatch hook
+    **Status:** Unbuilt
+    **Type:** AFK
+    **Blocked by:** 15
+    **User stories covered:** US10
+    **Spec:** `spawner-spec.md` (authoritative — read this before starting).
+    **Vertical slice:** Create a new workspace package `packages/spawner` (workspace name `@pithos/spawner`, global bin `pandora-spawn`). Ship template files `templates/{_common.md, envy.md.tmpl, toil.md.tmpl}`, a single hook script `hooks/claude-code/dispatch.sh`, frontmatter parser + `{{var}}` renderer, and a claude/fake harness module. Default verb is spawn (`pandora-spawn --agent envy --scope ...`); fake harness emits `{ env, argv, prompt }` JSON instead of execing claude. **Quality bar is intentionally lower than `@pithos/cli`** — minimal Effect plumbing, no tagged-error hierarchy, ONE Vitest snapshot smoke test exercising the fake harness end-to-end. No agent files in `.claude/agents/`; templates live entirely inside this package so they don't leak into consumer repos. Drop the `skills/pithos-cli/SKILL.md` direction — its content moves into `templates/_common.md` as a partial. See spec §2 for the strict simplicity bar.
 
-17. **Title:** Wire Claude hook heartbeat wrappers  
-    **Status:** Unbuilt  
-    **Type:** AFK  
-    **Blocked by:** 9, 15  
-    **User stories covered:** US4, US9  
-    **Vertical slice:** Add hook scripts that read `PITHOS_RUN_ID`, call `pithos heartbeat --hook ... --throttle-seconds 60`, and call `pithos run end` on SessionEnd; include shell tests or dry-run tests with fake env vars. For StopFailure, record a heartbeat with hook context only; no `run event` command exists in MVP. Keep all hook tests isolated from real Claude/tmux sessions.
+17. **Title:** Wire heartbeat/SessionEnd hook via `pandora-spawn hooks install`
+    **Status:** Unbuilt
+    **Type:** AFK
+    **Blocked by:** 9, 16
+    **User stories covered:** US4, US9
+    **Vertical slice:** Add `pandora-spawn hooks install` (and `uninstall`) which idempotently merges two entries into `~/.claude/settings.json`: `PreToolUse` (no matcher) and `SessionEnd` (matcher `prompt_input_exit` only — `Stop` would fire every assistant turn, and `clear`/`resume` matchers don't end the process). Both call `hooks/claude-code/dispatch.sh` with the hook name as argv. The script no-ops unless `PITHOS_AGENT` is set, then dispatches to `pithos heartbeat --throttle-seconds 60` (default) or `pithos run end --status ended` (SessionEnd). No tests for the bash script — manual smoke after install. Hooks live globally, not per-repo, so consumer repositories stay clean.
 
-18. **Title:** Add fake Claude harness for deterministic spawn tests  
-    **Status:** Unbuilt  
-    **Type:** AFK  
-    **Blocked by:** 15, 17  
-    **User stories covered:** US9, US10  
-    **Vertical slice:** Add an injectable Claude harness interface and a fake Claude executable/process used in tests. The fake follows the expected command contract, accepts flags such as `--agent`, `--append-system-prompt`, and `--model`, emits stub responses/session IDs, and lets tests verify spawn/status flows without real Claude API calls.
+18. **Title:** Reuse spawner fake harness for deterministic spawn tests
+    **Status:** Unbuilt
+    **Type:** AFK
+    **Blocked by:** 16
+    **User stories covered:** US9, US10
+    **Vertical slice:** The fake harness from slice 16 is the deliverable. This slice is the conceptual hook for any *additional* tests outside `packages/spawner` that need to assert against spawn behaviour without real Claude. Likely no new code is required; close as "subsumed by 16" if no other consumer needs it by the time we get here.
 
-19. **Title:** Document explicit spawn flow for Envy  
-    **Status:** Unbuilt  
-    **Type:** AFK  
-    **Blocked by:** 6, 15, 16, 18  
-    **User stories covered:** US9, US10  
-    **Vertical slice:** Add README/demo command sequence: register run, launch `claude --agent envy --append-system-prompt ...`, pass `PITHOS_RUN_ID`, and verify run appears in `inspect run`; no automatic spawning. Include a test/demo variant using the fake Claude harness.
+19. **Title:** Document explicit spawn flow for Envy
+    **Status:** Unbuilt
+    **Type:** AFK
+    **Blocked by:** 6, 15, 16
+    **User stories covered:** US9, US10
+    **Vertical slice:** Write a `packages/spawner/README.md` with the demo command sequence: `pithos init && pithos scope upsert ... && pithos enqueue ... && pandora-spawn --agent envy --scope ...`. Verify the spawned run appears in `pithos inspect run`. Include a `--harness fake` variant for offline reproduction. No automatic spawning; explicit only.
 
 20. **Title:** Run the first manual end-to-end Pithos demo  
     **Status:** Unbuilt  

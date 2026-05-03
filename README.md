@@ -57,6 +57,7 @@ When asked to continue Pithos implementation:
 | `tasks.md`            | Numbered tracer-bullet implementation slices; primary work queue      |
 | `mvp-spec.md`         | MVP product/domain spec                                               |
 | `technical-design.md` | Technical contracts and implementation details                        |
+| `spawner-spec.md`     | `@pithos/spawner` (`pandora-spawn`) package spec; read for slice 16+  |
 | `ambition.md`         | Long-term direction; do not overbuild from it                         |
 | `references/`         | Copied prior art from the current Pandora prototype                   |
 

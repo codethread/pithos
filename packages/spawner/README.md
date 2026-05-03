@@ -114,7 +114,7 @@ pandora-spawn --agent envy \
   --scope repo:$(echo "$PWD" | sed "s|$HOME/||g")
 
 # 5. Verify the run was registered
-pithos inspect run --run <run_id from step 4 output>
+pithos inspect run <run_id from step 4 output>
 ```
 
 For fully offline reproduction use `--harness fake`; the run is still registered in

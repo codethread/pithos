@@ -33,7 +33,7 @@ export const installHooks = (): void => {
   for (const [name, entry] of Object.entries(entries)) {
     const list = hooks[name] ?? []
     const command = entry.hooks[0]?.command
-    hooks[name] = list.some((existing) => existing.hooks.some((hook) => hook.command === command)) ? list : [...list, entry]
+    hooks[name] = list.some((existing) => existing.matcher === entry.matcher && existing.hooks.some((hook) => hook.command === command)) ? list : [...list, entry]
   }
   writeSettings({ ...settings, hooks })
 }

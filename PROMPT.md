@@ -374,15 +374,19 @@ Always capture these exact facts:
 
 ## Current known outcome from the most recent run
 
-The latest real rerun failed here:
+AH-4 rerun (2026-05-03) — **capability reset successful**:
 
-- Pandora delegated to Toil successfully
-- Toil claimed the triage task and created child task `task_a52a2b079b7c4645`
-- Toil used capability `execute`
-- Pandora spawned Envy successfully
-- Envy reported `No claimable watch task exists`
-- no worker run was observed
-- `scripts/hello.sh` was not created
-- no artifact was attached
+- Pandora (run `run_08c448593bb848d4`, session `93f9004c-01fe-427f-8dc3-35ad545a5aa6`) read the briefing, inspected the triage task, and delegated to Toil without writing the file itself
+- Toil (run `run_416da5e0def445ff`) claimed triage task `task_35f44fb598644f26` and created child task `task_73ba4de9fd884074` with capability **`implement`** (was `execute` before AH-3)
+- Pandora spawned Envy (run `run_1d7d7b27331d467d`)
+- Envy claimed the `implement` task — `No claimable watch task exists` did **not** recur
+- Envy created `scripts/hello.sh`, verified `bash scripts/hello.sh` → `hello`, attached artifact `artifact_0261f879717b4546` (kind: `completion`, title: `hello-script-done`), and completed the task
+- Pandora observed Envy's completion and reported the delegation chain without touching the file
+- DB used: `~/.pandora/pithos.sqlite` (DEFAULT_DB)
+- Hooks active: `PreToolUse` heartbeats observed on all three runs
+
+**Partial gaps vs full success criteria:**
+- No separate worker sub-session was spawned; Envy implemented the file directly (acceptable for a trivial task)
+- Artifact kind is `completion`, not `worker-completion` as the spec asks; Toil's task body used `kind: completion` in its instructions to Envy
 
 Keep this section updated after each rerun so the workflow remains an accurate operator document.

@@ -46,7 +46,7 @@
 ## Slice AH-4 — Re-run the HITL delegation workflow after the capability reset
 
 **Title:** Re-run Pandora → Toil → Envy → worker after capability reset
-**Status:** Unbuilt
+**Status:** Built
 **Type:** HITL
 **Blocked by:** AH-2, AH-3
 **User stories:** US11 (manual end-to-end demo)

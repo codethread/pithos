@@ -34,7 +34,7 @@
 ## Slice AH-3 — Prevent stage/capability drift in Pandora/Toil prompts
 
 **Title:** Stop recipe stage names leaking into queue capabilities
-**Status:** Unbuilt
+**Status:** Built
 **Type:** AFK
 **Blocked by:** AH-2
 **User stories:** US10 (agent config), US11 (manual end-to-end demo)

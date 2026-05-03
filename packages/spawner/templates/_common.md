@@ -8,3 +8,4 @@
 - Exit code 5 from `claim` means no claimable work.
 - Heartbeat during long work so sweep does not mark your run stale.
 - Attach a useful artifact before completing substantial work.
+- Queue capabilities are `triage`, `design`, or `implement`. Recipe stage names (such as `execute`, `watch`, `run`) must never be used as `--capability` values.

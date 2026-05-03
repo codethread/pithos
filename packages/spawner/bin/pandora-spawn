@@ -1,0 +1,266 @@
+#!/usr/bin/env node
+
+// src/main.ts
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+
+// src/cli.ts
+var UserInputError = class extends Error {
+  exitCode = 1;
+};
+var HelpRequested = class extends Error {
+  exitCode = 0;
+};
+var valueAfter = (args, index, flag) => {
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
+  return value;
+};
+var parseArgs = (args) => {
+  if (args[0] === "templates" && args[1] === "list") return { command: "templates:list" };
+  if (args[0] === "hooks" && args[1] === "install") return { command: "hooks:install" };
+  if (args[0] === "hooks" && args[1] === "uninstall") return { command: "hooks:uninstall" };
+  if (args.includes("--help") || args.includes("-h")) throw new HelpRequested("Usage: pandora-spawn --agent <name> --scope <scope-id> [--task <id>] [--cwd <path>] [--harness claude|fake]");
+  let agent = "";
+  let scope = "";
+  let task;
+  let cwd = process.cwd();
+  let harness = "claude";
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--agent") agent = valueAfter(args, index, arg);
+    else if (arg === "--scope") scope = valueAfter(args, index, arg);
+    else if (arg === "--task") task = valueAfter(args, index, arg);
+    else if (arg === "--cwd") cwd = valueAfter(args, index, arg);
+    else if (arg === "--harness") {
+      const raw = valueAfter(args, index, arg);
+      if (raw !== "claude" && raw !== "fake") throw new Error("--harness must be claude or fake");
+      harness = raw;
+    } else if (arg?.startsWith("--")) throw new Error(`Unknown flag: ${arg}`);
+  }
+  if (!agent) throw new UserInputError("--agent is required");
+  if (!scope) throw new UserInputError("--scope is required");
+  return task === void 0 ? { command: "spawn", agent, scope, cwd, harness } : { command: "spawn", agent, scope, task, cwd, harness };
+};
+
+// src/harness.ts
+import { spawn } from "node:child_process";
+var buildClaudeArgv = (input) => [
+  "claude",
+  "--session-id",
+  input.sessionId,
+  "--model",
+  input.model,
+  "--tools",
+  input.toolsCsv,
+  "--append-system-prompt",
+  input.prompt
+];
+var runFake = (description) => Promise.resolve({
+  pid: null,
+  output: description,
+  exitCode: 0
+});
+var runClaude = async (description) => new Promise((resolve2, reject) => {
+  const child = spawn(description.argv[0] ?? "claude", description.argv.slice(1), {
+    cwd: description.cwd,
+    env: { ...process.env, ...description.env },
+    stdio: "inherit"
+  });
+  child.on("error", reject);
+  child.on("close", (code) => resolve2({ pid: child.pid ?? null, output: { exit_code: code }, exitCode: code ?? 1 }));
+});
+
+// src/hooks-install.ts
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname as dirname2, join } from "node:path";
+import { homedir } from "node:os";
+
+// src/paths.ts
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+var here = dirname(fileURLToPath(import.meta.url));
+var packageRoot = resolve(here, "..");
+var templatesDir = resolve(packageRoot, "templates");
+var agentsPath = resolve(templatesDir, "agents.json");
+var hooksDir = resolve(packageRoot, "hooks", "claude-code");
+
+// src/hooks-install.ts
+var settingsPath = () => join(homedir(), ".claude", "settings.json");
+var dispatchPath = () => join(hooksDir, "dispatch.sh");
+var readSettings = () => {
+  const path = settingsPath();
+  if (!existsSync(path)) return {};
+  return JSON.parse(readFileSync(path, "utf8"));
+};
+var writeSettings = (settings) => {
+  const path = settingsPath();
+  mkdirSync(dirname2(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(settings, null, 2)}
+`);
+};
+var installHooks = () => {
+  const settings = readSettings();
+  const hooks = settings.hooks ?? {};
+  const dispatch = dispatchPath();
+  const entries = {
+    PreToolUse: { hooks: [{ type: "command", command: `${dispatch} PreToolUse` }] },
+    SessionEnd: { matcher: "prompt_input_exit", hooks: [{ type: "command", command: `${dispatch} SessionEnd` }] }
+  };
+  for (const [name, entry] of Object.entries(entries)) {
+    const list = hooks[name] ?? [];
+    const command = entry.hooks[0]?.command;
+    hooks[name] = list.some((existing) => existing.hooks.some((hook) => hook.command === command)) ? list : [...list, entry];
+  }
+  writeSettings({ ...settings, hooks });
+};
+var uninstallHooks = () => {
+  const settings = readSettings();
+  const dispatch = dispatchPath();
+  const hooks = {};
+  for (const [name, list] of Object.entries(settings.hooks ?? {})) {
+    const kept = list.filter((entry) => !entry.hooks.some((hook) => hook.command.startsWith(dispatch)));
+    if (kept.length > 0) hooks[name] = kept;
+  }
+  writeSettings({ ...settings, hooks });
+};
+
+// src/template.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { basename, join as join2 } from "node:path";
+var TemplateError = class extends Error {
+  exitCode = 2;
+};
+var readTemplateFile = (path) => {
+  try {
+    return readFileSync2(path, "utf8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new TemplateError(`${path}: failed to read template file: ${message}`);
+  }
+};
+var isStringArray = (value) => Array.isArray(value) && value.every((item) => typeof item === "string");
+var readStringField = (path, raw, field) => {
+  const value = raw[field];
+  if (typeof value !== "string" || value.length === 0) throw new TemplateError(`${path}: ${field} must be a non-empty string`);
+  return value;
+};
+var parseOneManifest = (path, parsed) => {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new TemplateError(`${path}: agent manifest must be a JSON object`);
+  const raw = parsed;
+  const tools = raw.tools;
+  if (!isStringArray(tools) || tools.length === 0) throw new TemplateError(`${path}: tools must be a non-empty string array`);
+  const includes = raw.includes;
+  if (includes !== void 0 && !isStringArray(includes)) throw new TemplateError(`${path}: includes must be a string array`);
+  return {
+    agent: readStringField(path, raw, "agent"),
+    model: readStringField(path, raw, "model"),
+    tools,
+    capability: readStringField(path, raw, "capability"),
+    includes: includes ?? [],
+    system_prompt: readStringField(path, raw, "system_prompt")
+  };
+};
+var loadAgentManifests = (agentsPath2) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(readTemplateFile(agentsPath2));
+  } catch (error) {
+    if (error instanceof TemplateError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new TemplateError(`${agentsPath2}: invalid JSON: ${message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) || !("agents" in parsed)) throw new TemplateError(`${agentsPath2}: agents must be a JSON array field`);
+  const agents = parsed.agents;
+  if (!Array.isArray(agents)) throw new TemplateError(`${agentsPath2}: agents must be a JSON array field`);
+  const manifests = agents.map((agent, index) => parseOneManifest(`${agentsPath2}#agents[${index}]`, agent));
+  const names = /* @__PURE__ */ new Set();
+  for (const manifest of manifests) {
+    if (names.has(manifest.agent)) throw new TemplateError(`${agentsPath2}: duplicate agent ${manifest.agent}`);
+    names.add(manifest.agent);
+  }
+  return manifests;
+};
+var loadTemplate = (agentsPath2, templatesDir2, agent) => {
+  const manifest = loadAgentManifests(agentsPath2).find((item) => item.agent === agent);
+  if (!manifest) throw new TemplateError(`${agentsPath2}: unknown agent ${agent}`);
+  if (basename(manifest.system_prompt) !== manifest.system_prompt) throw new TemplateError(`${agentsPath2}: system_prompt must be a template basename`);
+  if (manifest.system_prompt !== `${agent}.md.tmpl`) throw new TemplateError(`${agentsPath2}: system_prompt must match agent stem: ${agent}.md.tmpl`);
+  const includes = {};
+  for (const include of manifest.includes) {
+    if (basename(include) !== include) throw new TemplateError(`${agentsPath2}: include must be a template basename: ${include}`);
+    includes[include] = readTemplateFile(join2(templatesDir2, include));
+  }
+  return { manifest, body: readTemplateFile(join2(templatesDir2, manifest.system_prompt)), includes };
+};
+var render = (template, ctx) => template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key) => {
+  if (!(key in ctx)) throw new TemplateError(`Unknown template var: ${key}`);
+  return ctx[key] ?? "";
+});
+
+// src/main.ts
+var pithos = (args, env = process.env) => {
+  try {
+    return execFileSync("pithos", args, { env }).toString();
+  } catch (error) {
+    const failure = error;
+    if (Buffer.isBuffer(failure.stderr) && failure.stderr.length > 0) {
+      process.stderr.write(failure.stderr);
+    }
+    throw new Error(`pithos ${args.join(" ")} failed`);
+  }
+};
+var writeJson = (value) => {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}
+`);
+};
+var parseRunId = (raw) => {
+  const parsed = JSON.parse(raw);
+  if (typeof parsed !== "object" || parsed === null || !("run" in parsed)) throw new Error("pithos run register returned invalid JSON");
+  const runOutput = parsed;
+  if (typeof runOutput.run.id !== "string") throw new Error("pithos run register returned invalid run id");
+  return runOutput.run.id;
+};
+var run = async () => {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.command === "hooks:install") {
+    installHooks();
+    writeJson({ ok: true });
+    return;
+  }
+  if (opts.command === "hooks:uninstall") {
+    uninstallHooks();
+    writeJson({ ok: true });
+    return;
+  }
+  if (opts.command === "templates:list") {
+    const templates = loadAgentManifests(agentsPath).map((manifest) => ({ name: manifest.agent, model: manifest.model, tools: manifest.tools, capability: manifest.capability }));
+    writeJson({ ok: true, templates });
+    return;
+  }
+  const template = loadTemplate(agentsPath, templatesDir, opts.agent);
+  const pithosHelp = process.env.PANDORA_SPAWN_FAKE_PITHOS_HELP ?? pithos(["--help"]);
+  const sessionId = process.env.PANDORA_SPAWN_FAKE_SESSION_ID ?? randomUUID();
+  const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? parseRunId(pithos(["run", "register", "--agent-kind", opts.agent, "--scope", opts.scope, "--cwd", opts.cwd, "--session-id", sessionId]));
+  const toolsCsv = template.manifest.tools.join(",");
+  const context = { agent: opts.agent, capability: template.manifest.capability, model: template.manifest.model, tools_csv: toolsCsv, run_id: runId, scope_id: opts.scope, task_id: opts.task ?? "", cwd: opts.cwd, pithos_help: pithosHelp, ...template.includes };
+  const prompt = render(template.body, context);
+  const env = { PITHOS_RUN_ID: runId, PITHOS_AGENT: opts.agent, PITHOS_SCOPE_ID: opts.scope, PITHOS_OUTPUT: "json", ...opts.task ? { PITHOS_TASK_ID: opts.task } : {} };
+  const argv = buildClaudeArgv({ sessionId, model: template.manifest.model, toolsCsv, prompt });
+  const description = { env, argv, prompt, cwd: opts.cwd };
+  const result = opts.harness === "fake" ? await runFake(description) : await runClaude(description);
+  writeJson({ ok: result.exitCode === 0, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, pid: result.pid, ...result.output });
+  process.exitCode = result.exitCode;
+};
+run().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof HelpRequested) {
+    process.stdout.write(`${message}
+`);
+    process.exit(0);
+  }
+  process.stderr.write(`${message}
+`);
+  const exitCode = typeof error === "object" && error !== null && "exitCode" in error && typeof error.exitCode === "number" ? error.exitCode : 1;
+  process.exit(exitCode);
+});

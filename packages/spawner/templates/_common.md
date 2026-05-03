@@ -1,0 +1,10 @@
+- Use `pithos --help` and `pithos <command> --help`; help is the contract.
+- Do not write to the Pithos DB directly. Mutate state only through `pithos`.
+- Check process exit codes before parsing output.
+- All successful mutations write JSON `{ "ok": true, ... }` to stdout.
+- Failures write JSON errors to stderr and exit non-zero.
+- Fencing tokens from `claim` must be passed to `heartbeat`, `complete`, and `fail`.
+- Exit code 4 means a stale fencing token; stop touching that task.
+- Exit code 5 from `claim` means no claimable work.
+- Heartbeat during long work so sweep does not mark your run stale.
+- Attach a useful artifact before completing substantial work.

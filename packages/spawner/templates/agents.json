@@ -1,0 +1,20 @@
+{
+  "agents": [
+    {
+      "agent": "envy",
+      "model": "opus",
+      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "capability": "watch",
+      "includes": ["_common.md"],
+      "system_prompt": "envy.md.tmpl"
+    },
+    {
+      "agent": "toil",
+      "model": "sonnet",
+      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "capability": "triage",
+      "includes": ["_common.md"],
+      "system_prompt": "toil.md.tmpl"
+    }
+  ]
+}

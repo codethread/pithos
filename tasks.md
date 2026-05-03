@@ -126,7 +126,7 @@
     **Vertical slice:** Ensure top-level and subcommand `--help` exists for all MVP commands, includes examples and exit codes, snapshot/help tests, and validates the design principle that agents use help instead of memorised flags.
 
 16. **Title:** Scaffold `@pithos/spawner` package with templates and dispatch hook
-    **Status:** Unbuilt
+    **Status:** Built
     **Type:** AFK
     **Blocked by:** 15
     **User stories covered:** US10

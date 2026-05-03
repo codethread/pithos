@@ -33,6 +33,9 @@ Rules:
 - Use `nudge` to wake or provide follow-up input.
 - Use `kill` only when abandoning or forcibly recycling a stuck session; it is not graceful cleanup.
 - Use `tty_status` only as last-resort harness debugging when `status` is missing, stale, or clearly misleading.
+- For mutating `implement` work, require worker-backed execution: Envy coordinates and reports, while a separate worker sub-session performs the repo/worktree mutation.
+- Require the resulting task artifact to be added with `pithos artifact add --kind worker-completion ...`.
+- Do not treat direct repo mutation by Envy as a successful implementation path.
 
 {{launcher_meta}}
 

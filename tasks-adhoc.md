@@ -51,6 +51,30 @@
 **Blocked by:** AH-2, AH-3
 **User stories:** US11 (manual end-to-end demo)
 
-**Vertical slice:** Execute `PROMPT.md` from a fresh cleanup state. Seed the hello-script task, spawn Pandora manually, and observe the end-to-end delegation path. This slice is successful only if Pandora does not edit directly, Toil emits Envy-bound work with capability `implement`, Envy claims it, worker-style execution is observable, `scripts/hello.sh` exists and runs, a `worker-completion` artifact is attached, and the final report captures all required IDs/commands. Regression target: eliminate the exact failure where Envy reports `No claimable watch task exists`.
+**Vertical slice:** Execute `PROMPT.md` from a fresh cleanup state. Seed the hello-script task, spawn Pandora manually, and observe the end-to-end delegation path. Success criteria: Pandora does not edit directly, Toil emits Envy-bound work with capability `implement`, Envy claims it, a separate worker sub-session performs the file mutation, `scripts/hello.sh` exists and runs, Envy attaches a `worker-completion` artifact, and the final report captures all required IDs/commands. Current outcome: full success achieved. The `execute`/`watch` capability mismatch is gone, worker-style execution is observable, and the artifact contract is `worker-completion`.
+
+---
+
+## Slice AH-5 — Force Envy to delegate mutating implementation work to a worker
+
+**Title:** Envy must not perform repo mutations directly
+**Status:** Built
+**Type:** AFK
+**Blocked by:** AH-4
+**User stories:** US11 (manual end-to-end demo)
+
+**Vertical slice:** Tighten the Envy/Toil execution contract so mutating implementation work is delegated to a worker sub-session instead of being edited directly by Envy. Update the relevant prompt/task instructions and supporting docs/snapshots so the hello-script rerun is only considered successful when a separate worker performs the file mutation and Envy remains a coordinator/reporter.
+
+---
+
+## Slice AH-6 — Emit `worker-completion` artifacts for worker-backed execution
+
+**Title:** Normalize worker result artifacts to `worker-completion`
+**Status:** Built
+**Type:** AFK
+**Blocked by:** AH-4
+**User stories:** US11 (manual end-to-end demo)
+
+**Vertical slice:** Fix the Envy/Toil handoff instructions so worker-backed execution results in `pithos artifact add --kind worker-completion` rather than `completion`. Update prompt/task wording and nearby docs/examples accordingly, and keep the rerun acceptance criteria aligned with that artifact contract.
 
 ---

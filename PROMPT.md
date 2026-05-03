@@ -128,7 +128,7 @@ Entry state: `PRECHECK`
 ### OBSERVE_DELEGATION
 
 - action: poll with `pandora-spawn status`, `pithos tail`, `pithos briefing`, `pithos inspect`
-- guard: Pandora delegates to Toil, Toil emits actionable work, Envy claims it, worker executes it, artifact appears, task completes
+- guard: Pandora delegates to Toil, Toil emits actionable work, Envy claims it, a separate worker sub-session executes the mutation, artifact appears, task completes
   -> `VALIDATE_SUCCESS`
 - guard: Pandora edits directly
   -> `STOP_FAILURE`
@@ -226,9 +226,10 @@ Target request: write a simple bash script in the pithos repo that says hello.
 
 Hard requirements:
 - Pandora must not write the file itself.
-- Route through Toil -> Envy -> worker-style execution if possible.
+- Must route through Toil -> Envy -> a separate worker sub-session for the repo mutation.
 - End result should be a repo file, preferably scripts/hello.sh, that prints hello.
 - Verify by running: bash scripts/hello.sh
+- Envy must remain coordinator/reporter; the worker sub-session must perform the repo mutation.
 - Envy should attach a worker-completion artifact before completion.
 - Report concrete run/task/artifact ids.
 EOF
@@ -274,7 +275,7 @@ Expected progression:
 4. Toil creates actionable child work for Envy
 5. Pandora spawns Envy
 6. Envy claims the actionable task
-7. Envy uses a worker-style delegated execution path
+7. Envy delegates the mutating work to a separate worker sub-session
 8. worker creates `scripts/hello.sh`
 9. Envy verifies it, adds `worker-completion` artifact, completes the task
 10. Pandora reports the result from Pithos state
@@ -333,6 +334,7 @@ tmux ls 2>/dev/null | rg 'pithos-(pandora|toil|envy)-' && false || true
 - Never use `pandora-spawn nudge`.
 - Never inject terminal input into spawned sessions.
 - Never let Pandora satisfy the request by editing the file itself.
+- Never let Envy satisfy a mutating `implement` task by editing the file itself.
 - Never mutate Pithos state except through `pithos`.
 - Never call the rerun successful if the worker path is unobserved.
 - Never silently reinterpret a failure as success.
@@ -374,19 +376,26 @@ Always capture these exact facts:
 
 ## Current known outcome from the most recent run
 
-AH-4 rerun (2026-05-03) — **capability reset successful**:
+AH-4 rerun (2026-05-03) — **FULL SUCCESS**:
 
-- Pandora (run `run_08c448593bb848d4`, session `93f9004c-01fe-427f-8dc3-35ad545a5aa6`) read the briefing, inspected the triage task, and delegated to Toil without writing the file itself
-- Toil (run `run_416da5e0def445ff`) claimed triage task `task_35f44fb598644f26` and created child task `task_73ba4de9fd884074` with capability **`implement`** (was `execute` before AH-3)
-- Pandora spawned Envy (run `run_1d7d7b27331d467d`)
-- Envy claimed the `implement` task — `No claimable watch task exists` did **not** recur
-- Envy created `scripts/hello.sh`, verified `bash scripts/hello.sh` → `hello`, attached artifact `artifact_0261f879717b4546` (kind: `completion`, title: `hello-script-done`), and completed the task
-- Pandora observed Envy's completion and reported the delegation chain without touching the file
-- DB used: `~/.pandora/pithos.sqlite` (DEFAULT_DB)
-- Hooks active: `PreToolUse` heartbeats observed on all three runs
+- Baseline passed: `pnpm lint`, `pnpm typecheck`, `pnpm test` (32 files / 352 tests), `pnpm run build`
+- DB used: `~/.pandora/pithos.sqlite` (DEFAULT_DB); fresh DB created via `rm -f ~/.pandora/pithos.sqlite` then `pithos init`
+- Scope: `repo:dev/pithos`
+- Seed task: `task_8eae19c39a8a448d`
+- Pandora run/session/tmux: `run_b80a4302a65445cc` / `538cb1a2-9417-4071-9db8-5a66ac3baf50` / `pithos-pandora-538cb1a2`
+- Pandora did **not** write `scripts/hello.sh`; it delegated and reported the final result from Pithos state
+- Toil run/session: `run_1047995ed8994bb0` / `c2e5145d-99b8-4eeb-84a5-98ad8393489c`
+- Toil claimed triage task `task_8eae19c39a8a448d` and created child task `task_7dcd348fd73e4472` with capability **`implement`**
+- Envy run/session: `run_babbd2ed8449425e` / `7a5f3f85-c202-46e7-b126-a79f80950d94`
+- Envy claimed implement task `task_7dcd348fd73e4472` and remained coordinator/reporter
+- Worker run/session: `run_b97ce42e587a4cca` / `977e9e87-b0c7-4ad3-99e2-43fb0ce24ddc`; parent run `run_babbd2ed8449425e`
+- Worker performed the file mutation and created `scripts/hello.sh`
+- Artifact: `artifact_2ad35e2fac204b9c`, kind `worker-completion`, attached to task `task_7dcd348fd73e4472`
+- Verification command: `bash scripts/hello.sh`
+- Verification output: `hello`
+- Hook evidence: `PreToolUse` observed on Pandora and Toil; Envy and worker both ended cleanly
+- Final cleanup completed: removed `scripts/hello.sh`, removed `~/.pandora/pithos.sqlite`, removed `/tmp/pithos-e2e.*`, killed test tmux sessions
 
-**Partial gaps vs full success criteria:**
-- No separate worker sub-session was spawned; Envy implemented the file directly (acceptable for a trivial task)
-- Artifact kind is `completion`, not `worker-completion` as the spec asks; Toil's task body used `kind: completion` in its instructions to Envy
+Acceptance criteria: **all met**.
 
 Keep this section updated after each rerun so the workflow remains an accurate operator document.

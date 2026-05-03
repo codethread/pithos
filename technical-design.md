@@ -1,6 +1,6 @@
 # Pandora Box technical design
 
-**Status:** Planned  
+**Status:** Partial  
 **Last Updated:** 2026-05-03
 
 ## 1. Overview

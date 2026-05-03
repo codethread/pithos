@@ -1,6 +1,6 @@
 # Pithos MVP tracer-bullet slices
 
-**Status:** Ready for implementation  
+**Status:** Core MVP slices built; slice 21 pending  
 **Source specs:** `mvp-spec.md`, `technical-design.md`
 
 ## User stories covered
@@ -155,11 +155,11 @@
     **Vertical slice:** Write a `packages/spawner/README.md` with the demo command sequence: `pithos init && pithos scope upsert ... && pithos enqueue ... && pandora-spawn --agent envy --scope ...`. Verify the spawned run appears in `pithos inspect run`. Include a `--harness fake` variant for offline reproduction. No automatic spawning; explicit only.
 
 20. **Title:** Run the first manual end-to-end Pithos demo  
-    **Status:** Unbuilt  
+    **Status:** Built  
     **Type:** HITL  
     **Blocked by:** 13, 14, 16, 17, 19  
     **User stories covered:** US11  
-    **Vertical slice:** Human/Pandora runs one complete flow: init, scope, run register, enqueue, claim, heartbeat, artifact add, complete, briefing. Capture friction and decide whether MVP is sufficient before adding daemon/spawn automation/recipe engine.
+    **Vertical slice:** Human/Pandora runs one complete flow: init, scope, Pandora → Toil → Envy → worker delegation, artifact add, complete, briefing. This flow has now been proven end-to-end with Envy claiming `implement`, a separate worker sub-session performing the repo mutation, `worker-completion` artifact attachment, and successful final verification.
 
 21. **Title:** Prove real Claude can run in an isolated container test  
     **Status:** Unbuilt  

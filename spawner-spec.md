@@ -1,6 +1,6 @@
 # Pandora-Spawn spec
 
-**Status:** Planned
+**Status:** Partial
 **Last Updated:** 2026-05-03
 **Package:** `@pithos/spawner`
 **Bin:** `pandora-spawn`
@@ -193,7 +193,13 @@ includes: [_common.md]
 You have access to exactly these tools: {{tools_csv}}. No others exist.
 
 You are Envy. Claim one Pithos task with capability `{{capability}}`,
-oversee it, attach a worker artifact, complete or fail your task, exit.
+coordinate execution, attach a `worker-completion` artifact for worker-backed results, complete or fail your task, exit.
+
+Your session is the coordinator, not the mutating worker. If the task requires
+repo/worktree mutation, delegate that work to a separate worker sub-session;
+do not perform the mutation directly from the Envy coordinator session. For
+worker-backed implementation, record the result with
+`pithos artifact add --kind worker-completion ...` before task completion.
 
 ## Pithos CLI for this session
 
@@ -381,7 +387,7 @@ On systems where `~/.claude/settings.json` is a read-only home-manager symlink, 
 - `_common.md` — invariants (fencing tokens, exit codes, anti-patterns).
   Content is a trimmed version of today's `skills/pithos-cli/SKILL.md`.
 - `pandora.md.tmpl` — orchestrator role. Receives launcher command API and meta.
-- `envy.md.tmpl` — task-scoped execution coordinator. Capability `implement`.
+- `envy.md.tmpl` — task-scoped execution coordinator. Capability `implement`. For mutating implementation tasks, Envy coordinates while a separate worker sub-session performs the repo/worktree mutation.
 - `toil.md.tmpl` — short-lived recipe dispatcher. Capability `triage`.
 
 Greed and worker templates are deferred until a real workflow asks for them.

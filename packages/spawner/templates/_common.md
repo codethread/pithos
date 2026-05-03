@@ -7,5 +7,6 @@
 - Exit code 4 means a stale fencing token; stop touching that task.
 - Exit code 5 from `claim` means no claimable work.
 - Heartbeat during long work so sweep does not mark your run stale.
-- Attach a useful artifact before completing substantial work.
+- Attach a useful artifact before completing substantial work. For worker-backed `implement` work, that artifact kind is `worker-completion`.
 - Queue capabilities are `triage`, `design`, or `implement`. Recipe stage names (such as `execute`, `watch`, `run`) must never be used as `--capability` values.
+- For mutating `implement` work, Envy is the coordinator. A separate worker sub-session performs repo/worktree mutations; direct coordinator-side mutation does not satisfy the worker-backed execution contract.

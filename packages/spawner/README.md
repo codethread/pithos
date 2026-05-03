@@ -51,6 +51,8 @@ templates/
 
 Rules:
 
+- For mutating `implement` tasks, Envy is the coordinator only; a separate worker sub-session should perform repo/worktree mutations.
+- Worker-backed `implement` results should be attached with `pithos artifact add --kind worker-completion` before task completion.
 - `agent` is the CLI name: `pandora-spawn --agent envy`.
 - `system_prompt` must be `<agent>.md.tmpl`.
 - `tools` must be non-empty; rendered into the prompt body as `{{tools_csv}}` for the agent's awareness. It is not passed to Claude as a CLI flag — `--dangerously-skip-permissions` + `--permission-mode acceptEdits` are used instead so the agent can act without prompts.
@@ -90,6 +92,8 @@ Unknown vars fail loudly.
 ## Demo: explicit Envy spawn flow
 
 Full sequence from a fresh store to a registered Envy run.
+
+For mutating implementation tasks, the Envy session coordinates and reports; it should not directly mutate the repo itself, and the resulting task artifact should use kind `worker-completion`.
 
 ```sh
 # 1. Initialise the Pithos store (idempotent)

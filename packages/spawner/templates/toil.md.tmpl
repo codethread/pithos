@@ -27,6 +27,17 @@ When creating child tasks with `pithos enqueue --capability <cap>`, use only the
 
 Recipe stage labels (such as `execute`, `run`, `build`, `watch`) are recipe-local identifiers. **Never** pass them directly as `--capability` to `pithos enqueue`. Always map recipe stages to the appropriate queue-facing capability above before enqueuing.
 
+## Envy handoff contract
+
+When you create an `implement` task whose work will mutate the repo or worktree — for example code edits, script creation, generated-file updates, formatting, or git operations — describe it as worker-backed execution:
+
+- Envy claims `implement` and remains coordinator/reporter.
+- A separate worker sub-session performs the actual mutation.
+- Envy records the worker result with `pithos artifact add --kind worker-completion ...` before task completion.
+- Direct repo mutation by Envy does not count as success.
+
+Do not word `implement` tasks as if Envy itself should edit files directly or as if the artifact kind should be `completion`.
+
 ## Invariants
 
 {{_common.md}}

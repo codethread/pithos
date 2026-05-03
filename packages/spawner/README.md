@@ -86,3 +86,49 @@ Available vars:
 - each include filename, e.g. `{{_common.md}}`
 
 Unknown vars fail loudly.
+
+## Demo: explicit Envy spawn flow
+
+Full sequence from a fresh store to a registered Envy run.
+
+```sh
+# 1. Initialise the Pithos store (idempotent)
+pithos init
+
+# 2. Register the repo scope
+pithos scope upsert --kind repo --path "$PWD"
+
+# 3. Enqueue a task for the Envy agent
+pithos enqueue \
+  --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
+  --capability watch \
+  --title "Example task"
+
+# 4a. Spawn Envy (offline / fake harness — no Claude exec)
+pandora-spawn --agent envy \
+  --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
+  --harness fake | jq .
+
+# 4b. Same spawn with real Claude
+pandora-spawn --agent envy \
+  --scope repo:$(echo "$PWD" | sed "s|$HOME/||g")
+
+# 5. Verify the run was registered
+pithos inspect run --run <run_id from step 4 output>
+```
+
+For fully offline reproduction use `--harness fake`; the run is still registered in
+the Pithos DB via `pithos run register` so `pithos inspect run` works regardless.
+
+### Install global Claude Code hooks (optional)
+
+```sh
+# Merges PreToolUse + SessionEnd entries into ~/.claude/settings.json
+pandora-spawn hooks install
+
+# To undo
+pandora-spawn hooks uninstall
+```
+
+Hooks no-op in normal Claude sessions — they only activate when `PITHOS_AGENT`
+and `PITHOS_RUN_ID` are set, which `pandora-spawn` injects automatically.

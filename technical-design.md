@@ -1,7 +1,7 @@
 # Pandora Box technical design
 
 **Status:** Planned  
-**Last Updated:** 2026-05-01
+**Last Updated:** 2026-05-03
 
 ## 1. Overview
 
@@ -60,6 +60,9 @@ The implementation should be built from scratch. Existing `pandora/bin/*` script
 
 - **Decision:** Workers do not call `pithos` directly.
   - **Rationale:** Envy/delegate wrappers register worker runs and translate worker completion reports into artifacts. Worker prompts remain implementation-focused.
+
+- **Decision:** Queue capabilities describe requested outcome class, not internal execution strategy.
+  - **Rationale:** The queue needs stable claim-matching vocabulary such as `triage`, `design`, and `implement`. Envy may watch worker transcripts and coordinate delegated execution internally, but that behavior must not leak into queue capability names such as `watch`. Recipe stage IDs such as `execute` are likewise local recipe labels, not queue capability values.
 
 - **Decision:** Scope IDs are home-relative addresses.
   - **Rationale:** Human aliases like `repo:protobuf` are convenient but ambiguous across machines and orgs. Canonical scopes should be verbose and stable, e.g. `repo:work/perkbox-services/protobuf`, derived from `~/work/perkbox-services/protobuf`.
@@ -198,10 +201,10 @@ sequenceDiagram
     participant W as Worker
     participant DB as SQLite
 
-    P->>PB: enqueue --scope repo:work/perkbox-services/protobuf --capability watch
+    P->>PB: enqueue --scope repo:work/perkbox-services/protobuf --capability implement
     PB->>DB: insert task + event
     E->>PB: run register --agent-kind envy
-    E->>PB: claim --scope repo:work/perkbox-services/protobuf --capability watch
+    E->>PB: claim --scope repo:work/perkbox-services/protobuf --capability implement
     PB->>DB: atomic lease + fencing_token++
     E->>PB: heartbeat --task task_id --token token
     E->>PB: run register --agent-kind worker --parent-run envy
@@ -306,8 +309,8 @@ Prefer subcommands with explicit flags. All mutation commands return JSON.
 pithos init
 pithos scope upsert --kind repo --path ~/work/perkbox-services/protobuf
 pithos run register --agent-kind envy --scope repo:work/perkbox-services/protobuf --cwd "$PWD" --session-id <uuid>
-pithos enqueue --scope repo:work/perkbox-services/protobuf --capability watch --title "Watch worker" --body-file task.md
-pithos claim --run run_123 --scope repo:work/perkbox-services/protobuf --capability watch --lease-minutes 10
+pithos enqueue --scope repo:work/perkbox-services/protobuf --capability implement --title "Implement worker-backed task" --body-file task.md
+pithos claim --run run_123 --scope repo:work/perkbox-services/protobuf --capability implement --lease-minutes 10
 pithos heartbeat --run run_123 --task task_123 --token 1 --hook PreToolUse
 pithos complete task_123 --run run_123 --token 1 --result-file result.json
 pithos fail task_123 --run run_123 --token 1 --reason "worker disappeared"
@@ -340,7 +343,7 @@ Claim success:
   "task": {
     "id": "task_abc",
     "scope_id": "repo:work/perkbox-services/protobuf",
-    "capability": "watch",
+    "capability": "implement",
     "fencing_token": 1,
     "lease_until": "2026-05-01T12:10:00Z"
   }
@@ -367,7 +370,7 @@ run_id=$(jq -r .run.id <<<"$run_json")
 PITHOS_RUN_ID="$run_id" claude \
   --agent envy \
   --session-id <uuid> \
-  --append-system-prompt "PITHOS_RUN_ID=$run_id. Scope: repo:work/perkbox-services/protobuf. Claim one watch task with pithos; run pithos --help first."
+  --append-system-prompt "PITHOS_RUN_ID=$run_id. Scope: repo:work/perkbox-services/protobuf. Claim one implement task with pithos; run pithos --help first."
 ```
 
 `claude --agent <name>` loads the versioned agent file. The agent file carries the stable role prompt, default tools/model, and preloaded Skills. `--append-system-prompt` carries runtime context such as task ID, scope, run ID, worktree, and current objective.
@@ -468,6 +471,7 @@ Minimum useful behaviour:
 
 - `recipes/protobuf-update.yaml` documents the target workflow shape.
 - Toil can be prompted to read it and enqueue tasks manually through `pithos`.
+- Recipe stage IDs are local workflow labels. They must not be copied directly into `tasks.capability`. For MVP, Toil should enqueue queue-facing capabilities such as `triage`, `design`, and `implement`.
 - Agent files live under `.claude/agents/` and are loaded with `claude --agent <name>`.
 - Agent frontmatter preloads relevant Skills; Skills are available up front but not auto-run.
 - Runtime-specific context is appended with `--append-system-prompt`.
@@ -581,8 +585,8 @@ Run a complete local loop:
 pithos init
 pithos scope upsert --kind repo --path ~/work/perkbox-services/protobuf
 pithos run register --agent-kind envy --scope repo:work/perkbox-services/protobuf
-pithos enqueue --scope repo:work/perkbox-services/protobuf --capability watch --title "Test task"
-pithos claim --run <run> --scope repo:work/perkbox-services/protobuf --capability watch
+pithos enqueue --scope repo:work/perkbox-services/protobuf --capability implement --title "Test task"
+pithos claim --run <run> --scope repo:work/perkbox-services/protobuf --capability implement
 pithos heartbeat --run <run> --task <task> --token <token>
 pithos complete <task> --run <run> --token <token>
 pithos briefing --agent pandora

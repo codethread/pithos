@@ -1,7 +1,7 @@
 # Pithos ambition
 
 **Status:** Planned  
-**Last Updated:** 2026-05-01
+**Last Updated:** 2026-05-03
 
 ## 1. Overview
 
@@ -45,7 +45,10 @@ This document records the direction beyond the MVP. It is intentionally lighter 
   - **Rationale:** The goal is better work, not faster garbage. Greed exists for deep repo exploration and heavy human-in-the-loop design before execution.
 
 - **Decision:** Work routes to scopes/capabilities before named agents.
-  - **Rationale:** A task should target `repo:work/... + watch/design/triage`, allowing the implementation agent to change over time. Direct agent messages remain an escape hatch.
+  - **Rationale:** A task should target `repo:work/... + triage`, `... + design`, or `... + implement`, allowing the handling agent to change over time. Direct agent messages remain an escape hatch.
+
+- **Decision:** Capability names describe the requested outcome class, not the agent's internal execution strategy.
+  - **Rationale:** Envy may delegate to workers and watch their transcripts, but that is an execution style, not a queue-facing capability. `implement` is the correct capability for Envy-owned execution work; `design` is the correct capability for Greed-owned design work.
 
 - **Decision:** Workers stay mostly isolated from Pithos.
   - **Rationale:** Ordinary implementation agents should focus on their task and final report. Envy/wrappers translate worker transcripts into Pithos artifacts and lifecycle state.
@@ -120,9 +123,11 @@ Greed is the design-quality agent.
 
 Longer-term behaviour:
 
+- claims or is routed `design` work
 - spawned for unclear, risky, cross-repo, or PRD-heavy work
 - greedily absorbs repo/domain context
 - has heavy back-and-forth with Adam
+- runs in a HITL style by default
 - asks one focused question at a time after exploration
 - produces a shared design brief before implementation
 - records risks, rollout plans, open decisions, and impacted repos
@@ -133,7 +138,8 @@ Envy is the task-scoped execution coordinator.
 
 Longer-term behaviour:
 
-- one Envy run per watch/coordination task by default
+- one Envy run per `implement` task by default
+- consumes work in an AFK style by default unless blocked
 - may spawn zero or many workers
 - watches worker status/transcripts
 - converts worker reports into artifacts

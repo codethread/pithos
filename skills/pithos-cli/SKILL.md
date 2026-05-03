@@ -65,7 +65,7 @@ run_json=$(pithos run register --agent-kind envy --scope repo:work/myrepo --cwd 
 run_id=$(echo "$run_json" | jq -r .run.id)
 
 # 2. Claim a task (check exit code 5 = no work)
-claim_json=$(pithos claim --run "$run_id" --scope repo:work/myrepo --capability watch)
+claim_json=$(pithos claim --run "$run_id" --scope repo:work/myrepo --capability implement)
 # { "ok": true, "task": { "id": "task_...", "fencing_token": 1, ... } }
 task_id=$(echo "$claim_json" | jq -r .task.id)
 token=$(echo "$claim_json" | jq -r .task.fencing_token)

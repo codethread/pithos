@@ -14,7 +14,7 @@ exports[`envy spawn renders deterministic prompt + argv (fake harness) 1`] = `
     "opus",
     "You have access to exactly these tools: Bash,Read,Grep,Glob. No others exist.
 
-You are Envy. Claim one Pithos task with capability \`watch\`, oversee it, attach a worker artifact, complete or fail your task, exit.
+You are Envy. Claim one Pithos task with capability \`implement\`, oversee it, attach a worker artifact, complete or fail your task, exit.
 
 ## Pithos CLI for this session
 
@@ -182,7 +182,7 @@ Run \`pithos <subcommand> --help\` for per-command flags.
   "pid": null,
   "prompt": "You have access to exactly these tools: Bash,Read,Grep,Glob. No others exist.
 
-You are Envy. Claim one Pithos task with capability \`watch\`, oversee it, attach a worker artifact, complete or fail your task, exit.
+You are Envy. Claim one Pithos task with capability \`implement\`, oversee it, attach a worker artifact, complete or fail your task, exit.
 
 ## Pithos CLI for this session
 

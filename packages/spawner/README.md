@@ -41,7 +41,7 @@ templates/
       "agent": "envy",
       "model": "opus",
       "tools": ["Bash", "Read", "Grep", "Glob"],
-      "capability": "watch",
+      "capability": "implement",
       "includes": ["_common.md"],
       "system_prompt": "envy.md.tmpl"
     }
@@ -101,7 +101,7 @@ pithos scope upsert --kind repo --path "$PWD"
 # 3. Enqueue a task for the Envy agent
 pithos enqueue \
   --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
-  --capability watch \
+  --capability implement \
   --title "Example task"
 
 # 4a. Spawn Envy (offline / fake harness — no Claude exec)

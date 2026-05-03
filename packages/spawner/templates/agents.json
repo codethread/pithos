@@ -33,7 +33,7 @@
       "agent": "envy",
       "model": "opus",
       "tools": ["Bash", "Read", "Grep", "Glob"],
-      "capability": "watch",
+      "capability": "implement",
       "includes": ["_common.md"],
       "system_prompt": "envy.md.tmpl",
       "launcher": "local_claude_tmux",

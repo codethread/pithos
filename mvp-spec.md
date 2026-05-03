@@ -1,7 +1,7 @@
 # Pandora Box MVP
 
 **Status:** Planned  
-**Last Updated:** 2026-05-01
+**Last Updated:** 2026-05-03
 
 ## 1. Overview
 
@@ -18,7 +18,7 @@ This is a from-scratch build in a new dedicated repository. Existing `pandora/bi
 - Let tasks be claimed atomically with leases and fencing tokens.
 - Track Claude Code agent runs via lifecycle hooks and manual registration.
 - Generate concise Pandora briefings from DB state.
-- Support the first useful flow: Pandora or Toil enqueues work, Envy claims it, watches/delegates worker work, reports completion, and Pandora sees it in a briefing.
+- Support the first useful flow: Pandora or Toil enqueues work, Toil routes `triage` tasks, Greed can own `design` tasks, Envy claims `implement` tasks, delegates worker execution when needed, reports completion, and Pandora sees it in a briefing.
 - Keep workers mostly isolated from Pandora Box; Envy/adapters translate worker status into DB artifacts.
 - Keep recipes, Claude Code agent files, and Skills as configuration loaded at spawn time, not engine code.
 - Keep prompts lean by relying on `pithos --help` and subcommand help for command details.
@@ -56,7 +56,10 @@ This is a from-scratch build in a new dedicated repository. Existing `pandora/bi
   - **Rationale:** If an expired agent wakes up after another run claimed the task, its stale completion must be rejected.
 
 - **Decision:** Route work by scope and capability, not concrete agent, by default.
-  - **Rationale:** Toil should be able to emit `repo:work/perkbox-services/protobuf + watch` without caring whether Envy, a future agent, or a human handles it. Direct addressing remains an exception for handoffs/debugging.
+  - **Rationale:** Toil should be able to emit `repo:work/perkbox-services/protobuf + implement` or `... + design` without caring whether Envy, Greed, a future agent, or a human handles it. Direct addressing remains an exception for handoffs/debugging.
+
+- **Decision:** Capability names describe the requested outcome class, not the agent's internal execution strategy.
+  - **Rationale:** Queue-facing capabilities should answer what kind of work is being requested: `triage`, `design`, or `implement`. Envy may watch transcripts and delegate to workers internally, but that coordination style must not leak into claim matching as a queue capability such as `watch`. Likewise, recipe stage IDs such as `execute` are recipe-local names, not queue capability values.
 
 - **Decision:** Scope IDs are home-relative addresses.
   - **Rationale:** Verbose scopes such as `repo:work/perkbox-services/protobuf` are unambiguous across repos while still being readable. They are derived from canonical paths under `$HOME`.
@@ -151,8 +154,8 @@ flowchart TD
 
     Adam <-->|chat| Pandora
     Pandora -->|enqueue / briefing / inspect| Pithos
-    Toil -->|claim triage / emit tasks| Pithos
-    Envy -->|claim watch / register worker / complete| Pithos
+    Toil -->|claim triage / emit design+implement tasks| Pithos
+    Envy -->|claim implement / register worker / complete| Pithos
     Worker -->|completion report in Claude transcript| Envy
     Pithos <--> DB
     Sweep -->|expire leases / mark stale| Pithos
@@ -361,7 +364,7 @@ Heartbeats update `runs.last_heartbeat_at`; they should not append an event unle
 ### Phase 4: sweep and first workflow
 
 - [ ] Implement `pithos sweep` for expired leases and stale runs.
-- [ ] Add one recipe/example and minimal agent files with Skills frontmatter for protobuf update/watch flow.
+- [ ] Add one recipe/example and minimal agent files with Skills frontmatter for protobuf update/implement flow.
 - [ ] Run manually with Pandora + one Envy + one worker.
 - [ ] Record lessons before adding daemon/spawning automation or a real recipe engine.
 

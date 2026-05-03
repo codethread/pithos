@@ -179,12 +179,14 @@ Example manifest shape:
 
 ## 7. Template format
 
+`capability` in the manifest is the queue-facing work class the agent is expected to claim. It must describe the requested outcome (`triage`, `design`, `implement`), not the agent's internal execution strategy. For example, Envy may coordinate workers by watching transcripts, but its queue-facing capability is still `implement`.
+
 ```markdown
 ---
 agent: envy
 model: opus
 tools: [Bash, Read, Grep, Glob]
-capability: watch
+capability: implement
 includes: [_common.md]
 ---
 
@@ -220,7 +222,7 @@ Run `pithos <subcommand> --help` for per-command flags.
 | `agent` | string | yes | Must match the file stem (`envy.md.tmpl` → `envy`). |
 | `model` | string | yes | Passed straight to `claude --model`. |
 | `tools` | string[] | yes | Tool names; passed to `claude --tools` as CSV. Empty array is a validation error — be explicit. |
-| `capability` | string | yes | Pithos capability the agent expects to claim. Rendered into prompt only. |
+| `capability` | string | yes | Pithos capability the agent expects to claim. Use queue-facing outcome classes such as `triage`, `design`, `implement`; do not use internal execution-style labels such as `watch`. Rendered into prompt only. |
 | `includes` | string[] | no | Other files in `templates/` whose contents are inlined where the matching `{{filename}}` placeholder appears. |
 | `launcher` | string | no | Key into top-level `launchers`. If present, `cmd_*` vars become available. |
 | `inject_meta` | boolean | no | If true, render launcher metadata into `{{launcher_meta}}`. Intended for Pandora. |
@@ -379,7 +381,7 @@ On systems where `~/.claude/settings.json` is a read-only home-manager symlink, 
 - `_common.md` — invariants (fencing tokens, exit codes, anti-patterns).
   Content is a trimmed version of today's `skills/pithos-cli/SKILL.md`.
 - `pandora.md.tmpl` — orchestrator role. Receives launcher command API and meta.
-- `envy.md.tmpl` — task-scoped execution coordinator. Capability `watch`.
+- `envy.md.tmpl` — task-scoped execution coordinator. Capability `implement`.
 - `toil.md.tmpl` — short-lived recipe dispatcher. Capability `triage`.
 
 Greed and worker templates are deferred until a real workflow asks for them.

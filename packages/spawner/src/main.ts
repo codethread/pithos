@@ -46,14 +46,18 @@ const run = async (): Promise<void> => {
 
   const template = loadTemplate(agentsPath, templatesDir, opts.agent)
   const pithosHelp = process.env.PANDORA_SPAWN_FAKE_PITHOS_HELP ?? pithos(["--help"])
-  const sessionId = process.env.PANDORA_SPAWN_FAKE_SESSION_ID ?? randomUUID()
-  const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? parseRunId(pithos(["run", "register", "--agent-kind", opts.agent, "--scope", opts.scope, "--cwd", opts.cwd, "--session-id", sessionId]))
+  const sessionId = process.env.PANDORA_SPAWN_FAKE_SESSION_ID ?? (opts.preview ? "session_PREVIEW" : randomUUID())
+  const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? (opts.preview ? "run_PREVIEW" : parseRunId(pithos(["run", "register", "--agent-kind", opts.agent, "--scope", opts.scope, "--cwd", opts.cwd, "--session-id", sessionId])))
   const toolsCsv = template.manifest.tools.join(",")
   const context = { agent: opts.agent, capability: template.manifest.capability, model: template.manifest.model, tools_csv: toolsCsv, run_id: runId, scope_id: opts.scope, task_id: opts.task ?? "", cwd: opts.cwd, pithos_help: pithosHelp, ...template.includes }
   const prompt = render(template.body, context)
   const env = { PITHOS_RUN_ID: runId, PITHOS_AGENT: opts.agent, PITHOS_SCOPE_ID: opts.scope, PITHOS_OUTPUT: "json", ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}) }
   const argv = buildClaudeArgv({ sessionId, model: template.manifest.model, toolsCsv, prompt })
   const description = { env, argv, prompt, cwd: opts.cwd }
+  if (opts.preview) {
+    writeJson({ ok: true, preview: true, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, ...description })
+    return
+  }
   const result = opts.harness === "fake" ? await runFake(description) : await runClaude(description)
   writeJson({ ok: result.exitCode === 0, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, pid: result.pid, ...result.output })
   process.exitCode = result.exitCode

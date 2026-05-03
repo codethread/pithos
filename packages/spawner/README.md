@@ -1,19 +1,24 @@
 # @pithos/spawner
 
-Tiny CLI for turning versioned agent templates into Claude Code sessions.
+Tiny CLI for turning versioned agent templates into sessions in an agent harness like Claude Code.
 
-`pandora-spawn` owns agent config, prompt rendering, hook installation, and the Claude/fake harness boundary. Pithos state is still handled only by the `pithos` CLI subprocess.
+Claude Code is the first supported harness; `fake` is the deterministic test harness. The package is intentionally shaped so other harness adapters can be added later without moving Pithos state into the spawner.
+
+`pandora-spawn` owns agent config, prompt rendering, hook installation, and harness process setup. Pithos state is still handled only by the `pithos` CLI subprocess.
 
 ## CLI
 
 ```sh
 pandora-spawn --agent envy --scope repo:work/example --harness fake
+pandora-spawn --agent envy --scope repo:work/example --preview
 pandora-spawn templates list
 pandora-spawn hooks install
 pandora-spawn hooks uninstall
 ```
 
 Default command is spawn. Output is JSON.
+
+`--preview` renders the prompt and prints the harness command/env/cwd JSON without registering a run or starting the harness. It uses stable placeholder IDs (`run_PREVIEW`, `session_PREVIEW`) unless overridden with `PANDORA_SPAWN_FAKE_RUN_ID` / `PANDORA_SPAWN_FAKE_SESSION_ID`.
 
 ## templates/ API
 
@@ -50,11 +55,22 @@ Rules:
 - `system_prompt` must be `<agent>.md.tmpl`.
 - `tools` must be non-empty; rendered as `{{tools_csv}}` and passed to Claude `--tools`.
 - `includes` names files in `templates/`; path separators are rejected.
+- Includes are not automatically appended. Each include becomes a template var keyed by filename, so `"includes": ["_common.md"]` makes `{{_common.md}}` available in the system prompt.
 - JSON/template errors exit with code `2`.
 
 ### Prompt template vars
 
 Templates are plain markdown with `{{var}}` replacement only. No conditionals, loops, escaping, or helpers.
+
+Include placement is explicit: put the include placeholder exactly where the file content should appear. Example:
+
+```md
+## Invariants
+
+{{_common.md}}
+```
+
+At render time, `{{_common.md}}` is replaced with the full contents of `templates/_common.md`. If an include is listed in `agents.json` but its placeholder is absent, it is loaded but not rendered anywhere. If a placeholder references an include not listed in `agents.json`, rendering fails as an unknown var.
 
 Available vars:
 

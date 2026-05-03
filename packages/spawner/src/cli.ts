@@ -10,6 +10,7 @@ export interface SpawnOptions {
   readonly task?: string
   readonly cwd: string
   readonly harness: HarnessName
+  readonly preview: boolean
 }
 
 export type ParsedArgs = SpawnOptions | { readonly command: "templates:list" } | { readonly command: "hooks:install" } | { readonly command: "hooks:uninstall" }
@@ -24,13 +25,14 @@ export const parseArgs = (args: readonly string[]): ParsedArgs => {
   if (args[0] === "templates" && args[1] === "list") return { command: "templates:list" }
   if (args[0] === "hooks" && args[1] === "install") return { command: "hooks:install" }
   if (args[0] === "hooks" && args[1] === "uninstall") return { command: "hooks:uninstall" }
-  if (args.includes("--help") || args.includes("-h")) throw new HelpRequested("Usage: pandora-spawn --agent <name> --scope <scope-id> [--task <id>] [--cwd <path>] [--harness claude|fake]")
+  if (args.includes("--help") || args.includes("-h")) throw new HelpRequested("Usage: pandora-spawn --agent <name> --scope <scope-id> [--task <id>] [--cwd <path>] [--harness claude|fake] [--preview]")
 
   let agent = ""
   let scope = ""
   let task: string | undefined
   let cwd = process.cwd()
   let harness: HarnessName = "claude"
+  let preview = false
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
     if (arg === "--agent") agent = valueAfter(args, index, arg)
@@ -41,9 +43,10 @@ export const parseArgs = (args: readonly string[]): ParsedArgs => {
       const raw = valueAfter(args, index, arg)
       if (raw !== "claude" && raw !== "fake") throw new Error("--harness must be claude or fake")
       harness = raw
-    } else if (arg?.startsWith("--")) throw new Error(`Unknown flag: ${arg}`)
+    } else if (arg === "--preview") preview = true
+    else if (arg?.startsWith("--")) throw new Error(`Unknown flag: ${arg}`)
   }
   if (!agent) throw new UserInputError("--agent is required")
   if (!scope) throw new UserInputError("--scope is required")
-  return task === undefined ? { command: "spawn", agent, scope, cwd, harness } : { command: "spawn", agent, scope, task, cwd, harness }
+  return task === undefined ? { command: "spawn", agent, scope, cwd, harness, preview } : { command: "spawn", agent, scope, task, cwd, harness, preview }
 }

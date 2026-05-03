@@ -5,3 +5,6 @@ dist/
 
 packages/cli/bin/pithos
 packages/cli/bin/pithos-dev
+
+packages/spawner/bin/pandora-spawn
+packages/spawner/bin/pandora-spawn-dev

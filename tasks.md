@@ -134,21 +134,21 @@
     **Vertical slice:** Create a new workspace package `packages/spawner` (workspace name `@pithos/spawner`, global bin `pandora-spawn`). Ship template files `templates/{_common.md, envy.md.tmpl, toil.md.tmpl}`, a single hook script `hooks/claude-code/dispatch.sh`, frontmatter parser + `{{var}}` renderer, and a claude/fake harness module. Default verb is spawn (`pandora-spawn --agent envy --scope ...`); fake harness emits `{ env, argv, prompt }` JSON instead of execing claude. **Quality bar is intentionally lower than `@pithos/cli`** — minimal Effect plumbing, no tagged-error hierarchy, ONE Vitest snapshot smoke test exercising the fake harness end-to-end. No agent files in `.claude/agents/`; templates live entirely inside this package so they don't leak into consumer repos. Drop the `skills/pithos-cli/SKILL.md` direction — its content moves into `templates/_common.md` as a partial. See spec §2 for the strict simplicity bar.
 
 17. **Title:** Wire heartbeat/SessionEnd hook via `pandora-spawn hooks install`
-    **Status:** Unbuilt
+    **Status:** Built
     **Type:** AFK
     **Blocked by:** 9, 16
     **User stories covered:** US4, US9
     **Vertical slice:** Add `pandora-spawn hooks install` (and `uninstall`) which idempotently merges two entries into `~/.claude/settings.json`: `PreToolUse` (no matcher) and `SessionEnd` (matcher `prompt_input_exit` only — `Stop` would fire every assistant turn, and `clear`/`resume` matchers don't end the process). Both call `hooks/claude-code/dispatch.sh` with the hook name as argv. The script no-ops unless `PITHOS_AGENT` is set, then dispatches to `pithos heartbeat --throttle-seconds 60` (default) or `pithos run end --status ended` (SessionEnd). No tests for the bash script — manual smoke after install. Hooks live globally, not per-repo, so consumer repositories stay clean.
 
 18. **Title:** Reuse spawner fake harness for deterministic spawn tests
-    **Status:** Unbuilt
+    **Status:** Built
     **Type:** AFK
     **Blocked by:** 16
     **User stories covered:** US9, US10
     **Vertical slice:** The fake harness from slice 16 is the deliverable. This slice is the conceptual hook for any *additional* tests outside `packages/spawner` that need to assert against spawn behaviour without real Claude. Likely no new code is required; close as "subsumed by 16" if no other consumer needs it by the time we get here.
 
 19. **Title:** Document explicit spawn flow for Envy
-    **Status:** Unbuilt
+    **Status:** Built
     **Type:** AFK
     **Blocked by:** 6, 15, 16
     **User stories covered:** US9, US10

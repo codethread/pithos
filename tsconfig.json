@@ -1,5 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["packages/*/src/**/*", "packages/*/test/**/*"],
+  "include": [
+    "eslint.config.js",
+    "vitest.config.ts",
+    "vitest.global-setup.ts",
+    "packages/*/src/**/*",
+    "packages/*/test/**/*"
+  ],
   "exclude": ["**/node_modules/**", "**/dist/**"]
 }

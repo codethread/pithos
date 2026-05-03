@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "clean": "rimraf node_modules dist/ 'packages/cli/bin/pithos' 'packages/cli/bin/pithos-dev' 'packages/spawner/bin/pandora-spawn' 'packages/spawner/bin/pandora-spawn-dev' *.tsbuildinfo",
-    "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "clean": "pnpm -r --if-present clean && rimraf dist *.tsbuildinfo",
+    "clean:deps": "pnpm clean && rimraf node_modules packages/*/node_modules",
+    "lint": "eslint . && pnpm -r --if-present lint",
+    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "pnpm -r --if-present build && cd packages/cli && npm link && cd ../spawner && npm link",

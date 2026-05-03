@@ -7,6 +7,13 @@
     "pithos": "./bin/pithos"
   },
   "scripts": {
+    "clean": "rimraf dist bin/pithos bin/pithos-dev *.tsbuildinfo",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs --dev --run --"
   },

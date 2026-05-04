@@ -61,16 +61,21 @@ packages/spawner/
     cli.ts                     # tiny hand-rolled parser; no @effect/cli
     template.ts                # agents.json parse + {{var}} render
     harness.ts                 # buildClaudeArgv + spawnFake
-    hooks-install.ts           # merge into ~/.claude/settings.json
-    paths.ts                   # locate templates dir, hooks dir
+    paths.ts                   # locate templates dir
   templates/
     agents.json                # agents + launcher command recipes
     _common.md                 # shared invariants (was the skill body)
     pandora.md.tmpl
     envy.md.tmpl
     toil.md.tmpl
-  hooks/claude-code/
-    dispatch.sh                # the only hook script
+  hooks/
+    dispatch.sh                # canonical hook script
+  claude-plugin/               # Claude Code marketplace plugin
+    .claude-plugin/plugin.json
+    hooks/
+      hooks.json               # PreToolUse + SessionEnd registrations
+      dispatch.sh              # symlink → ../../hooks/dispatch.sh
+    README.md
   test/
     spawn.snap.test.ts         # one snapshot smoke test
     __snapshots__/
@@ -88,8 +93,6 @@ Default verb is spawn; subcommands are admin only.
 pandora-spawn --agent envy --scope repo:work/perkbox-services/protobuf [--task task_123] [--cwd "$PWD"] [--harness claude|fake]
 
 # admin
-pandora-spawn hooks install        # merges hook entries into ~/.claude/settings.json
-pandora-spawn hooks uninstall      # reverse
 pandora-spawn templates list       # prints { name, model, tools, capability } per template
 ```
 
@@ -348,7 +351,7 @@ One script, two registrations. Two responsibilities only:
 Everything else (UserPromptSubmit, PostToolUse, Stop, StopFailure, etc.)
 is deferred — redundant or "nice-to-have, not now".
 
-`hooks/claude-code/dispatch.sh`:
+`hooks/dispatch.sh`:
 
 ```bash
 #!/usr/bin/env bash
@@ -360,27 +363,12 @@ case "${1:-unknown}" in
 esac
 ```
 
-`pandora-spawn hooks install` resolves the absolute path to this script
-inside the installed package, then merges into `~/.claude/settings.json`:
-
-```jsonc
-{
-  "hooks": {
-    "PreToolUse": [{"hooks":[{"type":"command","command":"<abs>/dispatch.sh PreToolUse"}]}],
-    "SessionEnd": [{"matcher":"prompt_input_exit","hooks":[{"type":"command","command":"<abs>/dispatch.sh SessionEnd"}]}]
-  }
-}
-```
-
-Idempotent: if a matching command line already exists, leave it. `hooks
-uninstall` removes only the entries whose command points at our script.
-
 The `[ -n "$PITHOS_AGENT" ]` guard means Adam's normal Claude sessions are
 unaffected — only spawner-launched sessions trigger heartbeats.
 
-### Alternative install — Claude Code plugin (preferred on Nix)
+### Install — Claude Code plugin
 
-On systems where `~/.claude/settings.json` is a read-only home-manager symlink, `pandora-spawn hooks install` will fail because it cannot write to that file. The preferred install path on those setups is the Claude Code plugin at `claude-plugin/` in the repo root. The plugin's `hooks/hooks.json` registers the same two entries (`PreToolUse` + `SessionEnd prompt_input_exit`) declaratively via `${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.sh` (a symlink into `packages/spawner/hooks/claude-code/dispatch.sh`), without touching `settings.json`. Install once with `/plugin marketplace add https://github.com/codethread/pithos` then `/plugin install pithos@codethread/pithos`. The CLI path (`pandora-spawn hooks install`) remains the manual fallback for users on writable-settings systems.
+Hooks ship as the Claude Code marketplace plugin at `packages/spawner/claude-plugin/`. Its `hooks/hooks.json` registers the two entries (`PreToolUse` + `SessionEnd prompt_input_exit`) declaratively via `${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.sh`, a symlink back to `packages/spawner/hooks/dispatch.sh`. Install once with `/plugin marketplace add https://github.com/codethread/pithos` then `/plugin install pithos@codethread/pithos`. The repo-root marketplace manifest is `.claude-plugin/marketplace.json`.
 
 ## 11. Templates shipped in MVP
 
@@ -433,11 +421,10 @@ That's the whole test plan. Add more only when something breaks.
 3. Write `harness.ts` (claude + fake).
 4. Write `cli.ts` + `main.ts` (parse → render → harness).
 5. Write the three template files (`_common.md`, `envy.md.tmpl`, `toil.md.tmpl`).
-6. Write `dispatch.sh`.
-7. Write `hooks-install.ts`.
-8. Add the snapshot test.
-9. `pnpm verify` green.
-10. Manual smoke: `pandora-spawn --agent envy --scope repo:... --harness fake | jq .`
+6. Write `dispatch.sh` and the `claude-plugin/` marketplace plugin.
+7. Add the snapshot test.
+8. `pnpm verify` green.
+9. Manual smoke: `pandora-spawn --agent envy --scope repo:... --harness fake | jq .`
 
 Stop. Anything beyond this list is scope creep for this slice.
 
@@ -450,3 +437,81 @@ Stop. Anything beyond this list is scope creep for this slice.
 - Per-spawn settings.json (inline `--settings '{...}'`) instead of global hooks.
 - Templating engine upgrade (eta/handlebars).
 - Pithos-Spawn merging into Pithos. They stay separate.
+
+## 15. Session log introspection
+
+Claude Code writes a JSONL session log for every session at
+
+```
+~/.claude/projects/<project-dir>/<session-id>.jsonl
+```
+
+These logs are the ground-truth record of agent reasoning and actions.
+Prefer them over raw tmux capture for understanding what happened.
+
+### Finding a session log
+
+```bash
+find ~/.claude/projects -name '<session-id>.jsonl'
+```
+
+### Quick summary: thoughts + commands
+
+```bash
+LOG="$(find ~/.claude/projects -name '<session-id>.jsonl')"
+
+# Agent thoughts (text messages)
+jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' "$LOG"
+
+# Commands run (Bash tool inputs)
+jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Bash") | .input.command' "$LOG"
+```
+
+### Deeper investigation
+
+```bash
+LOG="$(find ~/.claude/projects -name '<session-id>.jsonl')"
+
+# Message type counts
+jq -r '.type' "$LOG" | sort | uniq -c | sort -rn
+
+# Tool use inventory (what tools were called, how many times)
+jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name' "$LOG" | sort | uniq -c | sort -rn
+
+# Tool results (output of each tool call)
+jq -r 'select(.type == "user") | .message.content[]? | select(.type == "tool_result") | "\(.tool_use_id[0:12])…  \(.content | if type == "array" then .[0].text[:200] else .[:200] end)"' "$LOG"
+
+# Full timeline (timestamp + message type + text/tool summary)
+jq -r '
+  if .type == "assistant" then
+    (.message.content | if type == "array" then [.[] | select(.type == "text") | .text[:120]] | join(" | ") else empty end) as $txt
+    | "\(.timestamp)  ASSIST  \($txt)"
+  elif .type == "user" then
+    (.message.content | if type == "array" then [.[] | select(.type == "tool_result") | "result(\(.tool_use_id[0:8]))"] | join(" ") else empty end) as $res
+    | "\(.timestamp)  USER    \($res)"
+  else
+    "\(.timestamp)  \(.type)"
+  end' "$LOG"
+```
+
+### Message structure
+
+Each line is a JSON object:
+
+| Field | Purpose |
+|---|---|
+| `type` | `"user"`, `"assistant"`, `"attachment"`, `"permission-mode"`, `"last-prompt"` |
+| `timestamp` | ISO-8601 UTC |
+| `message.role` | `"user"` or `"assistant"` |
+| `message.content` | Array of blocks: `{type: "text", text: "..."}`, `{type: "tool_use", name, id, input}`, or `{type: "tool_result", tool_use_id, content}` |
+| `session_id` | UUID matching the spawn session ID |
+
+### Post-mortem workflow
+
+After a run ends (or stalls):
+
+1. Find the run's `session_id` from `pithos inspect run <run_id>`
+2. Locate the JSONL log via `find ~/.claude/projects -name '<session_id>.jsonl'`
+3. Extract thoughts and commands (see above)
+4. Cross-reference with `pithos tail` events and `pithos inspect task` state
+5. Check the last Bash command for the self-kill finalizer: `pithos run end --run <id> --status ended && pandora-spawn kill --target <target>`

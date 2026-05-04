@@ -38,9 +38,9 @@ Bring up Pandora for the current repo:
 scripts/pandora-start.sh
 ```
 
-This initialises the store, upserts a repo scope, installs hooks (where the global `~/.claude/settings.json` is writable), spawns Pandora into a detached tmux session, and attaches.
+This initialises the store, upserts a repo scope, spawns Pandora into a detached tmux session, and attaches.
 
-On Nix systems where `~/.claude/settings.json` is a read-only home-manager symlink, install hooks via the Claude Code marketplace plugin instead — see [`claude-plugin/README.md`](claude-plugin/README.md).
+Liveness/session-end hooks ship as a Claude Code marketplace plugin — see [`packages/spawner/claude-plugin/README.md`](packages/spawner/claude-plugin/README.md). Install once:
 
 ```sh
 /plugin marketplace add https://github.com/codethread/pithos
@@ -65,7 +65,7 @@ On Nix systems where `~/.claude/settings.json` is a read-only home-manager symli
 | `packages/cli/CONTRIBUTING.md` | CLI package quality bar and add-a-command checklist                    |
 | `packages/spawner/README.md` | `pandora-spawn` CLI usage, templates, hooks                               |
 | `packages/spawner/CONTRIBUTING.md` | Spawner package quality bar and template/harness checklist          |
-| `claude-plugin/README.md`    | Claude Code plugin — declarative hook install via marketplace (Nix-safe)  |
+| `packages/spawner/claude-plugin/README.md` | Claude Code plugin — declarative hook install via marketplace      |
 | `skills/pithos-cli/SKILL.md` | Agent-facing Pithos CLI orientation skill                                 |
 | `references/README.md`       | Index for copied prior art; read-only reference behaviour                  |
 | `.claude/commands/smoke.md`  | Claude Code manual smoke-test command                                     |

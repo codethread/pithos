@@ -61,7 +61,7 @@ Checks must be green before every commit. No "leftover issues", no "next commit"
 | Understand engineering rules (fail loudly etc)   | `AGENTS.md`                       |
 | Touch DB schema, CLI shape, or migrations        | `docs/specs/technical-design.md`  |
 | Touch templates, hooks, or harness wiring        | `docs/specs/spawner-spec.md`      |
-| Touch the Claude Code plugin manifest or hooks   | `claude-plugin/README.md`         |
+| Touch the Claude Code plugin manifest or hooks   | `packages/spawner/claude-plugin/README.md` |
 | Look at prior art                                | `references/` (read-only)         |
 
 ## Per-package contributing notes

@@ -106,6 +106,7 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
   The logger emits JSON to stderr with span labels, level, timestamp, and annotations.
 - **Wrap non-trivial units of work in `Effect.withSpan`.** Spans give the causal tree; logs alone are flat. Span labels appear in every log line emitted inside the span.
 - **Errors carry context.** A `PithosError` with `code` + `message` an agent can grep beats a generic stack trace. No interactive-only debug paths — if the only way to understand a failure is attaching a debugger, add the log / span / structured error first.
+- **Session logs are the ground truth.** When investigating agent behavior during or after a run, inspect the Claude JSONL session log first — not raw tmux capture. See `docs/specs/spawner-spec.md#15-session-log-introspection` for the jq recipe.
 
 ## Effect.ts
 
@@ -121,7 +122,7 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 - `docs/README.md`: index for specs and planned docs
 - `docs/specs/mvp-spec.md`: MVP product/domain spec
 - `docs/specs/technical-design.md`: technical contracts, DB schema, CLI shape, migrations
-- `docs/specs/spawner-spec.md`: `@pithos/spawner` / `pandora-spawn` package spec
+- `docs/specs/spawner-spec.md`: `@pithos/spawner` / `pandora-spawn` package spec; includes session log introspection (§15)
 - `docs/planned/ambition.md`: long-term direction; do not overbuild from it
 - `scripts/tasks-adhoc.md`, then `scripts/tasks.md`: implementation queues
 - Each `packages/<package>/` repeats this pattern, providing more granular details as scope narrows

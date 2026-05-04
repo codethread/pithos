@@ -384,7 +384,7 @@ Planned new dedicated repo:
 | `packages/cli/src/**/*.test.ts`      | File-adjacent unit tests (fake layers)  |
 | `packages/cli/test/*.integration.test.ts` | Integration tests (real SQLite + CLI subprocess) |
 | `packages/cli/test/integration/`     | Containerised DB smoke tests            |
-| `hooks/claude-code/`                 | Shell wrappers for Claude Code hooks    |
+| `packages/spawner/hooks/`            | Shell wrappers for harness hooks        |
 | `recipes/`                           | Config-only workflow examples           |
 | `.claude/agents/`                    | Claude Code agent files                 |
 | `skills/`                            | Skills preloaded by agent frontmatter   |

@@ -16,8 +16,6 @@ export interface SpawnOptions {
 export type ParsedArgs =
   | SpawnOptions
   | { readonly command: "templates:list" }
-  | { readonly command: "hooks:install" }
-  | { readonly command: "hooks:uninstall" }
   | { readonly command: "status"; readonly sessionId: string; readonly lines: number }
   | { readonly command: "nudge"; readonly target: string; readonly message: string }
   | { readonly command: "kill"; readonly target: string }
@@ -31,8 +29,6 @@ const valueAfter = (args: readonly string[], index: number, flag: string): strin
 
 export const parseArgs = (args: readonly string[]): ParsedArgs => {
   if (args[0] === "templates" && args[1] === "list") return { command: "templates:list" }
-  if (args[0] === "hooks" && args[1] === "install") return { command: "hooks:install" }
-  if (args[0] === "hooks" && args[1] === "uninstall") return { command: "hooks:uninstall" }
   if (args[0] === "status") {
     let sessionId = ""
     let lines = 10

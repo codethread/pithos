@@ -12,9 +12,9 @@ Claude Code is the first supported harness; `fake` is the deterministic test har
 pandora-spawn --agent envy --scope repo:work/example --harness fake
 pandora-spawn --agent envy --scope repo:work/example --preview
 pandora-spawn templates list
-pandora-spawn hooks install
-pandora-spawn hooks uninstall
 ```
+
+Liveness/session-end hooks ship as a Claude Code plugin — see [`claude-plugin/README.md`](claude-plugin/README.md).
 
 Default command is spawn. Output is JSON.
 
@@ -154,19 +154,9 @@ TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns
 `tmux_session`, `script_path`, and `pane_pid`; attach with
 `tmux attach -t <tmux_session>` to interact.
 
-### Install global Claude Code hooks (optional)
+### Install Claude Code hooks
 
-On Nix systems where `~/.claude/settings.json` is a read-only home-manager symlink, use the Claude Code plugin instead — see the [plugin install instructions](../../claude-plugin/README.md). The plugin registers the same two hook entries declaratively without touching `settings.json`.
-
-On systems where `~/.claude/settings.json` is writable, the CLI install works directly:
-
-```sh
-# Merges PreToolUse + SessionEnd entries into ~/.claude/settings.json
-pandora-spawn hooks install
-
-# To undo
-pandora-spawn hooks uninstall
-```
+Liveness and session-end hooks are registered via the Claude Code plugin shipped at [`claude-plugin/`](./claude-plugin/README.md). Install once with `/plugin marketplace add https://github.com/codethread/pithos` then `/plugin install pithos@codethread/pithos`.
 
 Hooks no-op in normal Claude sessions — they only activate when `PITHOS_AGENT`
 and `PITHOS_RUN_ID` are set, which `pandora-spawn` injects automatically.

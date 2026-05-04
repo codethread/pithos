@@ -78,3 +78,32 @@
 **Vertical slice:** Fix the Envy/Toil handoff instructions so worker-backed execution results in `pithos artifact add --kind worker-completion` rather than `completion`. Update prompt/task wording and nearby docs/examples accordingly, and keep the rerun acceptance criteria aligned with that artifact contract.
 
 ---
+
+## Slice AH-7 — Emit error JSON on stdout (agents don't read exit codes)
+
+**Title:** Move error output from exit codes to machine-readable JSON on stdout
+**Status:** Pending
+**Type:** AFK
+**Blocked by:** None
+**User stories:** US11 (agent-facing CLI contract)
+
+**Vertical slice:** HITL session introspection revealed that agents never check `$?` — they pipe `2>&1` and parse the combined stdout/stderr stream. The current `PithosError` path already emits `{"ok":false,"error":{"code":"...","message":"..."}}` to **stderr**, but agents merge streams and parse it. Two gaps remain:
+
+1. **Non-PithosError failures** (validation, help, unknown errors) print free-form text from `@effect/cli` to stderr, then exit 2. Agents see raw text they can't parse.
+2. **`_common.md` invariants** instruct *"Check process exit codes before parsing output"* — a contract no agent actually follows (session evidence: all agents pipe `2>&1` and never check `$?`).
+
+**Changes:**
+- Collapse exit codes to 0 (success) / 1 (failure). Error details live in the JSON body: `{"ok":false,"error":{"code":"STALE_TOKEN","message":"..."}}`. No consumer branches on exit codes 2-5 — only `_common.md` tells agents to, and they ignore it.
+- Route ALL error output to **stdout** as structured JSON. `PithosError` already does this (to stderr); extend catchAll to match.
+- Remove `exitCodeFor()` mapping — all PithosError codes → exit 1.
+- Update `_common.md`: replace exit-code-based invariants ("Exit code 4 means stale token", "Exit code 5 means no claimable work") with JSON-based equivalents ("Parse JSON; `ok:false` with `error.code` of `STALE_TOKEN` means stale fencing token").
+- Update `skills/pithos-cli/SKILL.md` to match.
+- Update `--help` text in claim, complete, heartbeat, fail, run to remove specific exit code references — just "0 success, 1 failure".
+- Tests: `exec.ts` already only checks `exitCode !== 0` — no change needed.
+
+**Acceptance:**
+- All failure paths emit `{"ok":false,"error":{"code":"...","message":"..."}}` on stdout, exit 1.
+- `_common.md` and SKILL.md invariants updated to JSON-based error reading.
+- `--help` text simplified to 0/1 exit codes.
+- Snapshot updated if spawner help capture changes.
+- `pnpm test` green.

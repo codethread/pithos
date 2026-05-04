@@ -1,8 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { HelpRequested, parseArgs } from "./cli.ts"
-import { buildClaudeArgv, runClaude, runFake } from "./harness.ts"
-import { installHooks, uninstallHooks } from "./hooks-install.ts"
+import { buildClaudeArgv, runClaude, runFake, tmuxSessionName } from "./harness.ts"
 import { agentsPath, templatesDir } from "./paths.ts"
 import { renderStatus } from "./status.ts"
 import { loadAgentManifests, loadTemplate, render } from "./template.ts"
@@ -39,8 +38,6 @@ const parseRunId = (raw: string): string => {
 
 const run = async (): Promise<void> => {
   const opts = parseArgs(process.argv.slice(2))
-  if (opts.command === "hooks:install") { installHooks(); writeJson({ ok: true }); return }
-  if (opts.command === "hooks:uninstall") { uninstallHooks(); writeJson({ ok: true }); return }
   if (opts.command === "status") { process.stdout.write(`${renderStatus(opts.sessionId, opts.lines)}\n`); return }
   if (opts.command === "nudge") { process.stdout.write(execText(["tmux", "send-keys", "-t", opts.target, opts.message, "Enter"])); return }
   if (opts.command === "kill") { process.stdout.write(execText(["tmux", "kill-session", "-t", opts.target])); return }
@@ -76,6 +73,7 @@ const run = async (): Promise<void> => {
     cmd_kill: launcherCommands?.kill ?? "",
     cmd_tty_status: launcherCommands?.tty_status ?? "",
     launcher_meta: launcherMeta,
+    session_target: tmuxSessionName(opts.agent, sessionId),
     ...template.includes,
   }
   const prompt = render(template.body, context)

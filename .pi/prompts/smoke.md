@@ -27,7 +27,7 @@ Read these once; this workflow does not restate them.
 - `AGENTS.md` — repo rules; fail loudly; strict IO; observability
 - `README.md` — repo overview and operator entrypoints
 - `packages/spawner/README.md` — `pandora-spawn` spawn/status/hook behavior
-- `claude-plugin/README.md` — Nix-safe Claude plugin / hook install path
+- `packages/spawner/claude-plugin/README.md` — Claude plugin / hook install path
 
 ## Variables
 
@@ -56,7 +56,7 @@ Read these once; this workflow does not restate them.
 
 - Prefer the **manual spawn flow** on this machine.
 - Do **not** assume `scripts/pandora-start.sh` works here.
-- If `~/.claude/settings.json` is read-only, use the plugin path described in `claude-plugin/README.md` instead of `pandora-spawn hooks install`.
+- Hooks install via the Claude Code plugin — see `packages/spawner/claude-plugin/README.md`.
 - This workflow includes explicit cleanup both **before** and **after** a rerun so the next rerun starts from known state.
 - Always capture the report first, then tear down DB/files/sessions.
 

@@ -1,14 +1,6 @@
-# Pithos autonomous implementation loop
+# Autonomous implementation loop
 
-The single entrypoint for agents driving Pithos implementation forward against the slice queue.
-
-Project intro and human-facing docs live in `README.md` and `CONTRIBUTING.md`. This file is the agent runbook.
-
-## Agent loop
-
-When asked to continue Pithos implementation:
-
-1. Read this file.
+1. Read `CONTRIBUTING.md`.
 2. Read `tasks-adhoc.md` first, then `tasks.md`.
 3. Pick the first unimplemented task in `tasks-adhoc.md` whose `Blocked by` dependencies are complete; if none are available, pick the first unbuilt task in `tasks.md` whose `Blocked by` dependencies are complete.
 4. Read only the supporting docs needed for that task:
@@ -36,23 +28,12 @@ When asked to continue Pithos implementation:
 - Build from scratch in `~/dev/pithos`; existing vault scripts are prior art only.
 - Do not skip ahead to blocked slices.
 - Do not add daemon/spawn automation/recipe engine before the MVP slices ask for it.
+- Don't expand the spawner package surface beyond `spawner-spec.md`.
 - Do not use real Claude/tmux in AFK tests.
 - Docker/Podman DB smoke tests are okay; real Claude-in-container is HITL only.
 - Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness.
 - Keep workers pithos-tracked but not pithos-aware.
 - Keep prompts small; command details belong in `pithos --help`.
-
-## Documents
-
-| File                  | Purpose                                                               |
-| --------------------- | --------------------------------------------------------------------- |
-| `tasks-adhoc.md`      | Ad hoc observability/repair slices; actioned before the primary queue |
-| `tasks.md`            | Numbered tracer-bullet implementation slices; primary work queue      |
-| `mvp-spec.md`         | MVP product/domain spec                                               |
-| `technical-design.md` | Technical contracts and implementation details                        |
-| `spawner-spec.md`     | `@pithos/spawner` (`pandora-spawn`) package spec; read for slice 16+  |
-| `ambition.md`         | Long-term direction; do not overbuild from it                         |
-| `references/`         | Copied prior art from the current Pandora prototype                   |
 
 ## Current next action
 

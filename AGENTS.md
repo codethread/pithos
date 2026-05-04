@@ -1,6 +1,6 @@
 # Agent rules
 
-Pithos is an Effect-TS CLI. These rules are non-negotiable.
+These rules are non-negotiable.
 
 ## Build and run
 
@@ -109,4 +109,12 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 
 ## Effect.ts
 
-This codebase uses effect.ts heavily, the source is at `~/dev/vendor/effect`
+- This codebase uses effect.ts heavily, the source for Effect is at `~/dev/vendor/effect`
+- Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness — see `packages/cli/src` for the pattern.
+
+## Docs
+
+- `README.md`: Project intro and human-facing docs, discusses why, what and API boundaries
+- `CONTRIBUTING.md`: outlines conventions and architecture.
+- `AGENTS.md`: non negotiable rules beyond what can be enforced statically, injected transparently into agents
+- Each `packages/<package>/` then repeats this pattern, providing more granular details as scope narrows

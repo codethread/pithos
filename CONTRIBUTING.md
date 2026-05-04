@@ -52,16 +52,16 @@ Checks must be green before every commit. No "leftover issues", no "next commit"
 
 ## Doc map
 
-| When you want to…                              | Read…                                |
-| ---------------------------------------------- | ------------------------------------ |
-| Understand product intent                      | `mvp-spec.md`                        |
-| Find the next slice to work on                 | `tasks-adhoc.md`, then `tasks.md`    |
-| Understand engineering rules (fail loudly etc) | `AGENTS.md`                          |
-| Run the autonomous slice loop                  | `AGENT_LOOP.md`                      |
-| Touch DB schema, CLI shape, or migrations      | `technical-design.md`                |
-| Touch templates, hooks, or harness wiring      | `spawner-spec.md`                    |
-| Touch the Claude Code plugin manifest or hooks | `plugin/README.md`                   |
-| Look at prior art                              | `references/` (read-only)            |
+| When you want to…                                | Read…                             |
+| ------------------------------------------------ | --------------------------------- |
+| Understand product intent                        | `mvp-spec.md`                     |
+| Understand long-term direction (don't overbuild) | `ambition.md`                     |
+| Find the next slice to work on                   | `tasks-adhoc.md`, then `tasks.md` |
+| Understand engineering rules (fail loudly etc)   | `AGENTS.md`                       |
+| Touch DB schema, CLI shape, or migrations        | `technical-design.md`             |
+| Touch templates, hooks, or harness wiring        | `spawner-spec.md`                 |
+| Touch the Claude Code plugin manifest or hooks   | `plugin/README.md`                |
+| Look at prior art                                | `references/` (read-only)         |
 
 ## Per-package contributing notes
 
@@ -69,10 +69,3 @@ Each package has its own `CONTRIBUTING.md` with quality bar and add-a-feature ch
 
 - `packages/cli/CONTRIBUTING.md` — full Effect quality bar (tagged errors, schemas at IO, structured logs).
 - `packages/spawner/CONTRIBUTING.md` — relaxed bar per `spawner-spec.md` §2 (plain TS glue, one snapshot test).
-
-## Scope discipline
-
-- Don't add daemon/spawn automation/recipe engine before the MVP slices ask for it.
-- Don't expand the spawner package surface beyond `spawner-spec.md`.
-- Don't use real Claude/tmux in AFK tests. Real Claude integration is HITL only (slice 21+).
-- Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness — see `packages/cli/src` for the pattern.

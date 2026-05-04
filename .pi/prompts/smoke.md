@@ -1,3 +1,9 @@
+---
+name: smoke
+description: run a manual smoke test of the full workflow with fresh db and cleanup
+disable-model-invocation: true
+---
+
 # Workflow: fresh HITL Pandora delegation rerun
 
 Use this runbook to repeat the real end-to-end delegation test in `~/dev/pithos`.
@@ -25,16 +31,16 @@ Read these once; this workflow does not restate them.
 
 ## Variables
 
-| Variable | Value | Notes |
-| --- | --- | --- |
-| REPO_ROOT | `~/dev/pithos` | repo under test |
-| DEFAULT_DB | `~/.pandora/pithos.sqlite` | preferred DB on this machine unless explicitly testing propagation |
-| SCOPE_KIND | `repo` | scope under test |
-| REQUEST_TITLE | `Write simple hello bash script via delegated path` | seed task title |
-| REQUEST_TARGET | `scripts/hello.sh` | expected created file |
-| VERIFY_CMD | `bash scripts/hello.sh` | expected verification command |
-| TMP_DB_GLOB | `/tmp/pithos-e2e.*` | temp DB scratch path from prior runs |
-| TEST_SESSION_RG | `pithos-(pandora|toil|envy)-` | tmux test session matcher |
+| Variable        | Value                                               | Notes                                                              |
+| --------------- | --------------------------------------------------- | ------------------------------------------------------------------ | ------- | ------------------------- |
+| REPO_ROOT       | `~/dev/pithos`                                      | repo under test                                                    |
+| DEFAULT_DB      | `~/.pandora/pithos.sqlite`                          | preferred DB on this machine unless explicitly testing propagation |
+| SCOPE_KIND      | `repo`                                              | scope under test                                                   |
+| REQUEST_TITLE   | `Write simple hello bash script via delegated path` | seed task title                                                    |
+| REQUEST_TARGET  | `scripts/hello.sh`                                  | expected created file                                              |
+| VERIFY_CMD      | `bash scripts/hello.sh`                             | expected verification command                                      |
+| TMP_DB_GLOB     | `/tmp/pithos-e2e.*`                                 | temp DB scratch path from prior runs                               |
+| TEST_SESSION_RG | `pithos-(pandora                                    | toil                                                               | envy)-` | tmux test session matcher |
 
 ## Prerequisites
 
@@ -373,29 +379,3 @@ Always capture these exact facts:
 - whether hooks were active
 - whether `PITHOS_DB` propagation was correct
 - exact failing step and output if the rerun failed
-
-## Current known outcome from the most recent run
-
-AH-4 rerun (2026-05-03) — **FULL SUCCESS**:
-
-- Baseline passed: `pnpm lint`, `pnpm typecheck`, `pnpm test` (32 files / 352 tests), `pnpm run build`
-- DB used: `~/.pandora/pithos.sqlite` (DEFAULT_DB); fresh DB created via `rm -f ~/.pandora/pithos.sqlite` then `pithos init`
-- Scope: `repo:dev/pithos`
-- Seed task: `task_8eae19c39a8a448d`
-- Pandora run/session/tmux: `run_b80a4302a65445cc` / `538cb1a2-9417-4071-9db8-5a66ac3baf50` / `pithos-pandora-538cb1a2`
-- Pandora did **not** write `scripts/hello.sh`; it delegated and reported the final result from Pithos state
-- Toil run/session: `run_1047995ed8994bb0` / `c2e5145d-99b8-4eeb-84a5-98ad8393489c`
-- Toil claimed triage task `task_8eae19c39a8a448d` and created child task `task_7dcd348fd73e4472` with capability **`implement`**
-- Envy run/session: `run_babbd2ed8449425e` / `7a5f3f85-c202-46e7-b126-a79f80950d94`
-- Envy claimed implement task `task_7dcd348fd73e4472` and remained coordinator/reporter
-- Worker run/session: `run_b97ce42e587a4cca` / `977e9e87-b0c7-4ad3-99e2-43fb0ce24ddc`; parent run `run_babbd2ed8449425e`
-- Worker performed the file mutation and created `scripts/hello.sh`
-- Artifact: `artifact_2ad35e2fac204b9c`, kind `worker-completion`, attached to task `task_7dcd348fd73e4472`
-- Verification command: `bash scripts/hello.sh`
-- Verification output: `hello`
-- Hook evidence: `PreToolUse` observed on Pandora and Toil; Envy and worker both ended cleanly
-- Final cleanup completed: removed `scripts/hello.sh`, removed `~/.pandora/pithos.sqlite`, removed `/tmp/pithos-e2e.*`, killed test tmux sessions
-
-Acceptance criteria: **all met**.
-
-Keep this section updated after each rerun so the workflow remains an accurate operator document.

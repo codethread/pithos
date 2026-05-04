@@ -2,7 +2,7 @@
 
 **Priority:** Process this queue before `tasks.md`.
 **Scope:** Observability, diagnostics, and quick repair slices.
-**Source docs for current queue:** `PROMPT.md`, `mvp-spec.md`, `technical-design.md`, `ambition.md`, `spawner-spec.md`
+**Source docs for current queue:** `mvp-spec.md`, `technical-design.md`, `ambition.md`, `spawner-spec.md`
 
 ---
 

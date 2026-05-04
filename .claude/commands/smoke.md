@@ -1,0 +1,1 @@
+../../.pi/prompts/smoke.md

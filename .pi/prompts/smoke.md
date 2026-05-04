@@ -27,12 +27,12 @@ Read these once; this workflow does not restate them.
 - `AGENTS.md` — repo rules; fail loudly; strict IO; observability
 - `README.md` — repo overview and operator entrypoints
 - `packages/spawner/README.md` — `pandora-spawn` spawn/status/hook behavior
-- `plugin/README.md` — Nix-safe Claude plugin / hook install path
+- `claude-plugin/README.md` — Nix-safe Claude plugin / hook install path
 
 ## Variables
 
 | Variable        | Value                                               | Notes                                                              |
-| --------------- | --------------------------------------------------- | ------------------------------------------------------------------ | ------- | ------------------------- |
+| --------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
 | REPO_ROOT       | `~/dev/pithos`                                      | repo under test                                                    |
 | DEFAULT_DB      | `~/.pandora/pithos.sqlite`                          | preferred DB on this machine unless explicitly testing propagation |
 | SCOPE_KIND      | `repo`                                              | scope under test                                                   |
@@ -40,7 +40,7 @@ Read these once; this workflow does not restate them.
 | REQUEST_TARGET  | `scripts/hello.sh`                                  | expected created file                                              |
 | VERIFY_CMD      | `bash scripts/hello.sh`                             | expected verification command                                      |
 | TMP_DB_GLOB     | `/tmp/pithos-e2e.*`                                 | temp DB scratch path from prior runs                               |
-| TEST_SESSION_RG | `pithos-(pandora                                    | toil                                                               | envy)-` | tmux test session matcher |
+| TEST_SESSION_RG | `pithos-(pandora\|toil\|envy)-`                   | tmux test session matcher                                          |
 
 ## Prerequisites
 
@@ -56,7 +56,7 @@ Read these once; this workflow does not restate them.
 
 - Prefer the **manual spawn flow** on this machine.
 - Do **not** assume `scripts/pandora-start.sh` works here.
-- If `~/.claude/settings.json` is read-only, use the plugin path described in `plugin/README.md` instead of `pandora-spawn hooks install`.
+- If `~/.claude/settings.json` is read-only, use the plugin path described in `claude-plugin/README.md` instead of `pandora-spawn hooks install`.
 - This workflow includes explicit cleanup both **before** and **after** a rerun so the next rerun starts from known state.
 - Always capture the report first, then tear down DB/files/sessions.
 

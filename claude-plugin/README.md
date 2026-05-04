@@ -42,14 +42,14 @@ If you are working on the plugin itself or want to test before publishing:
 
 ```sh
 # Point Claude Code at the local plugin directory
-claude --plugin-dir ./plugin
+claude --plugin-dir ./claude-plugin
 ```
 
 Or add to your project `.claude/settings.json`:
 
 ```json
 {
-  "pluginDirs": ["./plugin"]
+  "pluginDirs": ["./claude-plugin"]
 }
 ```
 

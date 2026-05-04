@@ -54,13 +54,14 @@ Checks must be green before every commit. No "leftover issues", no "next commit"
 
 | When you want to…                                | Read…                             |
 | ------------------------------------------------ | --------------------------------- |
-| Understand product intent                        | `mvp-spec.md`                     |
-| Understand long-term direction (don't overbuild) | `ambition.md`                     |
-| Find the next slice to work on                   | `tasks-adhoc.md`, then `tasks.md` |
+| Browse project specs and planned docs            | `docs/README.md`                  |
+| Understand product intent                        | `docs/specs/mvp-spec.md`          |
+| Understand long-term direction (don't overbuild) | `docs/planned/ambition.md`        |
+| Find the next slice to work on                   | `scripts/tasks-adhoc.md`, then `scripts/tasks.md` |
 | Understand engineering rules (fail loudly etc)   | `AGENTS.md`                       |
-| Touch DB schema, CLI shape, or migrations        | `technical-design.md`             |
-| Touch templates, hooks, or harness wiring        | `spawner-spec.md`                 |
-| Touch the Claude Code plugin manifest or hooks   | `plugin/README.md`                |
+| Touch DB schema, CLI shape, or migrations        | `docs/specs/technical-design.md`  |
+| Touch templates, hooks, or harness wiring        | `docs/specs/spawner-spec.md`      |
+| Touch the Claude Code plugin manifest or hooks   | `claude-plugin/README.md`         |
 | Look at prior art                                | `references/` (read-only)         |
 
 ## Per-package contributing notes
@@ -68,4 +69,4 @@ Checks must be green before every commit. No "leftover issues", no "next commit"
 Each package has its own `CONTRIBUTING.md` with quality bar and add-a-feature checklist:
 
 - `packages/cli/CONTRIBUTING.md` — full Effect quality bar (tagged errors, schemas at IO, structured logs).
-- `packages/spawner/CONTRIBUTING.md` — relaxed bar per `spawner-spec.md` §2 (plain TS glue, one snapshot test).
+- `packages/spawner/CONTRIBUTING.md` — relaxed bar per `docs/specs/spawner-spec.md` §2 (plain TS glue, one snapshot test).

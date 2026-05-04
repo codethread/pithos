@@ -137,7 +137,7 @@ pithos/
       session-end
 ```
 
-Default implementation choice for MVP is TypeScript on Node LTS with pnpm workspaces, Effect v3, ESLint, and Vitest, as detailed in `pandora-box-technical-design.md`. DB/CLI logic should not be shell-heavy.
+Default implementation choice for MVP is TypeScript on Node LTS with pnpm workspaces, Effect v3, ESLint, and Vitest, as detailed in `docs/specs/technical-design.md`. DB/CLI logic should not be shell-heavy.
 
 ### Data flow
 

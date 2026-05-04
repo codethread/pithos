@@ -329,7 +329,7 @@ Two implementations. `claude` writes a wrapper script and launches it via
 `tmux new-session -d` so claude always has a TTY regardless of how
 `pandora-spawn` was invoked, then returns `{ tmux_session, script_path,
 pane_pid }`. `fake` returns the spawn description and never execs. The
-fake is reused by `tasks.md` slice 18 (fake-Claude harness for
+fake is reused by `scripts/tasks.md` slice 18 (fake-Claude harness for
 deterministic spawn tests), so build it once, here.
 
 ## 10. Hooks
@@ -380,7 +380,7 @@ unaffected — only spawner-launched sessions trigger heartbeats.
 
 ### Alternative install — Claude Code plugin (preferred on Nix)
 
-On systems where `~/.claude/settings.json` is a read-only home-manager symlink, `pandora-spawn hooks install` will fail because it cannot write to that file. The preferred install path on those setups is the Claude Code plugin at `plugin/` in the repo root. The plugin's `hooks/hooks.json` registers the same two entries (`PreToolUse` + `SessionEnd prompt_input_exit`) declaratively via `${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.sh` (a symlink into `packages/spawner/hooks/claude-code/dispatch.sh`), without touching `settings.json`. Install once with `/plugin marketplace add https://github.com/codethread/pithos` then `/plugin install pithos@codethread/pithos`. The CLI path (`pandora-spawn hooks install`) remains the manual fallback for users on writable-settings systems.
+On systems where `~/.claude/settings.json` is a read-only home-manager symlink, `pandora-spawn hooks install` will fail because it cannot write to that file. The preferred install path on those setups is the Claude Code plugin at `claude-plugin/` in the repo root. The plugin's `hooks/hooks.json` registers the same two entries (`PreToolUse` + `SessionEnd prompt_input_exit`) declaratively via `${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.sh` (a symlink into `packages/spawner/hooks/claude-code/dispatch.sh`), without touching `settings.json`. Install once with `/plugin marketplace add https://github.com/codethread/pithos` then `/plugin install pithos@codethread/pithos`. The CLI path (`pandora-spawn hooks install`) remains the manual fallback for users on writable-settings systems.
 
 ## 11. Templates shipped in MVP
 

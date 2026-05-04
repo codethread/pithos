@@ -40,21 +40,33 @@ scripts/pandora-start.sh
 
 This initialises the store, upserts a repo scope, installs hooks (where the global `~/.claude/settings.json` is writable), spawns Pandora into a detached tmux session, and attaches.
 
-On Nix systems where `~/.claude/settings.json` is a read-only home-manager symlink, install hooks via the Claude Code plugin instead — see [`plugin/README.md`](plugin/README.md).
+On Nix systems where `~/.claude/settings.json` is a read-only home-manager symlink, install hooks via the Claude Code marketplace plugin instead — see [`claude-plugin/README.md`](claude-plugin/README.md).
+
+```sh
+/plugin marketplace add https://github.com/codethread/pithos
+/plugin install pithos@codethread/pithos
+```
 
 ## Documents
 
 | File                         | Purpose                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------- |
-| `AGENT_LOOP.md`              | Autonomous loop spec: how agents pick slices and drive `tasks.md` forward |
+| `AGENT_LOOP.md`              | Autonomous loop spec: how agents pick slices and drive `scripts/tasks.md` forward |
 | `AGENTS.md`                  | Non-negotiable engineering rules (fail loudly, strict IO, observability)  |
 | `CONTRIBUTING.md`            | Setup, verify, commit hygiene, where to look                              |
-| `mvp-spec.md`                | MVP product/domain spec                                                   |
-| `technical-design.md`        | Technical contracts and DB/CLI shape                                      |
-| `spawner-spec.md`            | `@pithos/spawner` (`pandora-spawn`) package spec                          |
-| `ambition.md`                | Long-term direction; do not overbuild from it                             |
-| `tasks.md`                   | Numbered tracer-bullet implementation slices; primary queue               |
-| `tasks-adhoc.md`             | Ad-hoc observability/repair slices; actioned before the primary queue     |
+| `docs/README.md`             | Index for specs and planned docs                                          |
+| `docs/specs/mvp-spec.md`     | MVP product/domain spec                                                   |
+| `docs/specs/technical-design.md` | Technical contracts and DB/CLI shape                                  |
+| `docs/specs/spawner-spec.md` | `@pithos/spawner` (`pandora-spawn`) package spec                          |
+| `docs/planned/ambition.md`   | Long-term direction; do not overbuild from it                             |
+| `scripts/tasks.md`           | Numbered tracer-bullet implementation slices; primary queue               |
+| `scripts/tasks-adhoc.md`     | Ad-hoc observability/repair slices; actioned before the primary queue     |
 | `packages/cli/README.md`     | `pithos` CLI usage and surface                                            |
+| `packages/cli/CONTRIBUTING.md` | CLI package quality bar and add-a-command checklist                    |
 | `packages/spawner/README.md` | `pandora-spawn` CLI usage, templates, hooks                               |
-| `plugin/README.md`           | Claude Code plugin — declarative hook install (Nix-safe)                  |
+| `packages/spawner/CONTRIBUTING.md` | Spawner package quality bar and template/harness checklist          |
+| `claude-plugin/README.md`    | Claude Code plugin — declarative hook install via marketplace (Nix-safe)  |
+| `skills/pithos-cli/SKILL.md` | Agent-facing Pithos CLI orientation skill                                 |
+| `references/README.md`       | Index for copied prior art; read-only reference behaviour                  |
+| `.claude/commands/smoke.md`  | Claude Code manual smoke-test command                                     |
+| `.pi/prompts/smoke.md`       | Pi manual smoke-test prompt                                               |

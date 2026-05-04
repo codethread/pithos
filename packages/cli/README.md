@@ -38,6 +38,7 @@ The `--help` output is the contract — agents read it instead of memorising fla
 | `PITHOS_FENCING_TOKEN` | Current claim's fencing token                          |
 | `PITHOS_SCOPE_ID`      | Scope hint for the current session                     |
 | `PITHOS_OUTPUT`        | `json` (default) or `text`                             |
+| `PITHOS_LOG_LEVEL`     | `trace`/`debug`/`info`/`warning`/`error`/`fatal`/`none`; default `none` (silent) |
 
 ## Exit codes
 

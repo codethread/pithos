@@ -115,6 +115,13 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 ## Docs
 
 - `README.md`: Project intro and human-facing docs, discusses why, what and API boundaries
-- `CONTRIBUTING.md`: outlines conventions and architecture.
-- `AGENTS.md`: non negotiable rules beyond what can be enforced statically, injected transparently into agents
-- Each `packages/<package>/` then repeats this pattern, providing more granular details as scope narrows
+- `CONTRIBUTING.md`: build, verify, commit baseline, and doc map
+- `AGENTS.md`: non-negotiable rules beyond what can be enforced statically, injected transparently into agents
+- `AGENT_LOOP.md`: autonomous implementation loop; intentionally kept at repo root
+- `docs/README.md`: index for specs and planned docs
+- `docs/specs/mvp-spec.md`: MVP product/domain spec
+- `docs/specs/technical-design.md`: technical contracts, DB schema, CLI shape, migrations
+- `docs/specs/spawner-spec.md`: `@pithos/spawner` / `pandora-spawn` package spec
+- `docs/planned/ambition.md`: long-term direction; do not overbuild from it
+- `scripts/tasks-adhoc.md`, then `scripts/tasks.md`: implementation queues
+- Each `packages/<package>/` repeats this pattern, providing more granular details as scope narrows

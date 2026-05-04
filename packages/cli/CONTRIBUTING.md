@@ -2,7 +2,7 @@
 
 This package is the source of truth for Pithos state. The quality bar is high.
 
-Root-level rules (`AGENTS.md`) apply here in full: fail loudly, strict types at IO, structured logs, agent-first observability. This file lists the package-specific build commands and the add-a-command checklist.
+Root-level rules (`../../AGENTS.md`) apply here in full: fail loudly, strict types at IO, structured logs, agent-first observability. This file lists the package-specific build commands and the add-a-command checklist.
 
 ## Build
 
@@ -32,7 +32,7 @@ pnpm --filter @pithos/cli test              # both
 - **DB writes inside transactions.** If a race is detected mid-transaction, throw to roll back. Never best-effort.
 - **Structured logs.** `Effect.log*` with `Effect.annotateLogs`. Wrap non-trivial work in `Effect.withSpan`. No `console.log`.
 
-See `AGENTS.md` for canonical examples of each.
+See `../../AGENTS.md` for canonical examples of each.
 
 ## Adding a command — checklist
 

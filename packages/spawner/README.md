@@ -36,6 +36,20 @@ templates/
 
 ```json
 {
+  "launchers": {
+    "local_claude_tmux": {
+      "kind": "tmux",
+      "harness": "claude-code",
+      "commands": {
+        "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
+        "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
+        "nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
+        "kill": "pandora-spawn kill --target {{target}}",
+        "tty_status": "pandora-spawn tty-status --target {{target}}"
+      },
+      "meta": { "status_source": "claude_jsonl", "tty_provider": "tmux" }
+    }
+  },
   "agents": [
     {
       "agent": "envy",
@@ -43,7 +57,9 @@ templates/
       "tools": ["Bash", "Read", "Grep", "Glob"],
       "capability": "implement",
       "includes": ["_common.md"],
-      "system_prompt": "envy.md.tmpl"
+      "system_prompt": "envy.md.tmpl",
+      "launcher": "local_claude_tmux",
+      "inject_meta": false
     }
   ]
 }
@@ -58,6 +74,8 @@ Rules:
 - `tools` must be non-empty; rendered into the prompt body as `{{tools_csv}}` for the agent's awareness. It is not passed to Claude as a CLI flag — `--dangerously-skip-permissions` + `--permission-mode acceptEdits` are used instead so the agent can act without prompts.
 - `includes` names files in `templates/`; path separators are rejected.
 - Includes are not automatically appended. Each include becomes a template var keyed by filename, so `"includes": ["_common.md"]` makes `{{_common.md}}` available in the system prompt.
+- `launcher` names a key in the top-level `launchers` block. Its `commands` are rendered into the prompt as `{{cmd_spawn}}` / `{{cmd_status}}` / `{{cmd_nudge}}` / `{{cmd_kill}}` / `{{cmd_tty_status}}` so the agent knows how to drive its peers.
+- `inject_meta: true` exposes the launcher's `kind`/`harness`/`meta` block as `{{launcher_meta}}` (a fenced JSON section). Pandora gets this; her evils don't.
 - JSON/template errors exit with code `2`.
 
 ### Prompt template vars
@@ -81,10 +99,13 @@ Available vars:
 - `model`
 - `tools_csv`
 - `run_id`
+- `session_id`
 - `scope_id`
 - `task_id` — empty string when absent
 - `cwd`
-- `pithos_help`
+- `pithos_help` — `pithos --help` output, captured at spawn time
+- `cmd_spawn`, `cmd_status`, `cmd_nudge`, `cmd_kill`, `cmd_tty_status` — launcher command templates; empty string when the agent has no `launcher`
+- `launcher_meta` — fenced JSON block describing the launcher; empty unless `inject_meta: true`
 - each include filename, e.g. `{{_common.md}}`
 
 Unknown vars fail loudly.
@@ -135,7 +156,7 @@ TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns
 
 ### Install global Claude Code hooks (optional)
 
-On Nix systems where `~/.claude/settings.json` is a read-only home-manager symlink, use the Claude Code plugin instead — see the [plugin install instructions](../../plugin/README.md). The plugin registers the same two hook entries declaratively without touching `settings.json`.
+On Nix systems where `~/.claude/settings.json` is a read-only home-manager symlink, use the Claude Code plugin instead — see the [plugin install instructions](../../claude-plugin/README.md). The plugin registers the same two hook entries declaratively without touching `settings.json`.
 
 On systems where `~/.claude/settings.json` is writable, the CLI install works directly:
 

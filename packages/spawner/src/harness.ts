@@ -18,18 +18,25 @@ export interface ClaudeRunInput {
 export const buildClaudeArgv = (input: {
   readonly sessionId: string
   readonly model: string
+  readonly tools: string
   readonly prompt: string
-}): readonly string[] => [
-  "claude",
-  "--session-id",
-  input.sessionId,
-  "--dangerously-skip-permissions",
-  "--permission-mode",
-  "acceptEdits",
-  "--model",
-  input.model,
-  input.prompt,
-]
+  readonly kickoffMessage?: string
+}): readonly string[] => {
+  const base: string[] = [
+    "claude",
+    "--session-id",
+    input.sessionId,
+    "--dangerously-skip-permissions",
+    "--model",
+    input.model,
+    "--tools",
+    input.tools,
+    "--system-prompt",
+    input.prompt,
+  ]
+  if (input.kickoffMessage !== undefined) base.push(input.kickoffMessage)
+  return base
+}
 
 export const tmuxSessionName = (agent: string, sessionId: string): string =>
   `pithos-${agent}-${sessionId.slice(0, 8)}`

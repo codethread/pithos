@@ -8,10 +8,11 @@ exports[`envy spawn renders deterministic prompt + argv (fake harness) 1`] = `
     "--session-id",
     "session-TEST",
     "--dangerously-skip-permissions",
-    "--permission-mode",
-    "acceptEdits",
     "--model",
-    "opus",
+    "sonnet",
+    "--tools",
+    "Bash,Read,Grep,Glob",
+    "--system-prompt",
     "You have access to exactly these tools: Bash,Read,Grep,Glob. No others exist.
 
 You are Envy. Claim one Pithos task with capability \`implement\`, coordinate execution, attach a \`worker-completion\` artifact for worker-backed results, complete or fail your task, then finalize.
@@ -191,6 +192,7 @@ Run \`pithos <subcommand> --help\` for per-command flags.
 - For mutating \`implement\` work, Envy is the coordinator. A separate worker sub-session performs repo/worktree mutations; direct coordinator-side mutation does not satisfy the worker-backed execution contract.
 
 ",
+    "begin",
   ],
   "cwd": "/tmp/example",
   "env": {

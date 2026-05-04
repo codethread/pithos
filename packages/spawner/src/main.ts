@@ -43,7 +43,7 @@ const run = async (): Promise<void> => {
   if (opts.command === "kill") { process.stdout.write(execText(["tmux", "kill-session", "-t", opts.target])); return }
   if (opts.command === "tty-status") { process.stdout.write(execText(["tmux", "capture-pane", "-t", opts.target, "-p"])); return }
   if (opts.command === "templates:list") {
-    const templates = loadAgentManifests(agentsPath).map((manifest) => ({ name: manifest.agent, model: manifest.model, tools: manifest.tools, capability: manifest.capability, launcher: manifest.launcher ?? null }))
+    const templates = loadAgentManifests(agentsPath).map((manifest) => ({ name: manifest.agent, model: manifest.model, tools: manifest.tools, capability: manifest.capability, type: manifest.type, launcher: manifest.launcher ?? null }))
     writeJson({ ok: true, templates })
     return
   }
@@ -78,7 +78,14 @@ const run = async (): Promise<void> => {
   }
   const prompt = render(template.body, context)
   const env = { PITHOS_RUN_ID: runId, PITHOS_AGENT: opts.agent, PITHOS_SCOPE_ID: opts.scope, PITHOS_OUTPUT: "json", ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}) }
-  const argv = buildClaudeArgv({ sessionId, model: template.manifest.model, prompt })
+  const kickoffMessage = template.manifest.type === "afk" ? "begin" as const : undefined
+  const argv = buildClaudeArgv({
+    sessionId,
+    model: template.manifest.model,
+    tools: template.manifest.tools.join(","),
+    prompt,
+    ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
+  })
   const description = { env, argv, prompt, cwd: opts.cwd }
   if (opts.preview) {
     writeJson({ ok: true, preview: true, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, ...description })

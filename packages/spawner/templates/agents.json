@@ -21,20 +21,33 @@
   "agents": [
     {
       "agent": "pandora",
-      "model": "opus",
-      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "model": "sonnet",
+      "tools": [
+        "Bash"
+      ],
       "capability": "orchestrate",
-      "includes": ["_common.md"],
+      "type": "afk",
+      "includes": [
+        "_common.md"
+      ],
       "system_prompt": "pandora.md.tmpl",
       "launcher": "local_claude_tmux",
       "inject_meta": true
     },
     {
       "agent": "envy",
-      "model": "opus",
-      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "model": "sonnet",
+      "tools": [
+        "Bash",
+        "Read",
+        "Grep",
+        "Glob"
+      ],
       "capability": "implement",
-      "includes": ["_common.md"],
+      "type": "afk",
+      "includes": [
+        "_common.md"
+      ],
       "system_prompt": "envy.md.tmpl",
       "launcher": "local_claude_tmux",
       "inject_meta": false
@@ -42,9 +55,17 @@
     {
       "agent": "toil",
       "model": "sonnet",
-      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "tools": [
+        "Bash",
+        "Read",
+        "Grep",
+        "Glob"
+      ],
       "capability": "triage",
-      "includes": ["_common.md"],
+      "type": "afk",
+      "includes": [
+        "_common.md"
+      ],
       "system_prompt": "toil.md.tmpl",
       "launcher": "local_claude_tmux",
       "inject_meta": false

@@ -16,11 +16,14 @@ export interface LauncherManifest {
   readonly meta: Record<string, string>
 }
 
+export type AgentType = "afk" | "hitl"
+
 export interface AgentManifest {
   readonly agent: string
   readonly model: string
   readonly tools: readonly string[]
   readonly capability: string
+  readonly type: AgentType
   readonly includes: readonly string[]
   readonly system_prompt: string
   readonly launcher: string | undefined
@@ -57,6 +60,12 @@ const readOptionalStringField = (path: string, raw: Record<string, unknown>, fie
   const value = raw[field]
   if (value === undefined) return undefined
   if (typeof value !== "string" || value.length === 0) throw new TemplateError(`${path}: ${field} must be a non-empty string`)
+  return value
+}
+
+const readTypeField = (path: string, raw: Record<string, unknown>): AgentType => {
+  const value = raw.type
+  if (typeof value !== "string" || (value !== "afk" && value !== "hitl")) throw new TemplateError(`${path}: type must be "afk" or "hitl"`)
   return value
 }
 
@@ -108,6 +117,7 @@ const parseOneManifest = (path: string, parsed: unknown): AgentManifest => {
     model: readStringField(path, raw, "model"),
     tools,
     capability: readStringField(path, raw, "capability"),
+    type: readTypeField(path, raw),
     includes: includes ?? [],
     system_prompt: readStringField(path, raw, "system_prompt"),
     launcher: readOptionalStringField(path, raw, "launcher"),

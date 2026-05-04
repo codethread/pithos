@@ -91,6 +91,8 @@ flowchart TD
 
 ## 4. Agent Ambitions
 
+> For the **currently implemented** agent roster, capabilities, claim routing, and delegation chain, see [`docs/evils-and-claims.md`](../evils-and-claims.md). This section describes the longer-term vision.
+
 ### Pandora
 
 Pandora becomes more of a bridge between Adam and the workload than a task processor.

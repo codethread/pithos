@@ -56,6 +56,7 @@ Checks must be green before every commit. No "leftover issues", no "next commit"
 | ------------------------------------------------ | --------------------------------- |
 | Browse project specs and planned docs            | `docs/README.md`                  |
 | Understand product intent                        | `docs/specs/mvp-spec.md`          |
+| Understand agent architecture and delegation      | `docs/evils-and-claims.md`        |
 | Understand long-term direction (don't overbuild) | `docs/planned/ambition.md`        |
 | Find the next slice to work on                   | `scripts/tasks-adhoc.md`, then `scripts/tasks.md` |
 | Understand engineering rules (fail loudly etc)   | `AGENTS.md`                       |

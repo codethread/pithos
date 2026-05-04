@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
+import { homedir } from "node:os"
 import { HelpRequested, parseArgs } from "./cli.ts"
 import { buildClaudeArgv, runClaude, runFake, tmuxSessionName } from "./harness.ts"
 import { agentsPath, templatesDir } from "./paths.ts"
@@ -43,15 +44,17 @@ const run = async (): Promise<void> => {
   if (opts.command === "kill") { process.stdout.write(execText(["tmux", "kill-session", "-t", opts.target])); return }
   if (opts.command === "tty-status") { process.stdout.write(execText(["tmux", "capture-pane", "-t", opts.target, "-p"])); return }
   if (opts.command === "templates:list") {
-    const templates = loadAgentManifests(agentsPath).map((manifest) => ({ name: manifest.agent, model: manifest.model, tools: manifest.tools, capability: manifest.capability, type: manifest.type, launcher: manifest.launcher ?? null }))
+    const templates = loadAgentManifests(agentsPath).map((manifest) => ({ name: manifest.agent, model: manifest.model, tools: manifest.tools, capability: manifest.capability, type: manifest.type, cwd: manifest.cwd ?? null, launcher: manifest.launcher ?? null }))
     writeJson({ ok: true, templates })
     return
   }
 
   const template = loadTemplate(agentsPath, templatesDir, opts.agent)
+  const agentCwd = template.manifest.cwd?.startsWith("~/") ? `${homedir()}${template.manifest.cwd.slice(1)}` : template.manifest.cwd
+  const cwd = agentCwd ?? opts.cwd
   const pithosHelp = process.env.PANDORA_SPAWN_FAKE_PITHOS_HELP ?? pithos(["--help"])
   const sessionId = process.env.PANDORA_SPAWN_FAKE_SESSION_ID ?? (opts.preview ? "session_PREVIEW" : randomUUID())
-  const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? (opts.preview ? "run_PREVIEW" : parseRunId(pithos(["run", "register", "--agent-kind", opts.agent, "--scope", opts.scope, "--cwd", opts.cwd, "--session-id", sessionId])))
+  const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? (opts.preview ? "run_PREVIEW" : parseRunId(pithos(["run", "register", "--agent-kind", opts.agent, "--scope", opts.scope, "--cwd", cwd, "--session-id", sessionId])))
   const launcherCommands = template.launcher?.commands
   const launcherMeta = template.manifest.inject_meta && template.launcher !== undefined
     ? `## Launcher meta\n\n\`\`\`json\n${JSON.stringify({ kind: template.launcher.kind, harness: template.launcher.harness, meta: template.launcher.meta }, null, 2)}\n\`\`\``
@@ -65,7 +68,7 @@ const run = async (): Promise<void> => {
     session_id: sessionId,
     scope_id: opts.scope,
     task_id: opts.task ?? "",
-    cwd: opts.cwd,
+    cwd,
     pithos_help: pithosHelp,
     cmd_spawn: launcherCommands?.spawn ?? "",
     cmd_status: launcherCommands?.status ?? "",
@@ -86,7 +89,7 @@ const run = async (): Promise<void> => {
     prompt,
     ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
   })
-  const description = { env, argv, prompt, cwd: opts.cwd }
+  const description = { env, argv, prompt, cwd }
   if (opts.preview) {
     writeJson({ ok: true, preview: true, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, ...description })
     return

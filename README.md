@@ -11,10 +11,13 @@ An agent orchestration layer modelled around the 'light-factory' model wherein a
 - All agents are visible to the user through a control plane (currently only tmux implemented, but design is decoupled for future options)
 - Agents communicate through a messaging protocol defined within `pithos` cli (local sqlite db).
 - **Pandora** is the primary delegate with other Evils having dedicated roles within the orchestra.
-  - **Toil**: _AFK_ - breaks up Pandora's requests into tasks and sends messages them to the correct repos
-  - **Envy**: _AFK_ - picks up tasks and spawns workers to complete the task(s)
+  - **Toil**: _AFK_ - receives high-level tasks from Pandora, breaks them down into concrete task graphs, finds the right repos, and briefs Pandora back so she can spawn per-repo work. Toil exists because breaking down a task and locating repos was eating Pandora's context.
+  - **Envy**: _AFK_ - the watcher. Picks up `implement` tasks, spawns workers to execute them, and monitors progress with envious eyes — restarting stuck workers, handling context resets, and reporting back. Envy exists because Pandora was burning context babysitting workers.
   - **Greed**: _HITL_ - picks up design tasks and conducts detailed design analysis with you
+- The delegation chain: **Adam → Pandora** (high-level goal) → **Toil** (breakdown + repo discovery, in `~/.pandora`) → **Pandora** (spawn per-repo Toils) → **Envy** (pick up `implement` tasks, fan out to workers) → **Workers** (do the actual mutation). This indirection is deliberate — each agent has a narrow job that fits in a single context window.
 - Completed work is returned to Pandora as artifacts for review (when needed with you)
+
+> Full agent roster, claim routing, and delegation chain: [`docs/evils-and-claims.md`](docs/evils-and-claims.md)
 
 Pithos is a small SQLite-backed CLI plus a thin agent spawner (Claude code implemented, Pi agent planned).
 

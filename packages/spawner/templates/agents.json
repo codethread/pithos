@@ -22,11 +22,12 @@
     {
       "agent": "pandora",
       "model": "sonnet",
+      "cwd": "~/.pandora",
       "tools": [
         "Bash"
       ],
       "capability": "orchestrate",
-      "type": "afk",
+      "type": "hitl",
       "includes": [
         "_common.md"
       ],

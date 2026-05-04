@@ -6,6 +6,7 @@ Authoritative project docs that do not need to live at repo root.
 
 | File | Purpose |
 | --- | --- |
+| `evils-and-claims.md` | Agent roster, capabilities, claim routing, and delegation chain |
 | `specs/mvp-spec.md` | MVP product/domain spec and data model contract |
 | `specs/technical-design.md` | Technical contracts, DB/CLI shape, implementation order |
 | `specs/spawner-spec.md` | `@pithos/spawner` / `pandora-spawn` package spec |

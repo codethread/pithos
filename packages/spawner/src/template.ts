@@ -24,6 +24,7 @@ export interface AgentManifest {
   readonly tools: readonly string[]
   readonly capability: string
   readonly type: AgentType
+  readonly cwd: string | undefined
   readonly includes: readonly string[]
   readonly system_prompt: string
   readonly launcher: string | undefined
@@ -118,6 +119,7 @@ const parseOneManifest = (path: string, parsed: unknown): AgentManifest => {
     tools,
     capability: readStringField(path, raw, "capability"),
     type: readTypeField(path, raw),
+    cwd: readOptionalStringField(path, raw, "cwd"),
     includes: includes ?? [],
     system_prompt: readStringField(path, raw, "system_prompt"),
     launcher: readOptionalStringField(path, raw, "launcher"),

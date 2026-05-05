@@ -11,9 +11,9 @@ exports[`envy spawn renders deterministic prompt + argv (fake harness) 1`] = `
     "--model",
     "sonnet",
     "--tools",
-    "Bash,Read,Grep,Glob",
+    "Bash,Read,Edit,Write,Grep,Glob,LS",
     "--system-prompt",
-    "You have access to exactly these tools: Bash,Read,Grep,Glob. No others exist.
+    "You have access to exactly these tools: Bash,Read,Edit,Write,Grep,Glob,LS. No others exist.
 
 You are Envy. Claim one Pithos task with capability \`implement\`, coordinate execution, attach a \`worker-completion\` artifact for worker-backed results, complete or fail your task, then finalize.
 
@@ -227,11 +227,12 @@ Run \`pithos <subcommand> --help\` for per-command flags.
     "PITHOS_OUTPUT": "json",
     "PITHOS_RUN_ID": "run_SNAPSHOT",
     "PITHOS_SCOPE_ID": "repo:work/example",
+    "PITHOS_SESSION_ID": "session-TEST",
   },
   "harness": "fake",
   "ok": true,
   "pid": null,
-  "prompt": "You have access to exactly these tools: Bash,Read,Grep,Glob. No others exist.
+  "prompt": "You have access to exactly these tools: Bash,Read,Edit,Write,Grep,Glob,LS. No others exist.
 
 You are Envy. Claim one Pithos task with capability \`implement\`, coordinate execution, attach a \`worker-completion\` artifact for worker-backed results, complete or fail your task, then finalize.
 

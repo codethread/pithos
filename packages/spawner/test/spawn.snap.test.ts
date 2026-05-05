@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdtempSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 import { expect, test } from "vitest"
 
 test("envy spawn renders deterministic prompt + argv (fake harness)", () => {
@@ -25,4 +25,29 @@ test("envy spawn renders deterministic prompt + argv (fake harness)", () => {
   if (typeof runId !== "string") throw new Error("missing run_id")
   const text = JSON.stringify(parsed).replaceAll(runId, "run_SNAPSHOT")
   expect(JSON.parse(text)).toMatchSnapshot()
+}, 30_000)
+
+test("preview pi harness renders pi argv + extension wiring", () => {
+  execFileSync("pnpm", ["run", "build"], { stdio: "ignore" })
+  const env = { ...process.env, PANDORA_SPAWN_FAKE_PITHOS_HELP: "pithos help" }
+  const out = execFileSync("pandora-spawn", [
+    "--agent",
+    "pandora",
+    "--scope",
+    "repo:work/example",
+    "--cwd",
+    "/tmp/example",
+    "--preview",
+  ], { env }).toString()
+  const parsed = JSON.parse(out) as { harness: string; argv: string[]; session_file?: string }
+  expect(parsed.harness).toBe("pi")
+  expect(parsed.argv[0]).toBe("pi")
+  expect(parsed.argv).toContain("--extension")
+  expect(parsed.argv).toContain("--session")
+  expect(parsed.argv).toContain("--tools")
+  expect(parsed.argv).toContain("bash,read,edit,write,grep,find,ls")
+  expect(parsed.session_file).toBeTypeOf("string")
+  expect(isAbsolute(parsed.session_file!)).toBe(true)
+  expect(parsed.argv).toContain(parsed.session_file!)
+  expect(parsed.argv.some((arg) => arg.endsWith("packages/spawner/pi-extension"))).toBe(true)
 }, 30_000)

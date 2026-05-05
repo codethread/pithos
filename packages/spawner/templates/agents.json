@@ -1,8 +1,8 @@
 {
   "launchers": {
-    "local_claude_tmux": {
+    "local_agent_tmux": {
       "kind": "tmux",
-      "harness": "claude-code",
+      "harness": "pandora-spawn",
       "commands": {
         "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
         "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
@@ -11,7 +11,7 @@
         "tty_status": "pandora-spawn tty-status --target {{target}}"
       },
       "meta": {
-        "status_source": "claude_jsonl",
+        "status_source": "session_jsonl_auto",
         "tty_provider": "tmux",
         "target_format": "pithos-<agent>-<session_id_first_8_chars>",
         "debug_rule": "Use status first. Use tty_status only if status is missing, stale, or debugging harness/TTY issues. The --target for nudge/kill/tty_status is the tmux_session field returned by spawn, derivable from session_id via target_format."
@@ -21,68 +21,99 @@
   "agents": [
     {
       "agent": "pandora",
-      "model": "sonnet",
+      "harness": {
+        "kind": "pi",
+        "model": "deepseek-v4-pro",
+        "tools": [
+          "bash",
+          "read",
+          "edit",
+          "write",
+          "grep",
+          "find",
+          "ls"
+        ],
+        "system_prompt_mode": "replace"
+      },
       "cwd": "~/.pandora",
-      "tools": [
-        "Bash"
-      ],
       "capability": "orchestrate",
       "type": "hitl",
       "includes": [
         "_common.md"
       ],
       "system_prompt": "pandora.md.tmpl",
-      "launcher": "local_claude_tmux",
+      "launcher": "local_agent_tmux",
       "inject_meta": true
     },
     {
       "agent": "envy",
-      "model": "sonnet",
-      "tools": [
-        "Bash",
-        "Read",
-        "Grep",
-        "Glob"
-      ],
+      "harness": {
+        "kind": "claude",
+        "model": "sonnet",
+        "tools": [
+          "Bash",
+          "Read",
+          "Edit",
+          "Write",
+          "Grep",
+          "Glob",
+          "LS"
+        ],
+        "system_prompt_mode": "replace"
+      },
       "capability": "implement",
       "type": "afk",
       "includes": [
         "_common.md"
       ],
       "system_prompt": "envy.md.tmpl",
-      "launcher": "local_claude_tmux",
+      "launcher": "local_agent_tmux",
       "inject_meta": false
     },
     {
       "agent": "toil",
-      "model": "sonnet",
-      "tools": [
-        "Bash",
-        "Read",
-        "Grep",
-        "Glob"
-      ],
+      "harness": {
+        "kind": "claude",
+        "model": "sonnet",
+        "tools": [
+          "Bash",
+          "Read",
+          "Edit",
+          "Write",
+          "Grep",
+          "Glob",
+          "LS"
+        ],
+        "system_prompt_mode": "replace"
+      },
       "capability": "triage",
       "type": "afk",
       "includes": [
         "_common.md"
       ],
       "system_prompt": "toil.md.tmpl",
-      "launcher": "local_claude_tmux",
+      "launcher": "local_agent_tmux",
       "inject_meta": false
     },
     {
       "agent": "worker",
-      "model": "sonnet",
-      "tools": [
-        "Bash",
-        "Read",
-        "Grep",
-        "Glob"
-      ],
+      "harness": {
+        "kind": "claude",
+        "model": "sonnet",
+        "tools": [
+          "Bash",
+          "Read",
+          "Edit",
+          "Write",
+          "Grep",
+          "Glob",
+          "LS"
+        ],
+        "system_prompt_mode": "append"
+      },
       "type": "afk",
       "system_prompt": "worker.md.tmpl",
-      "launcher": "local_claude_tmux",
+      "launcher": "local_agent_tmux",
       "inject_meta": false
     }
   ]

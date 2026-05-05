@@ -1,20 +1,33 @@
 # @pithos/spawner
 
-Tiny CLI for turning versioned agent templates into sessions in an agent harness like Claude Code.
+Tiny CLI for turning versioned agent templates into sessions in an agent harness like Claude Code or Pi.
 
-Claude Code is the first supported harness; `fake` is the deterministic test harness. The package is intentionally shaped so other harness adapters can be added later without moving Pithos state into the spawner.
+Supported harnesses:
+
+- `claude` — Claude Code in tmux
+- `pi` — Pi in tmux
+- `fake` — deterministic test harness
+
+The package keeps Pithos state in the `pithos` CLI subprocess and treats the harness as an injectable adapter.
 
 `pandora-spawn` owns agent config, prompt rendering, hook installation, and harness process setup. Pithos state is still handled only by the `pithos` CLI subprocess.
+
+`pandora-spawn status --session-id <id>` auto-detects Claude Code and Pi JSONL session logs.
 
 ## CLI
 
 ```sh
 pandora-spawn --agent envy --scope repo:work/example --harness fake
+pandora-spawn --agent envy --scope repo:work/example --harness pi
 pandora-spawn --agent envy --scope repo:work/example --preview
 pandora-spawn templates list
 ```
 
-Liveness/session-end hooks ship as a Claude Code plugin — see [`claude-plugin/README.md`](claude-plugin/README.md).
+Liveness/session-end hooks ship as harness adapters:
+
+- Claude Code plugin — [`claude-plugin/README.md`](claude-plugin/README.md)
+- Pi extension — [`pi-extension/README.md`](pi-extension/README.md)
+- shared contract — [`HOOKS.md`](HOOKS.md)
 
 Default command is spawn. Output is JSON.
 
@@ -37,9 +50,9 @@ templates/
 ```json
 {
   "launchers": {
-    "local_claude_tmux": {
+    "local_agent_tmux": {
       "kind": "tmux",
-      "harness": "claude-code",
+      "harness": "pandora-spawn",
       "commands": {
         "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
         "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
@@ -47,18 +60,22 @@ templates/
         "kill": "pandora-spawn kill --target {{target}}",
         "tty_status": "pandora-spawn tty-status --target {{target}}"
       },
-      "meta": { "status_source": "claude_jsonl", "tty_provider": "tmux" }
+      "meta": { "status_source": "session_jsonl_auto", "tty_provider": "tmux" }
     }
   },
   "agents": [
     {
       "agent": "envy",
-      "model": "opus",
-      "tools": ["Bash", "Read", "Grep", "Glob"],
+      "harness": {
+        "kind": "pi",
+        "model": "github-copilot/claude-sonnet-4.6",
+        "tools": ["bash", "read", "grep", "find"],
+        "system_prompt_mode": "replace"
+      },
       "capability": "implement",
       "includes": ["_common.md"],
       "system_prompt": "envy.md.tmpl",
-      "launcher": "local_claude_tmux",
+      "launcher": "local_agent_tmux",
       "inject_meta": false
     }
   ]
@@ -71,10 +88,16 @@ Rules:
 - Worker-backed `implement` results should be attached with `pithos artifact add --kind worker-completion` before task completion.
 - `agent` is the CLI name: `pandora-spawn --agent envy`.
 - `system_prompt` must be `<agent>.md.tmpl`.
-- `tools` must be non-empty; rendered into the prompt body as `{{tools_csv}}` for the agent's awareness. It is not passed to Claude as a CLI flag — `--dangerously-skip-permissions` + `--permission-mode acceptEdits` are used instead so the agent can act without prompts.
+- `harness` is a single discriminated config keyed by `kind`. Define only the harness this agent should use.
+  - `kind: "claude"` validates Claude Code tool names (`Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `LS`) and renders Claude flags.
+  - `kind: "pi"` validates Pi tool names (`bash`, `read`, `edit`, `write`, `grep`, `find`, `ls`) and renders Pi flags.
+  - `model` is interpreted by that harness directly; no cross-harness model aliasing or tool mapping is performed.
+  - `system_prompt_mode` is `replace` (`--system-prompt`) or `append` (`--append-system-prompt`).
+  - `--harness` is optional; when omitted, the template's `harness.kind` is used. If supplied, it must match except `fake`, which renders the configured argv without launching.
+- The selected harness config's `tools` are rendered into the prompt body as `{{tools_csv}}` for the agent's awareness.
 - `includes` names files in `templates/`; path separators are rejected.
 - Includes are not automatically appended. Each include becomes a template var keyed by filename, so `"includes": ["_common.md"]` makes `{{_common.md}}` available in the system prompt.
-- `launcher` names a key in the top-level `launchers` block. Its `commands` are rendered into the prompt as `{{cmd_spawn}}` / `{{cmd_status}}` / `{{cmd_nudge}}` / `{{cmd_kill}}` / `{{cmd_tty_status}}` so the agent knows how to drive its peers.
+- `launcher` names a key in the top-level `launchers` block. Its `commands` are rendered into the prompt as `{{cmd_spawn}}` / `{{cmd_status}}` / `{{cmd_nudge}}` / `{{cmd_kill}}` / `{{cmd_tty_status}}` so the agent knows how to drive its peers. These commands are the stable shared launcher API across tmux-backed harnesses.
 - `inject_meta: true` exposes the launcher's `kind`/`harness`/`meta` block as `{{launcher_meta}}` (a fenced JSON section). Pandora gets this; her evils don't.
 - JSON/template errors exit with code `2`.
 
@@ -96,8 +119,8 @@ Available vars:
 
 - `agent`
 - `capability`
-- `model`
-- `tools_csv`
+- `model` — selected harness config model
+- `tools_csv` — selected harness config tools
 - `run_id`
 - `session_id`
 - `scope_id`
@@ -106,6 +129,7 @@ Available vars:
 - `pithos_help` — `pithos --help` output, captured at spawn time
 - `cmd_spawn`, `cmd_status`, `cmd_nudge`, `cmd_kill`, `cmd_tty_status` — launcher command templates; empty string when the agent has no `launcher`
 - `launcher_meta` — fenced JSON block describing the launcher; empty unless `inject_meta: true`
+- `session_target` — tmux target derived from `session_id`
 - each include filename, e.g. `{{_common.md}}`
 
 Unknown vars fail loudly.
@@ -136,7 +160,13 @@ pandora-spawn --agent envy \
 
 # 4b. Same spawn with real Claude
 pandora-spawn --agent envy \
-  --scope repo:$(echo "$PWD" | sed "s|$HOME/||g")
+  --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
+  --harness claude
+
+# 4c. Same spawn with Pi
+pandora-spawn --agent envy \
+  --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
+  --harness pi
 
 # 5. Verify the run was registered
 pithos inspect run <run_id from step 4 output>
@@ -144,19 +174,21 @@ pithos inspect run <run_id from step 4 output>
 
 For fully offline reproduction use `--harness fake`; the run is still registered in
 the Pithos DB via `pithos run register` so `pithos inspect run` works regardless.
-`--harness fake` returns the assembled `{ env, argv, prompt }` JSON instead of
-launching Claude. `--preview` is similar but does **not** register a run and uses
+`--harness fake` returns the assembled launch description JSON instead of
+launching a real harness. `--preview` is similar but does **not** register a run and uses
 stable placeholder ids; use it when iterating on templates without touching state.
 
-For the real Claude harness, `pandora-spawn` writes a wrapper bash script and
-launches it via `tmux new-session -d -s pithos-<agent>-<short>` so Claude has a
+For the real `claude` and `pi` harnesses, `pandora-spawn` writes a wrapper bash script and
+launches it via `tmux new-session -d -s pithos-<agent>-<short>` so the harness has a
 TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns
 `tmux_session`, `script_path`, and `pane_pid`; attach with
 `tmux attach -t <tmux_session>` to interact.
 
-### Install Claude Code hooks
+### Install harness hooks
 
-Liveness and session-end hooks are registered via the Claude Code plugin shipped at [`claude-plugin/`](./claude-plugin/README.md). Install once with `/plugin marketplace add https://github.com/codethread/pithos` then `/plugin install pithos@codethread/pithos`.
+- Claude Code: [`claude-plugin/`](./claude-plugin/README.md)
+- Pi: [`pi-extension/`](./pi-extension/README.md)
+- Shared contract: [`HOOKS.md`](./HOOKS.md)
 
-Hooks no-op in normal Claude sessions — they only activate when `PITHOS_AGENT`
+Hooks no-op in normal sessions — they only activate when `PITHOS_AGENT`
 and `PITHOS_RUN_ID` are set, which `pandora-spawn` injects automatically.

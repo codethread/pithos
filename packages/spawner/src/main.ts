@@ -17,9 +17,8 @@ import {
   TargetCliInputSchema,
   makePandoraSpawnCommand,
 } from "./cli.ts"
-import { buildClaudeArgv, runClaude, runFake, tmuxSessionName } from "./harness.ts"
+import { HarnessService, HarnessServiceLive, tmuxSessionName } from "./harness.ts"
 import { agentsPath, templatesDir } from "./paths.ts"
-import { renderStatus } from "./status.ts"
 import { loadAgentManifests, loadTemplate, render } from "./template.ts"
 import { SpawnerError, exitCodeFor } from "./errors.ts"
 import type { ErrorCode } from "./errors.ts"
@@ -113,7 +112,7 @@ const spawn = (raw: SpawnCliInput) =>
         agent: raw.agent,
         scope: raw.scope,
         cwd: raw.cwd,
-        harness: raw.harness,
+        ...(raw.harness !== undefined ? { harness: raw.harness } : {}),
         preview: raw.preview,
         ...(raw.task !== undefined ? { task: raw.task } : {}),
         ...(raw.message !== undefined ? { message: raw.message } : {}),
@@ -148,11 +147,19 @@ const spawn = (raw: SpawnCliInput) =>
     const launcherMeta = template.manifest.inject_meta && template.launcher !== undefined
       ? `## Launcher meta\n\n\`\`\`json\n${JSON.stringify({ kind: template.launcher.kind, harness: template.launcher.harness, meta: template.launcher.meta }, null, 2)}\n\`\`\``
       : ""
+    const harnessConfig = template.manifest.harness
+    const selectedHarness = opts.harness ?? harnessConfig.kind
+    if (selectedHarness !== "fake" && selectedHarness !== harnessConfig.kind) {
+      throw new SpawnerError({
+        code: "VALIDATION_ERROR",
+        message: `${opts.agent} defines ${harnessConfig.kind} harness config, but ${selectedHarness} was requested`,
+      })
+    }
     const context = {
       agent: opts.agent,
       capability: template.manifest.capability,
-      model: template.manifest.model,
-      tools_csv: template.manifest.tools.join(","),
+      model: harnessConfig.model,
+      tools_csv: harnessConfig.tools.join(","),
       run_id: runId,
       session_id: sessionId,
       scope_id: opts.scope,
@@ -173,19 +180,38 @@ const spawn = (raw: SpawnCliInput) =>
       PITHOS_RUN_ID: runId,
       PITHOS_AGENT: opts.agent,
       PITHOS_SCOPE_ID: opts.scope,
+      PITHOS_SESSION_ID: sessionId,
       PITHOS_OUTPUT: "json",
       ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}),
     }
     const kickoffMessage = opts.message ?? (template.manifest.type === "afk" ? "begin" : undefined)
-    const argv = buildClaudeArgv({
-      sessionId,
-      model: template.manifest.model,
-      tools: template.manifest.tools.join(","),
-      prompt,
-      appendSystemPrompt: opts.agent === "worker",
-      ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
-    })
-    const description = { env, argv, prompt, cwd }
+    const harnessService = yield* HarnessService
+    const harness = harnessService.get(selectedHarness)
+    const description = harness.describe(
+      harnessConfig.kind === "claude"
+        ? {
+            kind: "claude",
+            sessionId,
+            model: harnessConfig.model,
+            tools: harnessConfig.tools,
+            systemPromptMode: harnessConfig.system_prompt_mode,
+            prompt,
+            cwd,
+            env,
+            ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
+          }
+        : {
+            kind: "pi",
+            sessionId,
+            model: harnessConfig.model,
+            tools: harnessConfig.tools,
+            systemPromptMode: harnessConfig.system_prompt_mode,
+            prompt,
+            cwd,
+            env,
+            ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
+          },
+    )
     if (opts.preview) {
       writeJson({
         ok: true,
@@ -195,16 +221,14 @@ const spawn = (raw: SpawnCliInput) =>
         session_id: sessionId,
         scope_id: opts.scope,
         task_id: opts.task ?? null,
-        harness: opts.harness,
+        harness: selectedHarness,
         ...description,
       })
       return
     }
     let result
     try {
-      result = opts.harness === "fake"
-        ? runFake(description)
-        : runClaude(description, { agent: opts.agent, sessionId })
+      result = harness.run(description, { agent: opts.agent, sessionId })
     } catch (error: unknown) {
       if (process.env.PANDORA_SPAWN_FAKE_RUN_ID === undefined) {
         try {
@@ -216,7 +240,7 @@ const spawn = (raw: SpawnCliInput) =>
             "--status",
             "failed",
             "--summary",
-            `pandora-spawn ${opts.harness} harness launch failed`,
+            `pandora-spawn ${selectedHarness} harness launch failed`
           ])
         } catch {
           // surface original harness failure
@@ -233,7 +257,7 @@ const spawn = (raw: SpawnCliInput) =>
       session_id: sessionId,
       scope_id: opts.scope,
       task_id: opts.task ?? null,
-      harness: opts.harness,
+      harness: selectedHarness,
       pid: result.pid,
       ...result.output,
     })
@@ -248,7 +272,8 @@ const status = (raw: StatusCliInput) =>
       "VALIDATION_ERROR",
       "invalid status invocation",
     )
-    process.stdout.write(`${renderStatus(opts.sessionId, opts.lines)}\n`)
+    const harnessService = yield* HarnessService
+    process.stdout.write(`${harnessService.renderStatus(opts.sessionId, opts.lines)}\n`)
   })
 
 const nudge = (raw: NudgeCliInput) =>
@@ -259,7 +284,7 @@ const nudge = (raw: NudgeCliInput) =>
       "VALIDATION_ERROR",
       "invalid nudge invocation",
     )
-    process.stdout.write(execText(["tmux", "send-keys", "-t", opts.target, opts.message, "Enter"]))
+    process.stdout.write(execText(["tmux", "send-keys", "-t", opts.target, opts.message, "C-m"]))
   })
 
 const kill = (raw: TargetCliInput) =>
@@ -288,8 +313,7 @@ const templatesList = () =>
   Effect.sync(() => {
     const templates = loadAgentManifests(agentsPath).map((manifest) => ({
       name: manifest.agent,
-      model: manifest.model,
-      tools: manifest.tools,
+      harness: manifest.harness,
       capability: manifest.capability,
       type: manifest.type,
       cwd: manifest.cwd ?? null,
@@ -333,6 +357,7 @@ const program = cli(process.argv).pipe(
     Layer.mergeAll(
       NodeContext.layer,
       CliConfig.layer({ showBuiltIns: true }),
+      HarnessServiceLive,
     ),
   ),
 )

@@ -19,7 +19,13 @@ An agent orchestration layer modelled around the 'light-factory' model wherein a
 
 > Full agent roster, claim routing, and delegation chain: [`docs/evils-and-claims.md`](docs/evils-and-claims.md)
 
-Pithos is a small SQLite-backed CLI plus a thin agent spawner (Claude code implemented, Pi agent planned).
+Pithos is a small SQLite-backed CLI plus a thin agent spawner.
+
+Supported harnesses today:
+
+- Claude Code (`--harness claude`)
+- Pi (`--harness pi`)
+- fake/test harness (`--harness fake`)
 
 Agents register runs, claim fenced tasks, heartbeat, attach artifacts, and complete or fail — all through one `pithos` process per mutation. Nothing else writes to the database.
 
@@ -43,7 +49,13 @@ scripts/pandora-start.sh
 
 This initialises the store, upserts a repo scope, spawns Pandora into a detached tmux session, and attaches.
 
-Liveness/session-end hooks ship as a Claude Code marketplace plugin — see [`packages/spawner/claude-plugin/README.md`](packages/spawner/claude-plugin/README.md). Install once:
+Harness hook setup:
+
+- Claude Code: install the marketplace plugin once — [`packages/spawner/claude-plugin/README.md`](packages/spawner/claude-plugin/README.md)
+- Pi: spawned Pithos sessions inject the extension automatically; optional manual/dev install docs live at [`packages/spawner/pi-extension/README.md`](packages/spawner/pi-extension/README.md)
+- Shared hook contract: [`packages/spawner/HOOKS.md`](packages/spawner/HOOKS.md)
+
+Claude Code install:
 
 ```sh
 /plugin marketplace add https://github.com/codethread/pithos
@@ -69,6 +81,8 @@ Liveness/session-end hooks ship as a Claude Code marketplace plugin — see [`pa
 | `packages/spawner/README.md` | `pandora-spawn` CLI usage, templates, hooks                               |
 | `packages/spawner/CONTRIBUTING.md` | Spawner package quality bar and template/harness checklist          |
 | `packages/spawner/claude-plugin/README.md` | Claude Code plugin — declarative hook install via marketplace      |
+| `packages/spawner/pi-extension/README.md` | Pi extension — shared hook wiring for Pi sessions                  |
+| `packages/spawner/HOOKS.md` | Shared harness hook contract                                                |
 | `skills/pithos-cli/SKILL.md` | Agent-facing Pithos CLI orientation skill                                 |
 | `references/README.md`       | Index for copied prior art; read-only reference behaviour                  |
 | `.claude/commands/smoke.md`  | Claude Code manual smoke-test command                                     |

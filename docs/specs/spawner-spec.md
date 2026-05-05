@@ -229,8 +229,7 @@ Run `pithos <subcommand> --help` for per-command flags.
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `agent` | string | yes | Must match the file stem (`envy.md.tmpl` → `envy`). |
-| `model` | string | yes | Passed straight to `claude --model`. |
-| `tools` | string[] | yes | Tool names; passed to `claude --tools` as CSV. Empty array is a validation error — be explicit. |
+| `harness` | object | yes | Single discriminated config keyed by `kind`. `claude` validates Claude tool names and renders Claude flags; `pi` validates Pi tool names and renders Pi flags. Has `model`, `tools`, and `system_prompt_mode` (`replace` or `append`). No cross-harness aliasing/mapping. |
 | `capability` | string | yes | Pithos capability the agent expects to claim. Use queue-facing outcome classes such as `triage`, `design`, `implement`; do not use internal execution-style labels such as `watch`. Rendered into prompt only. |
 | `includes` | string[] | no | Other files in `templates/` whose contents are inlined where the matching `{{filename}}` placeholder appears. |
 | `launcher` | string | no | Key into top-level `launchers`. If present, `cmd_*` vars become available. |
@@ -291,22 +290,17 @@ That's it. No partials engine, no escaping, no helpers. ~6 lines.
 8. Render prompt body with full RenderContext.
 9. Build env: PITHOS_RUN_ID, PITHOS_AGENT=<agent>, PITHOS_SCOPE_ID,
               PITHOS_TASK_ID (if any), PITHOS_OUTPUT=json.
-10. Build argv (claude harness):
-    claude
-      --session-id <uuid>
-      --dangerously-skip-permissions
-      --permission-mode acceptEdits
-      --model <frontmatter.model>
-      <rendered prompt>          # positional, so claude immediately starts working
-    The frontmatter `tools` list is rendered into the prompt body for the
-    agent's awareness; it is not passed via `--allowed-tools` because
-    `--dangerously-skip-permissions` is in effect.
-11. Execute via the selected harness:
-    - claude harness: write a wrapper bash script (env exports + exec claude),
+10. Select harness config: use `manifest.harness`. `--harness` is optional; when omitted, use `manifest.harness.kind`. If supplied, it must match except `fake`, which renders the configured argv without launching.
+11. Build argv from the selected harness config:
+    - claude: `claude --session-id <uuid> --dangerously-skip-permissions --model <model> --tools <csv> --system-prompt|--append-system-prompt <rendered prompt> [kickoff]`
+    - pi: `pi --session-dir <root> --session <root>/--<canonical-cwd>--/<uuid>.jsonl --model <model> --extension <pi-extension> --tools <csv> --system-prompt|--append-system-prompt <rendered prompt> [kickoff]`
+    The selected harness config's `tools` list is also rendered into the prompt body for the agent's awareness.
+12. Execute via the selected harness:
+    - claude/pi harness: write a wrapper bash script (env exports + exec harness),
       launch via `tmux new-session -d -s pithos-<agent>-<short-uuid>`,
       return the tmux session name and pane pid. Detached so the spawning
       process (Pandora's Bash tool, or `pandora-start.sh`) can continue.
-    - fake harness:   write { env, argv, prompt } JSON to stdout. No exec.
+    - fake harness: write { env, argv, prompt } JSON to stdout. No exec.
 ```
 
 Step 6 may fail (DB not initialised, scope unknown). Surface the `pithos`

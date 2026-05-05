@@ -4,6 +4,25 @@ import { Either, ParseResult, Schema } from "effect"
 import { SpawnerError } from "./errors.ts"
 
 const AgentTypeSchema = Schema.Literal("afk", "hitl")
+const SystemPromptModeSchema = Schema.Literal("replace", "append")
+const ClaudeToolSchema = Schema.Literal("Bash", "Read", "Edit", "Write", "Grep", "Glob", "LS")
+const PiToolSchema = Schema.Literal("bash", "read", "edit", "write", "grep", "find", "ls")
+
+const ClaudeHarnessConfigSchema = Schema.Struct({
+  kind: Schema.Literal("claude"),
+  model: Schema.NonEmptyString,
+  tools: Schema.Array(ClaudeToolSchema).pipe(Schema.minItems(1)),
+  system_prompt_mode: SystemPromptModeSchema,
+})
+
+const PiHarnessConfigSchema = Schema.Struct({
+  kind: Schema.Literal("pi"),
+  model: Schema.NonEmptyString,
+  tools: Schema.Array(PiToolSchema).pipe(Schema.minItems(1)),
+  system_prompt_mode: SystemPromptModeSchema,
+})
+
+const HarnessConfigSchema = Schema.Union(ClaudeHarnessConfigSchema, PiHarnessConfigSchema)
 
 const LauncherCommandsSchema = Schema.Struct({
   spawn: Schema.NonEmptyString,
@@ -24,8 +43,7 @@ const LauncherManifestSchema = Schema.Struct({
 
 const AgentManifestSchema = Schema.Struct({
   agent: Schema.NonEmptyString,
-  model: Schema.NonEmptyString,
-  tools: Schema.Array(Schema.NonEmptyString).pipe(Schema.minItems(1)),
+  harness: HarnessConfigSchema,
   capability: Schema.optionalWith(Schema.String, { default: () => "" }),
   type: AgentTypeSchema,
   cwd: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
@@ -46,6 +64,10 @@ const AgentsFileSchema = Schema.Struct({
 export type LauncherManifest = Schema.Schema.Type<typeof LauncherManifestSchema>
 export type AgentType = Schema.Schema.Type<typeof AgentTypeSchema>
 export type AgentManifest = Schema.Schema.Type<typeof AgentManifestSchema>
+export type HarnessConfig = Schema.Schema.Type<typeof HarnessConfigSchema>
+export type SystemPromptMode = Schema.Schema.Type<typeof SystemPromptModeSchema>
+export type ClaudeTool = Schema.Schema.Type<typeof ClaudeToolSchema>
+export type PiTool = Schema.Schema.Type<typeof PiToolSchema>
 
 export interface LoadedTemplate {
   readonly manifest: AgentManifest

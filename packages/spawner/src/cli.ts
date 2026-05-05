@@ -2,10 +2,8 @@ import { Command, HelpDoc, Options } from "@effect/cli"
 import { Option, Schema } from "effect"
 import type { Effect } from "effect"
 import type { SpawnerError } from "./errors.ts"
-
-export const HarnessNameValues = ["claude", "fake"] as const
-export const HarnessNameSchema = Schema.Literal(...HarnessNameValues)
-export type HarnessName = Schema.Schema.Type<typeof HarnessNameSchema>
+import type { HarnessService } from "./harness.ts"
+import { HarnessNameSchema, HarnessNameValues } from "./harness-name.ts"
 
 export const SpawnCliInputSchema = Schema.Struct({
   agent: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
@@ -13,7 +11,7 @@ export const SpawnCliInputSchema = Schema.Struct({
   task: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
   message: Schema.optionalWith(Schema.String, { exact: true }),
   cwd: Schema.NonEmptyString,
-  harness: HarnessNameSchema,
+  harness: Schema.optionalWith(HarnessNameSchema, { exact: true }),
   preview: Schema.Boolean,
 })
 export type SpawnCliInput = Schema.Schema.Type<typeof SpawnCliInputSchema>
@@ -24,7 +22,7 @@ export const SpawnInvocationSchema = Schema.Struct({
   task: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
   message: Schema.optionalWith(Schema.String, { exact: true }),
   cwd: Schema.NonEmptyString,
-  harness: HarnessNameSchema,
+  harness: Schema.optionalWith(HarnessNameSchema, { exact: true }),
   preview: Schema.Boolean,
 })
 export type SpawnInvocation = Schema.Schema.Type<typeof SpawnInvocationSchema>
@@ -47,8 +45,8 @@ export const TargetCliInputSchema = Schema.Struct({
 export type TargetCliInput = Schema.Schema.Type<typeof TargetCliInputSchema>
 
 export interface CliHandlers {
-  readonly spawn: (input: SpawnCliInput) => Effect.Effect<void, SpawnerError, never>
-  readonly status: (input: StatusCliInput) => Effect.Effect<void, SpawnerError, never>
+  readonly spawn: (input: SpawnCliInput) => Effect.Effect<void, SpawnerError, HarnessService>
+  readonly status: (input: StatusCliInput) => Effect.Effect<void, SpawnerError, HarnessService>
   readonly nudge: (input: NudgeCliInput) => Effect.Effect<void, SpawnerError, never>
   readonly kill: (input: TargetCliInput) => Effect.Effect<void, SpawnerError, never>
   readonly ttyStatus: (input: TargetCliInput) => Effect.Effect<void, SpawnerError, never>
@@ -76,7 +74,7 @@ export const makePandoraSpawnCommand = (handlers: CliHandlers) => {
     {
       sessionId: Options.text("session-id").pipe(
         Options.withSchema(Schema.NonEmptyString),
-        Options.withDescription("Claude session id to inspect"),
+        Options.withDescription("Harness session id to inspect"),
       ),
       lines: Options.integer("lines").pipe(
         Options.withSchema(Schema.Int.pipe(Schema.positive())),
@@ -88,7 +86,7 @@ export const makePandoraSpawnCommand = (handlers: CliHandlers) => {
   ).pipe(
     Command.withDescription(
       desc(
-        "Render recent Claude session messages",
+        "Render recent harness session messages",
         "pandora-spawn status",
         ["pandora-spawn status --session-id session_abc --lines 20"],
         "0 success | 2 validation error | 3 session not found",
@@ -201,8 +199,8 @@ export const makePandoraSpawnCommand = (handlers: CliHandlers) => {
         Options.withDescription("Working directory when the agent has no template cwd override"),
       ),
       harness: Options.choice("harness", HarnessNameValues).pipe(
-        Options.withDefault("claude" as const),
-        Options.withDescription("Harness adapter: claude or fake"),
+        Options.optional,
+        Options.withDescription("Harness adapter override: claude, pi, or fake. Defaults to the template harness."),
       ),
       preview: Options.boolean("preview").pipe(
         Options.withDescription("Render only; do not register a run or launch a harness"),
@@ -213,13 +211,14 @@ export const makePandoraSpawnCommand = (handlers: CliHandlers) => {
       const scopeValue = opt(scope)
       const taskValue = opt(task)
       const messageValue = opt(message)
+      const harnessValue = opt(harness)
       return handlers.spawn({
         ...(agentValue !== undefined ? { agent: agentValue } : {}),
         ...(scopeValue !== undefined ? { scope: scopeValue } : {}),
         ...(taskValue !== undefined ? { task: taskValue } : {}),
         ...(messageValue !== undefined ? { message: messageValue } : {}),
         cwd,
-        harness,
+        ...(harnessValue !== undefined ? { harness: harnessValue } : {}),
         preview,
       })
     },

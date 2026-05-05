@@ -5,14 +5,14 @@ Tiny TypeScript CLI that turns versioned agent config + prompt templates into an
 ## Shape
 
 - Bin: `pandora-spawn`
-- First real harness: Claude Code
+- Real harnesses: Claude Code and Pi
 - Test/debug harness: `fake`
 - State boundary: never touch SQLite; call `pithos` CLI subprocess only
 - Config API: `templates/agents.json` + `templates/*.md.tmpl` + includes like `_common.md`
 
 ## Design notes
 
-- Keep this package simple: no Effect layers, no DB imports, no daemon logic.
+- Keep this package simple: the only allowed Effect abstraction is the injected harness service. No DB imports, no daemon logic.
 - Fail loudly on bad JSON, unknown template vars, missing template files, bad includes.
 - Includes are explicit vars: listing `_common.md` makes `{{_common.md}}` available; placement is controlled by the prompt template.
 - `--preview` must not register a run or spawn a harness.

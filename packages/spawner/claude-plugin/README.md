@@ -1,6 +1,7 @@
 # Pithos Claude Code Plugin
 
 Declarative Claude Code plugin that registers Pithos liveness and session-end hooks without mutating `~/.claude/settings.json`.
+It implements the shared harness hook contract documented in [`../HOOKS.md`](../HOOKS.md).
 
 ## What ships
 

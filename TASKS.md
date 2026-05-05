@@ -40,6 +40,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 1. Direct dependency authoring + task inspect
 - **Type:** AFK
+- **Status:** pending
 - **Blocked by:** none
 - **User stories covered:** US1, US2, US4, US6
 - **Primary files:**
@@ -83,6 +84,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 2. Ready-only claim + blocked/ready briefing
 - **Type:** AFK
+- **Status:** pending
 - **Blocked by:** 1
 - **User stories covered:** US2, US3, US4, US6
 - **Primary files:**
@@ -115,6 +117,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 3. Task-centric graph inspection
 - **Type:** AFK
+- **Status:** pending
 - **Blocked by:** 1, 4
 - **User stories covered:** US2, US4, US6
 - **Primary files:**
@@ -150,6 +153,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 4. Supersede a wrong middle task
 - **Type:** AFK
+- **Status:** pending
 - **Blocked by:** 1
 - **User stories covered:** US5, US6
 - **Primary files:**
@@ -197,6 +201,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 5. Graph inspection for scopes and live work
 - **Type:** AFK
+- **Status:** pending
 - **Blocked by:** 3, 4
 - **User stories covered:** US2, US4, US6
 - **Primary files:**
@@ -225,6 +230,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 6. Tail/event contract completion
 - **Type:** AFK
+- **Status:** pending
 - **Blocked by:** 1, 4
 - **User stories covered:** US4, US5, US6
 - **Primary files:**

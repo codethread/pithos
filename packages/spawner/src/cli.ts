@@ -1,97 +1,247 @@
-export type HarnessName = "claude" | "fake"
+import { Command, HelpDoc, Options } from "@effect/cli"
+import { Option, Schema } from "effect"
+import type { Effect } from "effect"
+import type { SpawnerError } from "./errors.ts"
 
-export class UserInputError extends Error { readonly exitCode = 1 }
-export class HelpRequested extends Error { readonly exitCode = 0 }
+export const HarnessNameValues = ["claude", "fake"] as const
+export const HarnessNameSchema = Schema.Literal(...HarnessNameValues)
+export type HarnessName = Schema.Schema.Type<typeof HarnessNameSchema>
 
-export interface SpawnOptions {
-  readonly command: "spawn"
-  readonly agent: string
-  readonly scope: string
-  readonly task?: string
-  readonly message?: string
-  readonly cwd: string
-  readonly harness: HarnessName
-  readonly preview: boolean
+export const SpawnCliInputSchema = Schema.Struct({
+  agent: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
+  scope: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
+  task: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
+  message: Schema.optionalWith(Schema.String, { exact: true }),
+  cwd: Schema.NonEmptyString,
+  harness: HarnessNameSchema,
+  preview: Schema.Boolean,
+})
+export type SpawnCliInput = Schema.Schema.Type<typeof SpawnCliInputSchema>
+
+export const SpawnInvocationSchema = Schema.Struct({
+  agent: Schema.NonEmptyString,
+  scope: Schema.NonEmptyString,
+  task: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
+  message: Schema.optionalWith(Schema.String, { exact: true }),
+  cwd: Schema.NonEmptyString,
+  harness: HarnessNameSchema,
+  preview: Schema.Boolean,
+})
+export type SpawnInvocation = Schema.Schema.Type<typeof SpawnInvocationSchema>
+
+export const StatusCliInputSchema = Schema.Struct({
+  sessionId: Schema.NonEmptyString,
+  lines: Schema.Int.pipe(Schema.positive()),
+})
+export type StatusCliInput = Schema.Schema.Type<typeof StatusCliInputSchema>
+
+export const NudgeCliInputSchema = Schema.Struct({
+  target: Schema.NonEmptyString,
+  message: Schema.NonEmptyString,
+})
+export type NudgeCliInput = Schema.Schema.Type<typeof NudgeCliInputSchema>
+
+export const TargetCliInputSchema = Schema.Struct({
+  target: Schema.NonEmptyString,
+})
+export type TargetCliInput = Schema.Schema.Type<typeof TargetCliInputSchema>
+
+export interface CliHandlers {
+  readonly spawn: (input: SpawnCliInput) => Effect.Effect<void, SpawnerError, never>
+  readonly status: (input: StatusCliInput) => Effect.Effect<void, SpawnerError, never>
+  readonly nudge: (input: NudgeCliInput) => Effect.Effect<void, SpawnerError, never>
+  readonly kill: (input: TargetCliInput) => Effect.Effect<void, SpawnerError, never>
+  readonly ttyStatus: (input: TargetCliInput) => Effect.Effect<void, SpawnerError, never>
+  readonly templatesList: () => Effect.Effect<void, SpawnerError, never>
 }
 
-export type ParsedArgs =
-  | SpawnOptions
-  | { readonly command: "templates:list" }
-  | { readonly command: "status"; readonly sessionId: string; readonly lines: number }
-  | { readonly command: "nudge"; readonly target: string; readonly message: string }
-  | { readonly command: "kill"; readonly target: string }
-  | { readonly command: "tty-status"; readonly target: string }
+const opt = <A>(o: Option.Option<A>): A | undefined => Option.getOrUndefined(o)
 
-const valueAfter = (args: readonly string[], index: number, flag: string): string => {
-  const value = args[index + 1]
-  if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`)
-  return value
-}
+const desc = (
+  summary: string,
+  cmdPath: string,
+  examples: readonly string[],
+  exitCodesLine: string,
+): HelpDoc.HelpDoc =>
+  HelpDoc.blocks([
+    HelpDoc.p(`${cmdPath} - ${summary}`),
+    HelpDoc.p("Examples:"),
+    ...examples.map((example) => HelpDoc.p(`  ${example}`)),
+    HelpDoc.p(`Exit codes: ${exitCodesLine}`),
+  ])
 
-export const parseArgs = (args: readonly string[]): ParsedArgs => {
-  if (args[0] === "templates" && args[1] === "list") return { command: "templates:list" }
-  if (args[0] === "status") {
-    let sessionId = ""
-    let lines = 10
-    for (let index = 1; index < args.length; index += 1) {
-      const arg = args[index]
-      if (arg === "--session-id") sessionId = valueAfter(args, index, arg)
-      else if (arg === "--lines") {
-        const raw = valueAfter(args, index, arg)
-        lines = Number(raw)
-        if (!Number.isInteger(lines) || lines <= 0) throw new UserInputError(`invalid --lines: ${raw}`)
-      } else if (arg?.startsWith("--")) throw new UserInputError(`Unknown flag: ${arg}`)
-    }
-    if (!sessionId) throw new UserInputError("--session-id is required")
-    return { command: "status", sessionId, lines }
-  }
-  if (args[0] === "nudge") {
-    let target = ""
-    let message = ""
-    for (let index = 1; index < args.length; index += 1) {
-      const arg = args[index]
-      if (arg === "--target") target = valueAfter(args, index, arg)
-      else if (arg === "--message") message = valueAfter(args, index, arg)
-      else if (arg?.startsWith("--")) throw new UserInputError(`Unknown flag: ${arg}`)
-    }
-    if (!target) throw new UserInputError("--target is required")
-    if (!message) throw new UserInputError("--message is required")
-    return { command: "nudge", target, message }
-  }
-  if (args[0] === "kill" || args[0] === "tty-status") {
-    let target = ""
-    for (let index = 1; index < args.length; index += 1) {
-      const arg = args[index]
-      if (arg === "--target") target = valueAfter(args, index, arg)
-      else if (arg?.startsWith("--")) throw new UserInputError(`Unknown flag: ${arg}`)
-    }
-    if (!target) throw new UserInputError("--target is required")
-    return { command: args[0], target }
-  }
-  if (args.includes("--help") || args.includes("-h")) throw new HelpRequested("Usage: pandora-spawn --agent <name> --scope <scope-id> [--task <id>] [--message <text>] [--cwd <path>] [--harness claude|fake] [--preview]")
+export const makePandoraSpawnCommand = (handlers: CliHandlers) => {
+  const status = Command.make(
+    "status",
+    {
+      sessionId: Options.text("session-id").pipe(
+        Options.withSchema(Schema.NonEmptyString),
+        Options.withDescription("Claude session id to inspect"),
+      ),
+      lines: Options.integer("lines").pipe(
+        Options.withSchema(Schema.Int.pipe(Schema.positive())),
+        Options.withDefault(10),
+        Options.withDescription("Recent message count to render (default: 10)"),
+      ),
+    },
+    ({ sessionId, lines }) => handlers.status({ sessionId, lines }),
+  ).pipe(
+    Command.withDescription(
+      desc(
+        "Render recent Claude session messages",
+        "pandora-spawn status",
+        ["pandora-spawn status --session-id session_abc --lines 20"],
+        "0 success | 2 validation error | 3 session not found",
+      ),
+    ),
+  )
 
-  let agent = ""
-  let scope = ""
-  let task: string | undefined
-  let message: string | undefined
-  let cwd = process.cwd()
-  let harness: HarnessName = "claude"
-  let preview = false
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]
-    if (arg === "--agent") agent = valueAfter(args, index, arg)
-    else if (arg === "--scope") scope = valueAfter(args, index, arg)
-    else if (arg === "--task") task = valueAfter(args, index, arg)
-    else if (arg === "--message") message = valueAfter(args, index, arg)
-    else if (arg === "--cwd") cwd = valueAfter(args, index, arg)
-    else if (arg === "--harness") {
-      const raw = valueAfter(args, index, arg)
-      if (raw !== "claude" && raw !== "fake") throw new Error("--harness must be claude or fake")
-      harness = raw
-    } else if (arg === "--preview") preview = true
-    else if (arg?.startsWith("--")) throw new Error(`Unknown flag: ${arg}`)
-  }
-  if (!agent) throw new UserInputError("--agent is required")
-  if (!scope) throw new UserInputError("--scope is required")
-  return { command: "spawn", agent, scope, cwd, harness, preview, ...(task !== undefined ? { task } : {}), ...(message !== undefined ? { message } : {}) }
+  const nudge = Command.make(
+    "nudge",
+    {
+      target: Options.text("target").pipe(
+        Options.withSchema(Schema.NonEmptyString),
+        Options.withDescription("tmux target/session name"),
+      ),
+      message: Options.text("message").pipe(
+        Options.withSchema(Schema.NonEmptyString),
+        Options.withDescription("Message to send followed by Enter"),
+      ),
+    },
+    ({ target, message }) => handlers.nudge({ target, message }),
+  ).pipe(
+    Command.withDescription(
+      desc(
+        "Send a nudge into a tmux-backed harness session",
+        "pandora-spawn nudge",
+        ["pandora-spawn nudge --target pithos-envy-12345678 --message 'status?'"],
+        "0 success | 2 validation error | 1 tmux error",
+      ),
+    ),
+  )
+
+  const kill = Command.make(
+    "kill",
+    {
+      target: Options.text("target").pipe(
+        Options.withSchema(Schema.NonEmptyString),
+        Options.withDescription("tmux target/session name"),
+      ),
+    },
+    ({ target }) => handlers.kill({ target }),
+  ).pipe(
+    Command.withDescription(
+      desc(
+        "Kill a tmux-backed harness session",
+        "pandora-spawn kill",
+        ["pandora-spawn kill --target pithos-envy-12345678"],
+        "0 success | 2 validation error | 1 tmux error",
+      ),
+    ),
+  )
+
+  const ttyStatus = Command.make(
+    "tty-status",
+    {
+      target: Options.text("target").pipe(
+        Options.withSchema(Schema.NonEmptyString),
+        Options.withDescription("tmux target/session name"),
+      ),
+    },
+    ({ target }) => handlers.ttyStatus({ target }),
+  ).pipe(
+    Command.withDescription(
+      desc(
+        "Capture the current tmux pane contents",
+        "pandora-spawn tty-status",
+        ["pandora-spawn tty-status --target pithos-envy-12345678"],
+        "0 success | 2 validation error | 1 tmux error",
+      ),
+    ),
+  )
+
+  const templatesList = Command.make("list", {}, () => handlers.templatesList()).pipe(
+    Command.withDescription(
+      desc(
+        "List available agent templates",
+        "pandora-spawn templates list",
+        ["pandora-spawn templates list"],
+        "0 success | 2 template/config error",
+      ),
+    ),
+  )
+
+  const templates = Command.make("templates").pipe(
+    Command.withDescription("Inspect agent templates"),
+    Command.withSubcommands([templatesList]),
+  )
+
+  return Command.make(
+    "pandora-spawn",
+    {
+      agent: Options.text("agent").pipe(
+        Options.optional,
+        Options.withDescription("Agent name to spawn, e.g. envy or pandora"),
+      ),
+      scope: Options.text("scope").pipe(
+        Options.optional,
+        Options.withDescription("Pithos scope id for the session"),
+      ),
+      task: Options.text("task").pipe(
+        Options.optional,
+        Options.withDescription("Optional task id to attach to the session"),
+      ),
+      message: Options.text("message").pipe(
+        Options.optional,
+        Options.withDescription("Optional kickoff message override"),
+      ),
+      cwd: Options.text("cwd").pipe(
+        Options.withSchema(Schema.NonEmptyString),
+        Options.withDefault(process.cwd()),
+        Options.withDescription("Working directory when the agent has no template cwd override"),
+      ),
+      harness: Options.choice("harness", HarnessNameValues).pipe(
+        Options.withDefault("claude" as const),
+        Options.withDescription("Harness adapter: claude or fake"),
+      ),
+      preview: Options.boolean("preview").pipe(
+        Options.withDescription("Render only; do not register a run or launch a harness"),
+      ),
+    },
+    ({ agent, scope, task, message, cwd, harness, preview }) => {
+      const agentValue = opt(agent)
+      const scopeValue = opt(scope)
+      const taskValue = opt(task)
+      const messageValue = opt(message)
+      return handlers.spawn({
+        ...(agentValue !== undefined ? { agent: agentValue } : {}),
+        ...(scopeValue !== undefined ? { scope: scopeValue } : {}),
+        ...(taskValue !== undefined ? { task: taskValue } : {}),
+        ...(messageValue !== undefined ? { message: messageValue } : {}),
+        cwd,
+        harness,
+        preview,
+      })
+    },
+  ).pipe(
+    Command.withDescription(
+      HelpDoc.blocks([
+        HelpDoc.p("Spawn agent sessions from versioned templates. Default command is spawn."),
+        HelpDoc.p("Environment:"),
+        HelpDoc.p("  PANDORA_SPAWN_FAKE_PITHOS_HELP  Override captured `pithos --help` text"),
+        HelpDoc.p("  PANDORA_SPAWN_FAKE_RUN_ID       Force run_id (preview/tests)"),
+        HelpDoc.p("  PANDORA_SPAWN_FAKE_SESSION_ID   Force session_id (preview/tests)"),
+        HelpDoc.p("Exit codes:"),
+        HelpDoc.p("  0  Success"),
+        HelpDoc.p("  1  Upstream / subprocess error"),
+        HelpDoc.p("  2  Validation / template error"),
+        HelpDoc.p("  3  Not found"),
+        HelpDoc.p("Examples:"),
+        HelpDoc.p("  pandora-spawn --agent envy --scope repo:work/example --preview"),
+        HelpDoc.p("  pandora-spawn --agent envy --scope repo:work/example --harness fake"),
+        HelpDoc.p("  pandora-spawn templates list"),
+      ]),
+    ),
+    Command.withSubcommands([status, nudge, kill, ttyStatus, templates]),
+  )
 }

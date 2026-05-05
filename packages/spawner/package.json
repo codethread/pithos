@@ -14,5 +14,11 @@
     "test:watch": "vitest --config vitest.config.ts",
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs --dev --run --"
+  },
+  "dependencies": {
+    "@effect/cli": "0.75.1",
+    "@effect/platform": "^0.96.1",
+    "@effect/platform-node": "^0.106.0",
+    "effect": "^3.21.2"
   }
 }

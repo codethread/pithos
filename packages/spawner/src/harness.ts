@@ -52,7 +52,7 @@ export interface ClaudeRunOutput {
   readonly pane_pid: number | null
 }
 
-export const runFake = (description: SpawnDescription): Promise<{ pid: null; output: SpawnDescription; exitCode: 0 }> => Promise.resolve({
+export const runFake = (description: SpawnDescription): { pid: null; output: SpawnDescription; exitCode: 0 } => ({
   pid: null,
   output: description,
   exitCode: 0,

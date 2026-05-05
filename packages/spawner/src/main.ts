@@ -1,120 +1,340 @@
 import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
-import { HelpRequested, parseArgs } from "./cli.ts"
+import { CliConfig, Command } from "@effect/cli"
+import * as ValidationError from "@effect/cli/ValidationError"
+import { NodeContext, NodeRuntime } from "@effect/platform-node"
+import { Effect, Layer, ParseResult, Schema } from "effect"
+import {
+  type CliHandlers,
+  type NudgeCliInput,
+  type SpawnCliInput,
+  type StatusCliInput,
+  type TargetCliInput,
+  NudgeCliInputSchema,
+  SpawnInvocationSchema,
+  StatusCliInputSchema,
+  TargetCliInputSchema,
+  makePandoraSpawnCommand,
+} from "./cli.ts"
 import { buildClaudeArgv, runClaude, runFake, tmuxSessionName } from "./harness.ts"
 import { agentsPath, templatesDir } from "./paths.ts"
 import { renderStatus } from "./status.ts"
 import { loadAgentManifests, loadTemplate, render } from "./template.ts"
+import { SpawnerError, exitCodeFor } from "./errors.ts"
+import type { ErrorCode } from "./errors.ts"
 
-interface ExecFailure { readonly stderr?: Buffer }
-
-const pithos = (args: readonly string[], env: NodeJS.ProcessEnv = process.env): string => {
-  try {
-    return execFileSync("pithos", args, { env }).toString()
-  } catch (error: unknown) {
-    const failure = error as ExecFailure
-    if (Buffer.isBuffer(failure.stderr) && failure.stderr.length > 0) {
-      process.stderr.write(failure.stderr)
-    }
-    throw new Error(`pithos ${args.join(" ")} failed`)
-  }
+interface ExecFailure {
+  readonly stderr?: Buffer | string
 }
+
+const RunRegisterOutputSchema = Schema.parseJson(
+  Schema.Struct({
+    run: Schema.Struct({
+      id: Schema.NonEmptyString,
+    }),
+  }),
+)
 
 const writeJson = (value: unknown): void => {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-const execText = (args: readonly string[]): string => execFileSync(args[0] ?? "", args.slice(1)).toString()
-
-interface RunRegisterOutput { readonly run: { readonly id: string } }
-
-const parseRunId = (raw: string): string => {
-  const parsed = JSON.parse(raw) as unknown
-  if (typeof parsed !== "object" || parsed === null || !("run" in parsed)) throw new Error("pithos run register returned invalid JSON")
-  const runOutput = parsed as RunRegisterOutput
-  if (typeof runOutput.run.id !== "string") throw new Error("pithos run register returned invalid run id")
-  return runOutput.run.id
+const writeError = (code: ErrorCode, message: string): void => {
+  process.stderr.write(`${JSON.stringify({ ok: false, error: { code, message } })}\n`)
 }
 
-const run = async (): Promise<void> => {
-  const opts = parseArgs(process.argv.slice(2))
-  if (opts.command === "status") { process.stdout.write(`${renderStatus(opts.sessionId, opts.lines)}\n`); return }
-  if (opts.command === "nudge") { process.stdout.write(execText(["tmux", "send-keys", "-t", opts.target, opts.message, "Enter"])); return }
-  if (opts.command === "kill") { process.stdout.write(execText(["tmux", "kill-session", "-t", opts.target])); return }
-  if (opts.command === "tty-status") { process.stdout.write(execText(["tmux", "capture-pane", "-t", opts.target, "-p"])); return }
-  if (opts.command === "templates:list") {
-    const templates = loadAgentManifests(agentsPath).map((manifest) => ({ name: manifest.agent, model: manifest.model, tools: manifest.tools, capability: manifest.capability, type: manifest.type, cwd: manifest.cwd ?? null, launcher: manifest.launcher ?? null }))
-    writeJson({ ok: true, templates })
-    return
-  }
+const decode = <A, I>(
+  schema: Schema.Schema<A, I>,
+  value: unknown,
+  code: ErrorCode,
+  message: string,
+): Effect.Effect<A, SpawnerError> =>
+  Schema.decodeUnknown(schema)(value).pipe(
+    Effect.mapError(
+      (error) =>
+        new SpawnerError({
+          code,
+          message: `${message}\n${ParseResult.TreeFormatter.formatErrorSync(error)}`,
+        }),
+    ),
+  )
 
-  const template = loadTemplate(agentsPath, templatesDir, opts.agent)
-  const agentCwd = template.manifest.cwd?.startsWith("~/") ? `${homedir()}${template.manifest.cwd.slice(1)}` : template.manifest.cwd
-  const cwd = agentCwd ?? opts.cwd
-  const pithosHelp = process.env.PANDORA_SPAWN_FAKE_PITHOS_HELP ?? pithos(["--help"])
-  const sessionId = process.env.PANDORA_SPAWN_FAKE_SESSION_ID ?? (opts.preview ? "session_PREVIEW" : randomUUID())
-  const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? (opts.preview ? "run_PREVIEW" : parseRunId(pithos(["run", "register", "--agent-kind", opts.agent, "--scope", opts.scope, "--cwd", cwd, "--session-id", sessionId])))
-  const launcherCommands = template.launcher?.commands
-  const launcherMeta = template.manifest.inject_meta && template.launcher !== undefined
-    ? `## Launcher meta\n\n\`\`\`json\n${JSON.stringify({ kind: template.launcher.kind, harness: template.launcher.harness, meta: template.launcher.meta }, null, 2)}\n\`\`\``
-    : ""
-  const context = {
-    agent: opts.agent,
-    capability: template.manifest.capability,
-    model: template.manifest.model,
-    tools_csv: template.manifest.tools.join(","),
-    run_id: runId,
-    session_id: sessionId,
-    scope_id: opts.scope,
-    task_id: opts.task ?? "",
-    cwd,
-    pithos_help: pithosHelp,
-    cmd_spawn: launcherCommands?.spawn ?? "",
-    cmd_status: launcherCommands?.status ?? "",
-    cmd_nudge: launcherCommands?.nudge ?? "",
-    cmd_kill: launcherCommands?.kill ?? "",
-    cmd_tty_status: launcherCommands?.tty_status ?? "",
-    launcher_meta: launcherMeta,
-    session_target: tmuxSessionName(opts.agent, sessionId),
-    ...template.includes,
+const commandFailure = (args: readonly string[], error: unknown): SpawnerError => {
+  const failure = error as ExecFailure
+  if (typeof failure.stderr === "string" && failure.stderr.length > 0) {
+    process.stderr.write(failure.stderr)
+  } else if (Buffer.isBuffer(failure.stderr) && failure.stderr.length > 0) {
+    process.stderr.write(failure.stderr)
   }
-  const prompt = render(template.body, context)
-  const env = { PITHOS_RUN_ID: runId, PITHOS_AGENT: opts.agent, PITHOS_SCOPE_ID: opts.scope, PITHOS_OUTPUT: "json", ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}) }
-  const kickoffMessage = opts.message ?? (template.manifest.type === "afk" ? "begin" as const : undefined)
-  const argv = buildClaudeArgv({
-    sessionId,
-    model: template.manifest.model,
-    tools: template.manifest.tools.join(","),
-    prompt,
-    appendSystemPrompt: opts.agent === "worker",
-    ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
+  return new SpawnerError({
+    code: "UPSTREAM_ERROR",
+    message: `${args.join(" ")} failed`,
   })
-  const description = { env, argv, prompt, cwd }
-  if (opts.preview) {
-    writeJson({ ok: true, preview: true, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, ...description })
-    return
-  }
-  let result
-  try {
-    result = opts.harness === "fake" ? await runFake(description) : runClaude(description, { agent: opts.agent, sessionId })
-  } catch (error) {
-    if (process.env.PANDORA_SPAWN_FAKE_RUN_ID === undefined) {
-      try { pithos(["run", "end", "--run", runId, "--status", "failed", "--summary", `pandora-spawn ${opts.harness} harness launch failed`]) } catch { /* surface original */ }
-    }
-    throw error
-  }
-  writeJson({ ok: result.exitCode === 0, agent: opts.agent, run_id: runId, session_id: sessionId, scope_id: opts.scope, task_id: opts.task ?? null, harness: opts.harness, pid: result.pid, ...result.output })
-  process.exitCode = result.exitCode
 }
 
-run().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error)
-  if (error instanceof HelpRequested) {
-    process.stdout.write(`${message}\n`)
-    process.exit(0)
+const pithos = (args: readonly string[], env: NodeJS.ProcessEnv = process.env): string => {
+  const cmd = ["pithos", ...args] as const
+  try {
+    return execFileSync(cmd[0], cmd.slice(1), { env }).toString()
+  } catch (error: unknown) {
+    throw commandFailure(cmd, error)
   }
-  process.stderr.write(`${message}\n`)
-  const exitCode = typeof error === "object" && error !== null && "exitCode" in error && typeof error.exitCode === "number" ? error.exitCode : 1
-  process.exit(exitCode)
+}
+
+const execText = (args: readonly string[]): string => {
+  const executable = args[0]
+  if (executable === undefined) {
+    throw new SpawnerError({
+      code: "UPSTREAM_ERROR",
+      message: "missing executable",
+    })
+  }
+  try {
+    return execFileSync(executable, args.slice(1)).toString()
+  } catch (error: unknown) {
+    throw commandFailure(args, error)
+  }
+}
+
+const parseRunId = (raw: string): Effect.Effect<string, SpawnerError> =>
+  decode(
+    RunRegisterOutputSchema,
+    raw,
+    "UPSTREAM_ERROR",
+    "pithos run register returned invalid JSON",
+  ).pipe(Effect.map(({ run }) => run.id))
+
+const spawn = (raw: SpawnCliInput) =>
+  Effect.gen(function* () {
+    const opts = yield* decode(
+      SpawnInvocationSchema,
+      {
+        agent: raw.agent,
+        scope: raw.scope,
+        cwd: raw.cwd,
+        harness: raw.harness,
+        preview: raw.preview,
+        ...(raw.task !== undefined ? { task: raw.task } : {}),
+        ...(raw.message !== undefined ? { message: raw.message } : {}),
+      },
+      "VALIDATION_ERROR",
+      "invalid spawn invocation",
+    )
+    const template = loadTemplate(agentsPath, templatesDir, opts.agent)
+    const agentCwd = template.manifest.cwd?.startsWith("~/")
+      ? `${homedir()}${template.manifest.cwd.slice(1)}`
+      : template.manifest.cwd
+    const cwd = agentCwd ?? opts.cwd
+    const pithosHelp = process.env.PANDORA_SPAWN_FAKE_PITHOS_HELP ?? pithos(["--help"])
+    const sessionId = process.env.PANDORA_SPAWN_FAKE_SESSION_ID ?? (opts.preview ? "session_PREVIEW" : randomUUID())
+    const runId = process.env.PANDORA_SPAWN_FAKE_RUN_ID ?? (opts.preview
+      ? "run_PREVIEW"
+      : yield* parseRunId(
+        pithos([
+          "run",
+          "register",
+          "--agent-kind",
+          opts.agent,
+          "--scope",
+          opts.scope,
+          "--cwd",
+          cwd,
+          "--session-id",
+          sessionId,
+        ]),
+      ))
+    const launcherCommands = template.launcher?.commands
+    const launcherMeta = template.manifest.inject_meta && template.launcher !== undefined
+      ? `## Launcher meta\n\n\`\`\`json\n${JSON.stringify({ kind: template.launcher.kind, harness: template.launcher.harness, meta: template.launcher.meta }, null, 2)}\n\`\`\``
+      : ""
+    const context = {
+      agent: opts.agent,
+      capability: template.manifest.capability,
+      model: template.manifest.model,
+      tools_csv: template.manifest.tools.join(","),
+      run_id: runId,
+      session_id: sessionId,
+      scope_id: opts.scope,
+      task_id: opts.task ?? "",
+      cwd,
+      pithos_help: pithosHelp,
+      cmd_spawn: launcherCommands?.spawn ?? "",
+      cmd_status: launcherCommands?.status ?? "",
+      cmd_nudge: launcherCommands?.nudge ?? "",
+      cmd_kill: launcherCommands?.kill ?? "",
+      cmd_tty_status: launcherCommands?.tty_status ?? "",
+      launcher_meta: launcherMeta,
+      session_target: tmuxSessionName(opts.agent, sessionId),
+      ...template.includes,
+    }
+    const prompt = render(template.body, context)
+    const env = {
+      PITHOS_RUN_ID: runId,
+      PITHOS_AGENT: opts.agent,
+      PITHOS_SCOPE_ID: opts.scope,
+      PITHOS_OUTPUT: "json",
+      ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}),
+    }
+    const kickoffMessage = opts.message ?? (template.manifest.type === "afk" ? "begin" : undefined)
+    const argv = buildClaudeArgv({
+      sessionId,
+      model: template.manifest.model,
+      tools: template.manifest.tools.join(","),
+      prompt,
+      appendSystemPrompt: opts.agent === "worker",
+      ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
+    })
+    const description = { env, argv, prompt, cwd }
+    if (opts.preview) {
+      writeJson({
+        ok: true,
+        preview: true,
+        agent: opts.agent,
+        run_id: runId,
+        session_id: sessionId,
+        scope_id: opts.scope,
+        task_id: opts.task ?? null,
+        harness: opts.harness,
+        ...description,
+      })
+      return
+    }
+    let result
+    try {
+      result = opts.harness === "fake"
+        ? runFake(description)
+        : runClaude(description, { agent: opts.agent, sessionId })
+    } catch (error: unknown) {
+      if (process.env.PANDORA_SPAWN_FAKE_RUN_ID === undefined) {
+        try {
+          pithos([
+            "run",
+            "end",
+            "--run",
+            runId,
+            "--status",
+            "failed",
+            "--summary",
+            `pandora-spawn ${opts.harness} harness launch failed`,
+          ])
+        } catch {
+          // surface original harness failure
+        }
+      }
+      if (error instanceof SpawnerError) throw error
+      const message = error instanceof Error ? error.message : String(error)
+      throw new SpawnerError({ code: "UPSTREAM_ERROR", message })
+    }
+    writeJson({
+      ok: result.exitCode === 0,
+      agent: opts.agent,
+      run_id: runId,
+      session_id: sessionId,
+      scope_id: opts.scope,
+      task_id: opts.task ?? null,
+      harness: opts.harness,
+      pid: result.pid,
+      ...result.output,
+    })
+    process.exitCode = result.exitCode
+  })
+
+const status = (raw: StatusCliInput) =>
+  Effect.gen(function* () {
+    const opts = yield* decode(
+      StatusCliInputSchema,
+      raw,
+      "VALIDATION_ERROR",
+      "invalid status invocation",
+    )
+    process.stdout.write(`${renderStatus(opts.sessionId, opts.lines)}\n`)
+  })
+
+const nudge = (raw: NudgeCliInput) =>
+  Effect.gen(function* () {
+    const opts = yield* decode(
+      NudgeCliInputSchema,
+      raw,
+      "VALIDATION_ERROR",
+      "invalid nudge invocation",
+    )
+    process.stdout.write(execText(["tmux", "send-keys", "-t", opts.target, opts.message, "Enter"]))
+  })
+
+const kill = (raw: TargetCliInput) =>
+  Effect.gen(function* () {
+    const opts = yield* decode(
+      TargetCliInputSchema,
+      raw,
+      "VALIDATION_ERROR",
+      "invalid kill invocation",
+    )
+    process.stdout.write(execText(["tmux", "kill-session", "-t", opts.target]))
+  })
+
+const ttyStatus = (raw: TargetCliInput) =>
+  Effect.gen(function* () {
+    const opts = yield* decode(
+      TargetCliInputSchema,
+      raw,
+      "VALIDATION_ERROR",
+      "invalid tty-status invocation",
+    )
+    process.stdout.write(execText(["tmux", "capture-pane", "-t", opts.target, "-p"]))
+  })
+
+const templatesList = () =>
+  Effect.sync(() => {
+    const templates = loadAgentManifests(agentsPath).map((manifest) => ({
+      name: manifest.agent,
+      model: manifest.model,
+      tools: manifest.tools,
+      capability: manifest.capability,
+      type: manifest.type,
+      cwd: manifest.cwd ?? null,
+      launcher: manifest.launcher ?? null,
+    }))
+    writeJson({ ok: true, templates })
+  })
+
+const handlers: CliHandlers = {
+  spawn,
+  status,
+  nudge,
+  kill,
+  ttyStatus,
+  templatesList,
+}
+
+const cli = Command.run(makePandoraSpawnCommand(handlers), {
+  name: "Pithos Spawner",
+  version: "0.1.0",
+  executable: "pandora-spawn",
 })
+
+const program = cli(process.argv).pipe(
+  Effect.catchTag("SpawnerError", (error) =>
+    Effect.sync(() => {
+      writeError(error.code, error.message)
+      process.exit(exitCodeFor(error.code))
+    }),
+  ),
+  Effect.catchAll((error: unknown) =>
+    ValidationError.isValidationError(error)
+      ? Effect.sync(() => process.exit(2))
+      : Effect.sync(() => {
+        const message = error instanceof Error ? error.message : String(error)
+        writeError("UPSTREAM_ERROR", message)
+        process.exit(1)
+      }),
+  ),
+  Effect.provide(
+    Layer.mergeAll(
+      NodeContext.layer,
+      CliConfig.layer({ showBuiltIns: true }),
+    ),
+  ),
+)
+
+NodeRuntime.runMain(program)

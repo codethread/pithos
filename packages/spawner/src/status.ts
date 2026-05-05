@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { SpawnerError } from "./errors.ts"
 
 type JsonRecord = Readonly<Record<string, unknown>>
 interface StatusMessage { readonly ts: string; readonly role: string; readonly text: string }
@@ -74,7 +75,12 @@ const parseClaude = (path: string): readonly StatusMessage[] =>
 
 export const renderStatus = (sessionId: string, lines: number): string => {
   const claudeFile = findClaudeSession(sessionId)
-  if (claudeFile === undefined) throw new Error(`session not found: ${sessionId}`)
+  if (claudeFile === undefined) {
+    throw new SpawnerError({
+      code: "NOT_FOUND",
+      message: `session not found: ${sessionId}`,
+    })
+  }
   return parseClaude(claudeFile)
     .slice(-lines)
     .map((message) => {

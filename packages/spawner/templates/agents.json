@@ -74,6 +74,12 @@
     {
       "agent": "worker",
       "model": "sonnet",
+      "tools": [
+        "Bash",
+        "Read",
+        "Grep",
+        "Glob"
+      ],
       "type": "afk",
       "system_prompt": "worker.md.tmpl",
       "launcher": "local_claude_tmux",

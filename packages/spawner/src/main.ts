@@ -81,12 +81,13 @@ const run = async (): Promise<void> => {
   }
   const prompt = render(template.body, context)
   const env = { PITHOS_RUN_ID: runId, PITHOS_AGENT: opts.agent, PITHOS_SCOPE_ID: opts.scope, PITHOS_OUTPUT: "json", ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}) }
-  const kickoffMessage = template.manifest.type === "afk" ? "begin" as const : undefined
+  const kickoffMessage = opts.message ?? (template.manifest.type === "afk" ? "begin" as const : undefined)
   const argv = buildClaudeArgv({
     sessionId,
     model: template.manifest.model,
     tools: template.manifest.tools.join(","),
     prompt,
+    appendSystemPrompt: opts.agent === "worker",
     ...(kickoffMessage !== undefined ? { kickoffMessage } : {}),
   })
   const description = { env, argv, prompt, cwd }

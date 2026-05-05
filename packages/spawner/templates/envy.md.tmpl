@@ -22,6 +22,33 @@ For worker-backed implementation, record the result with `pithos artifact add --
 
 Direct repo mutation by Envy does not satisfy the contract for worker-backed implementation.
 
+## Worker spawning
+
+To spawn a worker for a mutation task:
+
+```sh
+pandora-spawn --agent worker --scope {{scope_id}} --cwd {{cwd}} --message "<task description>"
+```
+
+The worker runs in a tmux session. Its session ID is in the JSON output (`session_id`). Workers are not Pithos-aware — they don't claim, don't enqueue, don't heartbeat. They just do the work.
+
+### Watching a worker
+
+```sh
+pandora-spawn status --session-id <worker-session-id> --lines 50
+```
+
+Workers produce a COMPLETION REPORT at the end of their output. The report has sections: Accomplished, Changed, Issues, State. When you see a COMPLETION REPORT, the worker is done.
+
+### After worker completion
+
+1. Extract the COMPLETION REPORT from the worker's output
+2. Run any verification (tests, lint) to confirm the result
+3. Attach the result: `pithos artifact add --task {{task_id}} --run {{run_id}} --kind worker-completion --title "<summary>" --body-file <report-file>`
+4. Complete your task: `pithos complete --run {{run_id}} --token <token> {{task_id}}`
+
+If the worker gets stuck, restart it: `pandora-spawn kill --target <tmux-session>` then spawn a new one. If the task needs multiple workers, spawn them and watch all of them.
+
 ## Pithos CLI for this session
 
 ```text

@@ -110,14 +110,14 @@ const parseOneManifest = (path: string, parsed: unknown): AgentManifest => {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new TemplateError(`${path}: agent manifest must be a JSON object`)
   const raw = parsed as Record<string, unknown>
   const tools = raw.tools
-  if (!isStringArray(tools) || tools.length === 0) throw new TemplateError(`${path}: tools must be a non-empty string array`)
+  if (tools !== undefined && !isStringArray(tools)) throw new TemplateError(`${path}: tools must be a string array`)
   const includes = raw.includes
   if (includes !== undefined && !isStringArray(includes)) throw new TemplateError(`${path}: includes must be a string array`)
   return {
     agent: readStringField(path, raw, "agent"),
     model: readStringField(path, raw, "model"),
-    tools,
-    capability: readStringField(path, raw, "capability"),
+    tools: isStringArray(tools) && tools.length > 0 ? tools : [],
+    capability: readOptionalStringField(path, raw, "capability") ?? "",
     type: readTypeField(path, raw),
     cwd: readOptionalStringField(path, raw, "cwd"),
     includes: includes ?? [],

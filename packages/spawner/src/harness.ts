@@ -21,6 +21,7 @@ export const buildClaudeArgv = (input: {
   readonly tools: string
   readonly prompt: string
   readonly kickoffMessage?: string
+  readonly appendSystemPrompt?: boolean
 }): readonly string[] => {
   const base: string[] = [
     "claude",
@@ -29,11 +30,13 @@ export const buildClaudeArgv = (input: {
     "--dangerously-skip-permissions",
     "--model",
     input.model,
-    "--tools",
-    input.tools,
-    "--system-prompt",
-    input.prompt,
   ]
+  if (input.tools.length > 0) base.push("--tools", input.tools)
+  if (input.appendSystemPrompt === true) {
+    base.push("--append-system-prompt", input.prompt)
+  } else {
+    base.push("--system-prompt", input.prompt)
+  }
   if (input.kickoffMessage !== undefined) base.push(input.kickoffMessage)
   return base
 }

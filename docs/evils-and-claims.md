@@ -9,6 +9,7 @@ The Pithos agent roster, their capabilities, and how work routes through the sys
 | Pandora  | AFK    | —           | Bash, Read, Grep, Glob   | `~/.pandora` | Global orchestrator. Delegates, never does.   |
 | Toil     | AFK    | `triage`    | Bash, Read, Grep, Glob   | caller-cwd   | Breaks down goals, finds repos, enqueues.     |
 | Envy     | AFK    | `implement` | Bash, Read, Grep, Glob   | caller-cwd   | Watcher. Spawns workers, monitors, reports.   |
+| Worker   | AFK    | —           | Bash, Read, Write, Edit, Grep, Glob | caller-cwd | Ephemeral. Does mutation, reports, exits. Pithos-unaware. |
 | Greed    | HITL   | `design`    | TBD                      | caller-cwd   | Design partner. Research + discussion w/ Adam.|
 
 ## Delegation chain
@@ -80,6 +81,12 @@ Toil exists because breaking down a goal and discovering repos was eating Pandor
 **Claims `implement`.** Picks up actionable tasks, spawns workers to do the mutation, monitors them, restarts stuck workers, handles context resets, and reports back. Does not mutate the repo herself — workers do. Attaches `worker-completion` artifacts before task completion.
 
 Envy exists because Pandora was burning context babysitting individual workers through long-running tasks.
+
+### Worker — executor
+
+**Pithos-unaware.** Workers do not claim, enqueue, heartbeat, or know Pithos exists. Envy spawns them with a task description. They do the mutation, produce a COMPLETION REPORT, and exit. The session-end hook auto-closes their run. Envy extracts the report, verifies, and attaches a `worker-completion` artifact.
+
+Workers have Write/Edit tools (unlike the orchestrator agents) because their job is mutation.
 
 ### Greed — design partner
 

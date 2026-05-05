@@ -8,6 +8,7 @@ export interface SpawnOptions {
   readonly agent: string
   readonly scope: string
   readonly task?: string
+  readonly message?: string
   readonly cwd: string
   readonly harness: HarnessName
   readonly preview: boolean
@@ -67,11 +68,12 @@ export const parseArgs = (args: readonly string[]): ParsedArgs => {
     if (!target) throw new UserInputError("--target is required")
     return { command: args[0], target }
   }
-  if (args.includes("--help") || args.includes("-h")) throw new HelpRequested("Usage: pandora-spawn --agent <name> --scope <scope-id> [--task <id>] [--cwd <path>] [--harness claude|fake] [--preview]")
+  if (args.includes("--help") || args.includes("-h")) throw new HelpRequested("Usage: pandora-spawn --agent <name> --scope <scope-id> [--task <id>] [--message <text>] [--cwd <path>] [--harness claude|fake] [--preview]")
 
   let agent = ""
   let scope = ""
   let task: string | undefined
+  let message: string | undefined
   let cwd = process.cwd()
   let harness: HarnessName = "claude"
   let preview = false
@@ -80,6 +82,7 @@ export const parseArgs = (args: readonly string[]): ParsedArgs => {
     if (arg === "--agent") agent = valueAfter(args, index, arg)
     else if (arg === "--scope") scope = valueAfter(args, index, arg)
     else if (arg === "--task") task = valueAfter(args, index, arg)
+    else if (arg === "--message") message = valueAfter(args, index, arg)
     else if (arg === "--cwd") cwd = valueAfter(args, index, arg)
     else if (arg === "--harness") {
       const raw = valueAfter(args, index, arg)
@@ -90,5 +93,5 @@ export const parseArgs = (args: readonly string[]): ParsedArgs => {
   }
   if (!agent) throw new UserInputError("--agent is required")
   if (!scope) throw new UserInputError("--scope is required")
-  return task === undefined ? { command: "spawn", agent, scope, cwd, harness, preview } : { command: "spawn", agent, scope, task, cwd, harness, preview }
+  return { command: "spawn", agent, scope, cwd, harness, preview, ...(task !== undefined ? { task } : {}), ...(message !== undefined ? { message } : {}) }
 }

@@ -70,6 +70,14 @@
       "system_prompt": "toil.md.tmpl",
       "launcher": "local_claude_tmux",
       "inject_meta": false
+    },
+    {
+      "agent": "worker",
+      "model": "sonnet",
+      "type": "afk",
+      "system_prompt": "worker.md.tmpl",
+      "launcher": "local_claude_tmux",
+      "inject_meta": false
     }
   ]
 }

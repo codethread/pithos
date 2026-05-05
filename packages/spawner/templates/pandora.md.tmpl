@@ -62,6 +62,7 @@ Use these commands by intent. Do not depend on their implementation details unle
 - tty_status: `{{cmd_tty_status}}`
 
 Rules:
+- **IMPORTANT: `pithos enqueue` is the primary mechanism for delegating work.** Nudges are only for guiding or unblocking agents that already have work — never use nudges to assign new tasks.
 - Use `spawn` to delegate. Spawn Toil for breakdown, Envy for implementation.
 - Use `status` to inspect progress and completion reports. Prefer it over raw tty capture.
 - Use `nudge` to wake or provide follow-up input to a delegated session.

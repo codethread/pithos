@@ -145,7 +145,7 @@
     **Type:** AFK
     **Blocked by:** 16
     **User stories covered:** US9, US10
-    **Vertical slice:** The fake harness from slice 16 is the deliverable. This slice is the conceptual hook for any *additional* tests outside `packages/spawner` that need to assert against spawn behaviour without real Claude. Likely no new code is required; close as "subsumed by 16" if no other consumer needs it by the time we get here.
+    **Vertical slice:** The fake harness from slice 16 is the deliverable. This slice is the conceptual hook for any _additional_ tests outside `packages/spawner` that need to assert against spawn behaviour without real Claude. Likely no new code is required; close as "subsumed by 16" if no other consumer needs it by the time we get here.
 
 19. **Title:** Document explicit spawn flow for Envy
     **Status:** Built
@@ -162,7 +162,7 @@
     **Vertical slice:** Human/Pandora runs one complete flow: init, scope, Pandora → Toil → Envy → worker delegation, artifact add, complete, briefing. This flow has now been proven end-to-end with Envy claiming `implement`, a separate worker sub-session performing the repo mutation, `worker-completion` artifact attachment, and successful final verification.
 
 21. **Title:** Prove real Claude can run in an isolated container test  
-    **Status:** Unbuilt  
+    **Status:** Blocked - current implementation needs refining from user, do not build this step
     **Type:** HITL  
     **Blocked by:** 20  
     **User stories covered:** US9, US11  

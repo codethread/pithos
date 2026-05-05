@@ -1,16 +1,16 @@
 # Contributing to `@pithos/spawner`
 
-This package is still lighter-weight than `@pithos/cli`, but the current implementation already uses Effect, `@effect/cli`, schemas, and tagged errors. Read `README.md` before adding anything.
+Spawner-specific quality bar and change checklist. Read `README.md` first for what this package does. Root-level rules (`../../AGENTS.md`) apply.
 
-The spawner is glue: it turns a versioned agent template into a Claude Code or Pi session. It never touches SQLite directly. It calls the `pithos` CLI subprocess for state.
+The spawner is glue: it turns a versioned agent template into a session in a real harness. It never touches SQLite directly — state goes through the `pithos` CLI subprocess. The current implementation already uses Effect, `@effect/cli`, schemas, and tagged errors; follow those patterns rather than introducing new ones.
 
 ## Quality bar
 
 - Keep the package small and glue-focused. No DB imports.
-- Follow the current codebase pattern when touching existing modules: Effect-based CLI handlers, schema-decoded boundaries, tagged `SpawnerError` failures.
-- Prefer adding to the existing harness/template/status seams over inventing new abstractions.
-- Keep tests light but real: snapshot/integration smoke for spawn shape plus focused unit tests for harness/template/status parsing.
-- Hooks are still not tested directly; manual spawn proves they fire.
+- Follow the existing pattern when touching modules: Effect-based CLI handlers, schema-decoded boundaries, tagged `SpawnerError` failures.
+- Prefer extending the existing harness/template/status seams over inventing new abstractions.
+- Tests stay light but real: snapshot/integration smoke for spawn shape plus focused unit tests for harness/template/status parsing.
+- Hooks are not tested directly; manual spawn proves they fire.
 - Lint and typecheck still apply. No `any`.
 
 If you find yourself adding speculative orchestration beyond the existing harness/template/status seams, **stop**. This is still glue.
@@ -35,8 +35,8 @@ When the snapshot updates because of a real shape change (new flag, new template
 
 1. Add a `templates/<agent>.md.tmpl` file. The frontmatter `agent` must equal the file stem.
 2. Add an entry under `agents` in `templates/agents.json`. All required fields populated; `harness` present. Use `kind: "claude"` with Claude tool names or `kind: "pi"` with Pi tool names.
-3. If the template uses any new include filename, list it in `includes` and reference it as `{{filename.md}}` in the body.
-4. Update the snapshot test if you've added a new agent that the test should cover. (One per harness shape is enough.)
+3. If the template uses a new include filename, list it in `includes` and reference it as `{{filename.md}}` in the body.
+4. Update the snapshot test if you've added a new agent it should cover (one per harness shape is enough).
 5. Manual smoke: `pandora-spawn --agent <name> --scope repo:... --preview | jq .`.
 
 ## Touching the harness

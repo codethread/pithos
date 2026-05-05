@@ -45,9 +45,18 @@ Workers produce a COMPLETION REPORT at the end of their output. The report has s
 1. Extract the COMPLETION REPORT from the worker's output
 2. Run any verification (tests, lint) to confirm the result
 3. Attach the result: `pithos artifact add --task {{task_id}} --run {{run_id}} --kind worker-completion --title "<summary>" --body-file <report-file>`
-4. Complete your task: `pithos complete --run {{run_id}} --token <token> {{task_id}}`
+4. **Kill the worker session immediately**: `pandora-spawn kill --target <worker-session-id>`
+5. Complete your task: `pithos complete --run {{run_id}} --token <token> {{task_id}}`
 
-If the worker gets stuck, restart it: `pandora-spawn kill --target <tmux-session>` then spawn a new one. If the task needs multiple workers, spawn them and watch all of them.
+### Worker lifecycle is your responsibility
+
+Workers do NOT self-terminate. Every worker session you spawn must be killed by you — there is no other cleanup path. Leaking worker sessions wastes resources.
+
+Rules:
+- Track every `session_id` returned by `pandora-spawn` — that is your authoritative list of live workers.
+- Kill a worker as soon as you have its COMPLETION REPORT and have attached the artifact. Do not wait until your own task ends.
+- If a worker gets stuck or you need to restart it: `pandora-spawn kill --target <worker-session-id>` then spawn a new one.
+- Before running the final `pithos run end ... && pandora-spawn kill --target {{session_target}}` command, walk your tracked `session_id` list and kill any you have not already killed. Use `pandora-spawn kill` and `pandora-spawn status` — do not reach for `tmux` directly.
 
 ## Pithos CLI for this session
 

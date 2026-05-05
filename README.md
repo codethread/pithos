@@ -4,13 +4,47 @@
 >
 > -- Steve Yegge: [Gas Town: from Clown Show to v1.0](https://steve-yegge.medium.com/gas-town-from-clown-show-to-v1-0-c239d9a407ec)
 
-The idea is you talk with a primary agent, 'Pandora', who will then delegate out your work (via the 'Evils' in Pandora's Box); crucially you are still able to interact with any other agents within the orchestra (light factory).
+## About
 
-Different Evils perform different focused roles, such as designing, planning, implementation, etc
+Pandora's Box is a multi-agent orchestration system. You talk to a primary agent, **Pandora**, who delegates work to specialist agents called the **Evils** — each handling a focused role such as triage, design, or implementation.
 
-At this time the mane control plane is `tmux` but the implementation is such that in theory another control plane (like remove SSH boxes) could be added. The precise mechanics are abstracted from the agents
+The system stays visible and steerable. Pandora is the main interface, but you can inspect or interact with any agent in the orchestra directly when needed.
 
-Again, at this time only Claude Code and Pi agent harnesses are implemented.
+`tmux` is the current control plane; shared state and coordination live in the Pithos SQLite store. The control-plane layer is intended to stay replaceable, so agents do not depend on tmux-specific mechanics. Supported harnesses today: Claude Code and Pi.
+
+```mermaid
+flowchart TD
+    User[User / Adam]
+    DB[(Pithos SQLite DB)]
+
+    subgraph TMUX[tmux control plane]
+        Pandora[Pandora<br/>Pi]
+        Toil[Toil<br/>Claude Code]
+        Envy[Envy<br/>Claude Code]
+        Other[Other Evils<br/>Claude Code or Pi]
+
+        subgraph WorkerPool[Workers spawned by Envy]
+            W1[Worker 1<br/>Claude Code or Pi]
+            W2[Worker 2<br/>Claude Code or Pi]
+            WN[Worker N<br/>Claude Code or Pi]
+        end
+    end
+
+    User <--> TMUX
+    Pandora <--> Toil
+    Pandora <--> Envy
+    Pandora <--> Other
+    Toil <--> DB
+    Envy <--> DB
+    Other <--> DB
+    Pandora <--> DB
+    Envy --> W1
+    Envy --> W2
+    Envy --> WN
+    W1 --> Envy
+    W2 --> Envy
+    WN --> Envy
+```
 
 ## Packages
 
@@ -19,21 +53,64 @@ Again, at this time only Claude Code and Pi agent harnesses are implemented.
 
 Agents register runs, claim fenced tasks, heartbeat, attach artifacts, and complete or fail — all through `pithos`. Nothing else writes to the database.
 
-Supported harnesses today:
+Supported harnesses:
 
 - Claude Code (`--harness claude`)
 - Pi (`--harness pi`)
 
+## Quick start
+
+Prereqs: `tmux` plus at least one supported harness CLI on PATH (`claude`, `pi`, or both).
+
+```sh
+pnpm install
+pnpm run build      # builds both packages and links pithos + pandora-spawn on PATH
+pithos --help
+pandora-spawn templates list
+```
+
+Bring up Pandora for the current repo:
+
+```sh
+scripts/pandora-start.sh
+```
+
+This initialises the store, upserts a repo scope, spawns Pandora into a detached tmux session, and attaches.
+
+### Harness hooks
+
+Real spawned sessions rely on tiny harness adapters for two jobs:
+
+- **liveness** — native harness activity becomes throttled `pithos heartbeat`
+- **clean shutdown** — real session termination becomes `pithos run end --status ended`
+
+Claude Code and Pi use different native hook APIs, but both forward into the same shared dispatcher. The adapters no-op in normal non-Pithos sessions because `pandora-spawn` only activates them when it injects the required `PITHOS_*` environment.
+
+Install per harness:
+
+- **Claude Code** — install the marketplace plugin once:
+
+  ```sh
+  /plugin marketplace add https://github.com/codethread/pithos
+  /plugin install pithos@codethread/pithos
+  ```
+
+  Plugin details: [`packages/spawner/claude-plugin/README.md`](packages/spawner/claude-plugin/README.md).
+
+- **Pi** — spawned sessions inject the extension automatically. Manual/dev install: [`packages/spawner/pi-extension/README.md`](packages/spawner/pi-extension/README.md).
+
+Shared hook details: [`packages/spawner/README.md#harness-hooks`](packages/spawner/README.md#harness-hooks).
+
 ## Agent model
 
-All agents are visible through the control plane. Today that means tmux-backed sessions plus JSONL session logs; the design keeps the state layer separate from the harness.
+All agents are visible through the control plane: tmux-backed sessions plus JSONL session logs. The state layer is deliberately separate from the harness.
 
 Agents fall into two categories:
 
-- AFK: away from keyboard, we want as many of these as possible
-- HITL: human-in-the-loop, expensive but important
+- **AFK** — away from keyboard. Cheap; we want as many of these as possible.
+- **HITL** — human-in-the-loop. Expensive but important.
 
-The whole point of Pandora's Box is to distill down the HITL time to maximise busy work while the human user provides clear direction
+The point of Pandora's Box is to distill HITL time, maximising busy work while the human provides clear direction.
 
 ### Implemented roster
 
@@ -73,7 +150,7 @@ Each handoff is deliberate: Pandora should not burn context on repo discovery, a
 
 ### Claim routing
 
-Queue capabilities describe the requested outcome class, not the agent's internal execution style.
+Queue capabilities describe the requested outcome class, not the agent's internal execution style. Pandora does not claim queue work — she coordinates across scopes and capabilities.
 
 ```text
 pithos enqueue --capability triage     -> Toil claims
@@ -81,66 +158,13 @@ pithos enqueue --capability implement  -> Envy claims
 pithos enqueue --capability design     -> Greed claims once implemented
 ```
 
-Pandora does not claim queue work. She coordinates across scopes and capabilities.
+### Per-agent notes
 
-### Per-agent detail
-
-#### Pandora
-
-Pandora is the human-facing bridge. She consumes briefings, inspects tasks/runs/artifacts, decides where attention is needed, and spawns the right specialist. She should not personally track every worker session in context.
-
-#### Toil
-
-Toil claims `triage`. In `~/.pandora`, she can do broad repo discovery and breakdown. In a concrete repo scope, she turns goals into actionable queue work and then exits.
-
-#### Envy
-
-Envy claims `implement`. She is the coordinator, not the mutating worker. For repo/worktree changes she spawns a separate worker session, watches progress, and records the result as a `worker-completion` artifact before completing or failing the task.
-
-#### Worker
-
-Workers are intentionally Pithos-unaware. They do the mutation, produce a completion report, and exit. Envy translates that result back into Pithos state.
-
-#### Greed
-
-Greed is the planned design-quality agent. She will own `design` tasks and run in a more human-in-the-loop style.
-
-## Quick start
-
-```sh
-pnpm install
-pnpm run build      # builds both packages and links pithos + pandora-spawn on PATH
-pithos --help
-pandora-spawn templates list
-```
-
-Bring up Pandora for the current repo:
-
-```sh
-scripts/pandora-start.sh
-```
-
-This initialises the store, upserts a repo scope, spawns Pandora into a detached tmux session, and attaches.
-
-Harness hook setup:
-
-Real spawned sessions rely on tiny harness adapters for two jobs only:
-
-- liveness: native harness activity becomes throttled `pithos heartbeat`
-- clean shutdown: real session termination becomes `pithos run end --status ended`
-
-Claude Code and Pi use different native hook APIs, but both forward into the same shared dispatcher. The adapters no-op in normal non-Pithos sessions because `pandora-spawn` only activates them when it injects the required `PITHOS_*` environment.
-
-- Claude Code: install the marketplace plugin once — [`packages/spawner/claude-plugin/README.md`](packages/spawner/claude-plugin/README.md)
-- Pi: spawned Pithos sessions inject the extension automatically; optional manual/dev install docs live at [`packages/spawner/pi-extension/README.md`](packages/spawner/pi-extension/README.md)
-- Shared hook details: [`packages/spawner/README.md#harness-hooks`](packages/spawner/README.md#harness-hooks)
-
-Claude Code install:
-
-```sh
-/plugin marketplace add https://github.com/codethread/pithos
-/plugin install pithos@codethread/pithos
-```
+- **Pandora** — the human-facing bridge. Consumes briefings, inspects tasks/runs/artifacts, decides where attention is needed, and spawns the right specialist. Should not personally track every worker session in context.
+- **Toil** — in `~/.pandora` she does broad repo discovery and breakdown; in a concrete repo scope she turns goals into actionable queue work and then exits.
+- **Envy** — coordinator, not mutator. Spawns a separate worker session for repo/worktree changes, watches progress, and records the result as a `worker-completion` artifact before completing or failing the task.
+- **Worker** — intentionally Pithos-unaware. Performs the mutation, produces a completion report, and exits. Envy translates that result back into Pithos state.
+- **Greed** — planned design-quality agent. Will own `design` tasks and run in a more human-in-the-loop style.
 
 ## Documents
 
@@ -158,8 +182,4 @@ Claude Code install:
 | `.claude/commands/smoke.md`                | Claude Code manual smoke-test command                                  |
 | `.pi/prompts/smoke.md`                     | Pi manual smoke-test prompt                                            |
 
-## Current architecture rule of thumb
-
-- Read the code for exact behavior.
-- Read package READMEs for the supported surface.
-- Read `AGENTS.md` for engineering invariants.
+When in doubt: read the code for exact behavior, the package READMEs for the supported surface, and `AGENTS.md` for engineering invariants.

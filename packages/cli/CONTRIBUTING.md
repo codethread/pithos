@@ -2,7 +2,7 @@
 
 This package is the source of truth for Pithos state. The quality bar is high.
 
-Root-level rules (`../../AGENTS.md`) apply here in full: fail loudly, strict types at IO, structured logs, agent-first observability. This file lists the package-specific build commands and the add-a-command checklist.
+Root-level rules (`../../AGENTS.md`) apply in full: fail loudly, strict types at IO, structured logs, agent-first observability. This file lists the package-specific build commands, test layout, quality bar, and add-a-command checklist.
 
 ## Build
 
@@ -36,7 +36,7 @@ See `../../AGENTS.md` for canonical examples of each.
 
 ## Adding a command — checklist
 
-1. Add command file under `src/commands/<name>.ts`.
+1. Add the command file under `src/commands/<name>.ts`.
 2. Add a colocated `<name>.test.ts` with at least:
    - happy path
    - one failure mode (validation, not-found, or stale-token)

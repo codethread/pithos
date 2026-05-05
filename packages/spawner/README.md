@@ -2,17 +2,13 @@
 
 Tiny CLI for turning versioned agent templates into sessions in an agent harness like Claude Code or Pi.
 
+`pandora-spawn` owns agent config, prompt rendering, hook installation, and harness process setup. It never touches the Pithos SQLite store directly — all state goes through the `pithos` CLI subprocess, and the harness itself is treated as an injectable adapter.
+
 Supported harnesses:
 
 - `claude` — Claude Code in tmux
 - `pi` — Pi in tmux
 - `fake` — deterministic test harness
-
-The package keeps Pithos state in the `pithos` CLI subprocess and treats the harness as an injectable adapter.
-
-`pandora-spawn` owns agent config, prompt rendering, hook installation, and harness process setup. Pithos state is still handled only by the `pithos` CLI subprocess.
-
-`pandora-spawn status --session-id <id>` auto-detects Claude Code and Pi JSONL session logs.
 
 ## CLI
 
@@ -24,20 +20,11 @@ pandora-spawn --agent envy --scope repo:work/example --preview
 pandora-spawn templates list
 ```
 
-Liveness/session-end hooks ship as harness adapters:
-
-- Claude Code plugin — [`claude-plugin/README.md`](claude-plugin/README.md)
-- Pi extension — [`pi-extension/README.md`](pi-extension/README.md)
-- shared contract — documented below in [Harness hooks](#harness-hooks)
-
-Across both harnesses the hook layer has only two responsibilities:
-
-- keep active runs alive via throttled heartbeats
-- finalize runs cleanly when the real session actually ends
-
 Default command is spawn. Output is JSON.
 
 `--preview` renders the prompt and prints the harness command/env/cwd JSON without registering a run or starting the harness. It uses stable placeholder IDs (`run_PREVIEW`, `session_PREVIEW`) unless overridden with `PANDORA_SPAWN_FAKE_RUN_ID` / `PANDORA_SPAWN_FAKE_SESSION_ID`.
+
+Real spawned sessions need a per-harness liveness/session-end adapter installed once — see [Harness hooks](#harness-hooks).
 
 ## templates/ API
 
@@ -180,22 +167,13 @@ pandora-spawn --agent pandora \
 pithos inspect run <run_id from step 4 output>
 ```
 
-For fully offline reproduction use `--harness fake`; the run is still registered in
-the Pithos DB via `pithos run register` so `pithos inspect run` works regardless.
-`--harness fake` returns the assembled launch description JSON instead of
-launching a real harness. `--preview` is similar but does **not** register a run and uses
-stable placeholder ids; use it when iterating on templates without touching state.
+For fully offline reproduction use `--harness fake`; the run is still registered in the Pithos DB via `pithos run register` so `pithos inspect run` works regardless. `--harness fake` returns the assembled launch description JSON instead of launching a real harness. `--preview` is similar but does **not** register a run and uses stable placeholder ids; use it when iterating on templates without touching state.
 
-For the real `claude` and `pi` harnesses, `pandora-spawn` writes a wrapper bash script and
-launches it via `tmux new-session -d -s pithos-<agent>-<short>` so the harness has a
-TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns
-`tmux_session`, `script_path`, and `pane_pid`; attach with
-`tmux attach -t <tmux_session>` to interact.
+For the real `claude` and `pi` harnesses, `pandora-spawn` writes a wrapper bash script and launches it via `tmux new-session -d -s pithos-<agent>-<short>` so the harness has a TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns `tmux_session`, `script_path`, and `pane_pid`; attach with `tmux attach -t <tmux_session>` to interact.
 
 ## Harness hooks
 
-`pandora-spawn` keeps run liveness and run-finalization outside the harness binary itself.
-Real harness sessions receive these environment variables:
+`pandora-spawn` keeps run liveness and run-finalization outside the harness binary itself. Real harness sessions receive these environment variables:
 
 - `PITHOS_RUN_ID`
 - `PITHOS_AGENT`
@@ -204,9 +182,7 @@ Real harness sessions receive these environment variables:
 - `PITHOS_TASK_ID` when a task is attached
 - `PITHOS_OUTPUT=json`
 
-The shared dispatcher is [`hooks/dispatch.sh`](./hooks/dispatch.sh). It no-ops unless
-both `PITHOS_RUN_ID` and `PITHOS_AGENT` are present, so the same plugin/extension can
-stay installed for normal non-Pithos sessions.
+The shared dispatcher is [`hooks/dispatch.sh`](./hooks/dispatch.sh). It no-ops unless both `PITHOS_RUN_ID` and `PITHOS_AGENT` are present, so the same plugin/extension can stay installed for normal non-Pithos sessions.
 
 ### Shared hook events
 
@@ -219,7 +195,7 @@ All harness adapters map their native lifecycle API into two logical events:
   - forwards to `hooks/dispatch.sh SessionEnd`
   - runs `pithos run end --run "$PITHOS_RUN_ID" --status ended`
 
-Unknown event names currently emit a diagnostic message so adapter drift is visible.
+Unknown event names emit a diagnostic message so adapter drift is visible.
 
 ### Harness-specific mappings
 
@@ -228,7 +204,7 @@ Unknown event names currently emit a diagnostic message so adapter drift is visi
 - native `PreToolUse` -> shared `PreToolUse`
 - native `SessionEnd` with matcher `prompt_input_exit` -> shared `SessionEnd`
 
-Install/use: [`claude-plugin/README.md`](./claude-plugin/README.md)
+Install/use: [`claude-plugin/README.md`](./claude-plugin/README.md).
 
 #### Pi extension
 
@@ -236,41 +212,26 @@ Install/use: [`claude-plugin/README.md`](./claude-plugin/README.md)
 - native `session_shutdown` with `reason !== "reload"` -> shared `SessionEnd`
 - both are additionally gated on `PITHOS_SESSION_ID` matching the active Pi session
 
-That session-id guard matters because Pi can replace the active session without exiting
-its process; replacement sessions must not heartbeat or finalize the wrong Pithos run.
+The session-id guard matters because Pi can replace the active session without exiting its process; replacement sessions must not heartbeat or finalize the wrong Pithos run.
 
-### Status contract
+Install/use: [`pi-extension/README.md`](./pi-extension/README.md).
 
-`pandora-spawn status --session-id <id>` reads the harness transcript from the session log.
-Today it auto-detects:
+## Status and session logs
 
-- Claude Code JSONL sessions under `~/.claude/projects`
-- Pi JSONL sessions under `~/.pi/agent/sessions`
+Session JSONL logs are the ground truth for understanding what an agent actually did. Prefer them over raw tmux capture.
 
-### Install harness hooks
+`pandora-spawn status --session-id <id>` reads the harness transcript and auto-detects:
 
-- Claude Code: [`claude-plugin/`](./claude-plugin/README.md)
-- Pi: [`pi-extension/`](./pi-extension/README.md)
-- Shared contract: see [Harness hooks](#harness-hooks)
+- Claude Code JSONL sessions under `~/.claude/projects/<project-dir>/<session-id>.jsonl`
+- Pi JSONL sessions under `~/.pi/agent/sessions/**/<session-id>.jsonl`
 
-## Session log introspection
+For live summaries without raw `jq`:
 
-Session JSONL logs are the ground truth for understanding what an agent actually did.
-Prefer them over raw tmux capture.
-
-Claude Code logs live under:
-
-```text
-~/.claude/projects/<project-dir>/<session-id>.jsonl
+```sh
+pandora-spawn status --session-id <session-id> --lines 20
 ```
 
-Pi logs live under:
-
-```text
-~/.pi/agent/sessions/**/<session-id>.jsonl
-```
-
-Quick recipes:
+Direct `jq` recipes for deeper inspection:
 
 ```sh
 # Find a session log
@@ -283,10 +244,4 @@ jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tex
 
 # Claude Code Bash tool calls
 jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Bash") | .input.command' "$LOG"
-```
-
-For live summaries without raw jq, use:
-
-```sh
-pandora-spawn status --session-id <session-id> --lines 20
 ```

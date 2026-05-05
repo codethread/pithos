@@ -118,8 +118,6 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 - `README.md`: project intro, agent model, delegation chain, and current architecture
 - `CONTRIBUTING.md`: build, verify, commit baseline, and doc map
 - `AGENTS.md`: non-negotiable rules beyond what can be enforced statically, injected transparently into agents
-- `AGENT_LOOP.md`: autonomous implementation loop; intentionally kept at repo root
-- `scripts/tasks-adhoc.md`, then `scripts/tasks.md`: implementation queues
 - `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md`: CLI surface, package quality bar, add-a-command checklist
-- `packages/spawner/README.md`, `packages/spawner/HOOKS.md`, `packages/spawner/CONTRIBUTING.md`: spawner surface, hook contract, session-log introspection, package constraints
+- `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md`: spawner surface, hook contract, session-log introspection, package constraints
 - Each `packages/<package>/` repeats this pattern, providing more granular details as scope narrows

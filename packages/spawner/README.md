@@ -28,7 +28,12 @@ Liveness/session-end hooks ship as harness adapters:
 
 - Claude Code plugin — [`claude-plugin/README.md`](claude-plugin/README.md)
 - Pi extension — [`pi-extension/README.md`](pi-extension/README.md)
-- shared contract — [`HOOKS.md`](HOOKS.md)
+- shared contract — documented below in [Harness hooks](#harness-hooks)
+
+Across both harnesses the hook layer has only two responsibilities:
+
+- keep active runs alive via throttled heartbeats
+- finalize runs cleanly when the real session actually ends
 
 Default command is spawn. Output is JSON.
 
@@ -187,14 +192,66 @@ TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns
 `tmux_session`, `script_path`, and `pane_pid`; attach with
 `tmux attach -t <tmux_session>` to interact.
 
+## Harness hooks
+
+`pandora-spawn` keeps run liveness and run-finalization outside the harness binary itself.
+Real harness sessions receive these environment variables:
+
+- `PITHOS_RUN_ID`
+- `PITHOS_AGENT`
+- `PITHOS_SCOPE_ID`
+- `PITHOS_SESSION_ID`
+- `PITHOS_TASK_ID` when a task is attached
+- `PITHOS_OUTPUT=json`
+
+The shared dispatcher is [`hooks/dispatch.sh`](./hooks/dispatch.sh). It no-ops unless
+both `PITHOS_RUN_ID` and `PITHOS_AGENT` are present, so the same plugin/extension can
+stay installed for normal non-Pithos sessions.
+
+### Shared hook events
+
+All harness adapters map their native lifecycle API into two logical events:
+
+- `PreToolUse`
+  - forwards to `hooks/dispatch.sh PreToolUse`
+  - runs `pithos heartbeat --run "$PITHOS_RUN_ID" --hook PreToolUse --throttle-seconds 60`
+- `SessionEnd`
+  - forwards to `hooks/dispatch.sh SessionEnd`
+  - runs `pithos run end --run "$PITHOS_RUN_ID" --status ended`
+
+Unknown event names currently emit a diagnostic message so adapter drift is visible.
+
+### Harness-specific mappings
+
+#### Claude Code plugin
+
+- native `PreToolUse` -> shared `PreToolUse`
+- native `SessionEnd` with matcher `prompt_input_exit` -> shared `SessionEnd`
+
+Install/use: [`claude-plugin/README.md`](./claude-plugin/README.md)
+
+#### Pi extension
+
+- native `tool_call` -> shared `PreToolUse`
+- native `session_shutdown` with `reason !== "reload"` -> shared `SessionEnd`
+- both are additionally gated on `PITHOS_SESSION_ID` matching the active Pi session
+
+That session-id guard matters because Pi can replace the active session without exiting
+its process; replacement sessions must not heartbeat or finalize the wrong Pithos run.
+
+### Status contract
+
+`pandora-spawn status --session-id <id>` reads the harness transcript from the session log.
+Today it auto-detects:
+
+- Claude Code JSONL sessions under `~/.claude/projects`
+- Pi JSONL sessions under `~/.pi/agent/sessions`
+
 ### Install harness hooks
 
 - Claude Code: [`claude-plugin/`](./claude-plugin/README.md)
 - Pi: [`pi-extension/`](./pi-extension/README.md)
-- Shared contract: [`HOOKS.md`](./HOOKS.md)
-
-Hooks no-op in normal sessions — they only activate when `PITHOS_AGENT`
-and `PITHOS_RUN_ID` are set, which `pandora-spawn` injects automatically.
+- Shared contract: see [Harness hooks](#harness-hooks)
 
 ## Session log introspection
 

@@ -1,6 +1,6 @@
 # Contributing
 
-This doc is the build/verify/commit baseline for both humans and agents working on Pithos. Engineering rules that are non-negotiable live in `AGENTS.md`. The autonomous slice-loop process lives in `AGENT_LOOP.md`.
+This doc is the build/verify/commit baseline for both humans and agents working on Pithos. Engineering rules that are non-negotiable live in `AGENTS.md`.
 
 ## Prereqs
 
@@ -55,10 +55,9 @@ Checks must be green before every commit. No "leftover issues", no "next commit"
 | When you want to… | Read… |
 | ---------------- | ----- |
 | Understand the product, agent model, and current architecture | `README.md` |
-| Find the next slice to work on | `scripts/tasks-adhoc.md`, then `scripts/tasks.md` |
 | Understand engineering rules (fail loudly etc) | `AGENTS.md` |
 | Touch DB schema, CLI shape, or migrations | `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md` |
-| Touch templates, hooks, harness wiring, or session status | `packages/spawner/README.md`, `packages/spawner/HOOKS.md`, `packages/spawner/CONTRIBUTING.md` |
+| Touch templates, hooks, harness wiring, or session status | `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md` |
 | Touch the Claude Code plugin manifest or hooks | `packages/spawner/claude-plugin/README.md` |
 | Look at prior art | `references/` (read-only) |
 

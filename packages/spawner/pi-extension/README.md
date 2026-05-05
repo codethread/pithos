@@ -1,7 +1,7 @@
 # Pithos Pi extension
 
 Tiny Pi extension that wires Pithos liveness and session-end hooks into Pi.
-It is the Pi equivalent of the Claude Code plugin and forwards Pi lifecycle events into the shared [`../hooks/dispatch.sh`](../hooks/dispatch.sh) contract documented in [`../HOOKS.md`](../HOOKS.md).
+It is the Pi equivalent of the Claude Code plugin and forwards Pi lifecycle events into the shared [`../hooks/dispatch.sh`](../hooks/dispatch.sh) contract documented in [`../README.md#harness-hooks`](../README.md#harness-hooks).
 
 ## What it does
 

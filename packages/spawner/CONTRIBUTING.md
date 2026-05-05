@@ -1,6 +1,6 @@
 # Contributing to `@pithos/spawner`
 
-This package is still lighter-weight than `@pithos/cli`, but the current implementation already uses Effect, `@effect/cli`, schemas, and tagged errors. Read `README.md` and `HOOKS.md` before adding anything.
+This package is still lighter-weight than `@pithos/cli`, but the current implementation already uses Effect, `@effect/cli`, schemas, and tagged errors. Read `README.md` before adding anything.
 
 The spawner is glue: it turns a versioned agent template into a Claude Code or Pi session. It never touches SQLite directly. It calls the `pithos` CLI subprocess for state.
 
@@ -47,7 +47,6 @@ If you change argv building, prompt position, env injection, or hook wiring:
 
 1. Update `src/harness.ts` and the injected harness service.
 2. Update `src/main.ts` envelope shape if you add output fields.
-3. Update `HOOKS.md` plus the harness-specific README (`claude-plugin/` or `pi-extension/`) when the shared contract changes.
-4. Update `README.md` and/or `HOOKS.md` when the external contract changes.
-5. Refresh tests/snapshots.
-6. Manual real-spawn smoke (HITL) — confirm the agent actually starts working, not idle at `❯`.
+3. Update `README.md` plus the harness-specific README (`claude-plugin/` or `pi-extension/`) when the shared contract changes.
+4. Refresh tests/snapshots.
+5. Manual real-spawn smoke (HITL) — confirm the agent actually starts working, not idle at `❯`.

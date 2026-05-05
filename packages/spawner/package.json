@@ -3,9 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./pi-extension"
+    ]
   },
   "bin": {
     "pandora-spawn": "./bin/pandora-spawn"

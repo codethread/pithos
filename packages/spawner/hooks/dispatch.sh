@@ -4,5 +4,5 @@
 case "${1:-}" in
   PreToolUse) pithos heartbeat --run "$PITHOS_RUN_ID" --hook PreToolUse --throttle-seconds 60 >/dev/null 2>&1 || true ;;
   SessionEnd) pithos run end --run "$PITHOS_RUN_ID" --status ended >/dev/null 2>&1 || true ;;
-  *)          printf '{"systemMessage":"pandora-spawn dispatch.sh: unknown hook event %s; check packages/spawner/HOOKS.md and harness adapter wiring"}\n' "${1:-<empty>}" ;;
+  *)          printf '{"systemMessage":"pandora-spawn dispatch.sh: unknown hook event %s; check packages/spawner/README.md#harness-hooks and harness adapter wiring"}\n' "${1:-<empty>}" ;;
 esac

@@ -18,12 +18,12 @@ pithos <command> --help              # per-command flags + examples + exit codes
 - `pithos init` — create or migrate the SQLite store (idempotent).
 - `pithos scope upsert --kind {global|repo|worktree} --path <path>` — register the unit-of-work scope.
 - `pithos run register|end` — agent session lifecycle.
-- `pithos enqueue` — add a task to a scope with a capability.
+- `pithos enqueue` — add a task to a scope with a capability and optional repeatable `--depends-on` blockers.
 - `pithos claim` — atomic claim with lease + fencing token.
 - `pithos heartbeat` — extend lease while working; throttled.
 - `pithos complete|fail` — terminate a claim, fenced.
 - `pithos artifact add` — attach a worker-completion or other artifact to a task.
-- `pithos inspect scope|run|task` — read structured state.
+- `pithos inspect scope|run|task` — read structured state; `inspect task` includes direct dependencies, dependents, unresolved blockers, supersession links, and artifacts.
 - `pithos tail [--limit N]` — recent events.
 - `pithos sweep` — requeue expired leases, dead-letter exhausted tasks, mark stale runs.
 - `pithos briefing --agent pandora` — markdown briefing with `as_of_event_id` watermark.

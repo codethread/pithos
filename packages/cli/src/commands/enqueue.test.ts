@@ -55,6 +55,22 @@ describe("enqueueCommand (unit — fake DB)", () => {
     )
     expect(Exit.isFailure(exit)).toBe(true)
   })
+
+  it("fails VALIDATION_ERROR when duplicate --depends-on IDs are supplied", async () => {
+    const layer = Layer.mergeAll(makeDbServiceTest(), makeIdServiceTest([]), makeFsServiceTest(), silentOutput)
+    const exit = await runEff(
+      Effect.provide(
+        enqueueCommand({
+          scope: "global",
+          capability: "watch",
+          title: "Test",
+          dependsOn: ["task_a", "task_a"],
+        }),
+        layer,
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
 })
 
 describe("inspectTaskCommand (unit — fake DB)", () => {

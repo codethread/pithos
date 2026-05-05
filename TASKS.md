@@ -40,7 +40,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 1. Direct dependency authoring + task inspect
 - **Type:** AFK
-- **Status:** pending
+- **Status:** complete
 - **Blocked by:** none
 - **User stories covered:** US1, US2, US4, US6
 - **Primary files:**

@@ -82,3 +82,17 @@ export class EventRow extends Schema.Class<EventRow>("EventRow")({
 export class MigrationRow extends Schema.Class<MigrationRow>("MigrationRow")({
   version: Schema.Number,
 }) {}
+
+export class TaskDependencyRow extends Schema.Class<TaskDependencyRow>("TaskDependencyRow")({
+  task_id: Schema.String,
+  depends_on_task_id: Schema.String,
+  created_at: Schema.String,
+}) {}
+
+export class TaskSupersessionRow extends Schema.Class<TaskSupersessionRow>("TaskSupersessionRow")({
+  old_task_id: Schema.String,
+  new_task_id: Schema.String,
+  created_by_run_id: Schema.NullOr(Schema.String),
+  reason: Schema.String,
+  created_at: Schema.String,
+}) {}

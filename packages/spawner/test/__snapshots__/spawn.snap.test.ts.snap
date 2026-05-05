@@ -60,9 +60,18 @@ Workers produce a COMPLETION REPORT at the end of their output. The report has s
 1. Extract the COMPLETION REPORT from the worker's output
 2. Run any verification (tests, lint) to confirm the result
 3. Attach the result: \`pithos artifact add --task  --run run_SNAPSHOT --kind worker-completion --title "<summary>" --body-file <report-file>\`
-4. Complete your task: \`pithos complete --run run_SNAPSHOT --token <token> \`
+4. **Kill the worker session immediately**: \`pandora-spawn kill --target <worker-session-id>\`
+5. Complete your task: \`pithos complete --run run_SNAPSHOT --token <token> \`
 
-If the worker gets stuck, restart it: \`pandora-spawn kill --target <tmux-session>\` then spawn a new one. If the task needs multiple workers, spawn them and watch all of them.
+### Worker lifecycle is your responsibility
+
+Workers do NOT self-terminate. Every worker session you spawn must be killed by you — there is no other cleanup path. Leaking worker sessions wastes resources.
+
+Rules:
+- Track every \`session_id\` returned by \`pandora-spawn\` — that is your authoritative list of live workers.
+- Kill a worker as soon as you have its COMPLETION REPORT and have attached the artifact. Do not wait until your own task ends.
+- If a worker gets stuck or you need to restart it: \`pandora-spawn kill --target <worker-session-id>\` then spawn a new one.
+- Before running the final \`pithos run end ... && pandora-spawn kill --target pithos-envy-session-\` command, walk your tracked \`session_id\` list and kill any you have not already killed. Use \`pandora-spawn kill\` and \`pandora-spawn status\` — do not reach for \`tmux\` directly.
 
 ## Pithos CLI for this session
 
@@ -151,45 +160,45 @@ Exit codes:
 
 [0;1mCOMMANDS[0m
 
-  - init                                                                                                                        
+  - init                                                                                                                          
 
-  - scope                                                                                                                       Manage pithos scopes
+  - scope                                                                                                                         Manage pithos scopes
 
-  - scope upsert [--kind global | repo | worktree] [--path text]                                                                
+  - scope upsert [--kind global | repo | worktree] [--path text]                                                                  
 
-  - run                                                                                                                         Manage pithos runs (Claude Code / worker / agent sessions)
+  - run                                                                                                                           Manage pithos runs (Claude Code / worker / agent sessions)
 
-  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]           
+  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]             
 
-  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                 
+  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                   
 
-  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] [--parent-id text]  
+  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] --depends-on text...  
 
-  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                             
+  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                               
 
-  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                           
+  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                             
 
-  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                      
+  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                        
 
-  - fail [--run text] [--token integer] [--reason text] <task-id>                                                               
+  - fail [--run text] [--token integer] [--reason text] <task-id>                                                                 
 
-  - artifact                                                                                                                    Manage pithos artifacts
+  - artifact                                                                                                                      Manage pithos artifacts
 
-  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                     
+  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                       
 
-  - inspect                                                                                                                     
+  - inspect                                                                                                                       
 
-  - inspect scope <scope-id>                                                                                                    
+  - inspect scope <scope-id>                                                                                                      
 
-  - inspect run <run-id>                                                                                                        
+  - inspect run <run-id>                                                                                                          
 
-  - inspect task <task-id>                                                                                                      
+  - inspect task <task-id>                                                                                                        
 
-  - tail [--limit integer]                                                                                                      
+  - tail [--limit integer]                                                                                                        
 
-  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                         
+  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                           
 
-  - briefing [--agent text]                                                                                                     
+  - briefing [--agent text]                                                                                                       
 
 
 \`\`\`
@@ -279,9 +288,18 @@ Workers produce a COMPLETION REPORT at the end of their output. The report has s
 1. Extract the COMPLETION REPORT from the worker's output
 2. Run any verification (tests, lint) to confirm the result
 3. Attach the result: \`pithos artifact add --task  --run run_SNAPSHOT --kind worker-completion --title "<summary>" --body-file <report-file>\`
-4. Complete your task: \`pithos complete --run run_SNAPSHOT --token <token> \`
+4. **Kill the worker session immediately**: \`pandora-spawn kill --target <worker-session-id>\`
+5. Complete your task: \`pithos complete --run run_SNAPSHOT --token <token> \`
 
-If the worker gets stuck, restart it: \`pandora-spawn kill --target <tmux-session>\` then spawn a new one. If the task needs multiple workers, spawn them and watch all of them.
+### Worker lifecycle is your responsibility
+
+Workers do NOT self-terminate. Every worker session you spawn must be killed by you — there is no other cleanup path. Leaking worker sessions wastes resources.
+
+Rules:
+- Track every \`session_id\` returned by \`pandora-spawn\` — that is your authoritative list of live workers.
+- Kill a worker as soon as you have its COMPLETION REPORT and have attached the artifact. Do not wait until your own task ends.
+- If a worker gets stuck or you need to restart it: \`pandora-spawn kill --target <worker-session-id>\` then spawn a new one.
+- Before running the final \`pithos run end ... && pandora-spawn kill --target pithos-envy-session-\` command, walk your tracked \`session_id\` list and kill any you have not already killed. Use \`pandora-spawn kill\` and \`pandora-spawn status\` — do not reach for \`tmux\` directly.
 
 ## Pithos CLI for this session
 
@@ -370,45 +388,45 @@ Exit codes:
 
 [0;1mCOMMANDS[0m
 
-  - init                                                                                                                        
+  - init                                                                                                                          
 
-  - scope                                                                                                                       Manage pithos scopes
+  - scope                                                                                                                         Manage pithos scopes
 
-  - scope upsert [--kind global | repo | worktree] [--path text]                                                                
+  - scope upsert [--kind global | repo | worktree] [--path text]                                                                  
 
-  - run                                                                                                                         Manage pithos runs (Claude Code / worker / agent sessions)
+  - run                                                                                                                           Manage pithos runs (Claude Code / worker / agent sessions)
 
-  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]           
+  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]             
 
-  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                 
+  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                   
 
-  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] [--parent-id text]  
+  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] --depends-on text...  
 
-  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                             
+  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                               
 
-  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                           
+  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                             
 
-  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                      
+  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                        
 
-  - fail [--run text] [--token integer] [--reason text] <task-id>                                                               
+  - fail [--run text] [--token integer] [--reason text] <task-id>                                                                 
 
-  - artifact                                                                                                                    Manage pithos artifacts
+  - artifact                                                                                                                      Manage pithos artifacts
 
-  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                     
+  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                       
 
-  - inspect                                                                                                                     
+  - inspect                                                                                                                       
 
-  - inspect scope <scope-id>                                                                                                    
+  - inspect scope <scope-id>                                                                                                      
 
-  - inspect run <run-id>                                                                                                        
+  - inspect run <run-id>                                                                                                          
 
-  - inspect task <task-id>                                                                                                      
+  - inspect task <task-id>                                                                                                        
 
-  - tail [--limit integer]                                                                                                      
+  - tail [--limit integer]                                                                                                        
 
-  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                         
+  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                           
 
-  - briefing [--agent text]                                                                                                     
+  - briefing [--agent text]                                                                                                       
 
 
 \`\`\`

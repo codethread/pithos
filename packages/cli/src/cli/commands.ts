@@ -225,12 +225,12 @@ const enqueue = Command.make(
       Options.optional,
       Options.withDescription("Run ID of the agent enqueuing the task"),
     ),
-    parentId: Options.text("parent-id").pipe(
-      Options.optional,
-      Options.withDescription("Parent task ID for sub-task relationships"),
+    dependsOn: Options.text("depends-on").pipe(
+      Options.repeated,
+      Options.withDescription("Direct dependency target task ID; repeat for multiple blockers"),
     ),
   },
-  ({ scope, capability, title, body, bodyFile, run, parentId }) =>
+  ({ scope, capability, title, body, bodyFile, run, dependsOn }) =>
     enqueueCommand({
       scope: opt(scope),
       capability: opt(capability),
@@ -238,18 +238,18 @@ const enqueue = Command.make(
       body: opt(body),
       bodyFile: opt(bodyFile),
       run: opt(run),
-      parentId: opt(parentId),
+      dependsOn,
     }),
 ).pipe(
   Command.withDescription(
     desc(
-      "Create a queued task with an associated task.created event",
+      "Create a queued task with direct dependency edges and a task.created event",
       "pithos enqueue",
       [
         "pithos enqueue --scope global --capability triage --title 'Review PR #42'",
-        "pithos enqueue --scope repo:work/repo --capability watch --title 'Watch build' --body-file task.md",
+        "pithos enqueue --scope repo:work/repo --capability watch --title 'Watch build' --depends-on task_design --depends-on task_api",
       ],
-      "0 success | 2 validation error | 3 scope not found",
+      "0 success | 1 user error | 2 validation error | 3 not found",
     ),
   ),
 )
@@ -533,7 +533,7 @@ const inspectTask = Command.make(
 ).pipe(
   Command.withDescription(
     desc(
-      "Inspect a task by ID (includes events and artifacts)",
+      "Inspect a task by ID with dependencies, dependents, blockers, supersession links, and artifacts",
       "pithos inspect task",
       ["pithos inspect task task_abc123"],
       "0 success | 3 not found",
@@ -545,6 +545,7 @@ const inspect = Command.make("inspect").pipe(
   Command.withDescription(
     HelpDoc.blocks([
       HelpDoc.p("Inspect persisted state: scope, run, or task."),
+      HelpDoc.p("Task inspection includes direct dependencies, direct dependents, unresolved blockers, and immediate supersession links."),
       HelpDoc.p("Examples:"),
       HelpDoc.p("  pithos inspect scope global"),
       HelpDoc.p("  pithos inspect run run_abc"),

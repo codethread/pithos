@@ -11,6 +11,7 @@ import Database from "better-sqlite3"
 
 import { enqueueCommand } from "../src/commands/enqueue.ts"
 import { inspectTaskCommand } from "../src/commands/inspect.ts"
+import { scopeUpsertCommand } from "../src/commands/scope.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest, IdServiceLive } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
@@ -46,6 +47,28 @@ describe("enqueueCommand (integration — real SQLite)", () => {
 
   const makeLayer = (ids: string[] = ["task_test1"]) =>
     Layer.mergeAll(dbLayer, makeIdServiceTest(ids), FsServiceLive, silentOutput)
+
+  const registerRun = async (runId: string): Promise<void> => {
+    await Effect.runPromise(
+      Effect.provide(
+        runRegisterCommand({ agentKind: "envy", run: runId }),
+        Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput),
+      ),
+    )
+  }
+
+  const upsertRepoScope = async (pathSuffix: string): Promise<string> => {
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        scopeUpsertCommand({ kind: "repo", path: join(tempDir, pathSuffix) }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
+    const parsed = JSON.parse(out.lines()[0]!) as { ok: boolean; scope: { id: string } }
+    expect(parsed.ok).toBe(true)
+    return parsed.scope.id
+  }
 
   it("creates a queued task with a task_ prefixed ID", async () => {
     await Effect.runPromise(
@@ -110,18 +133,21 @@ describe("enqueueCommand (integration — real SQLite)", () => {
     )
 
     const db = new Database(dbPath)
-    const row = db
-      .prepare("SELECT body FROM tasks")
-      .get() as { body: string } | undefined
+    const row = db.prepare("SELECT body FROM tasks").get() as { body: string } | undefined
     db.close()
 
     expect(row?.body).toBe("")
   })
 
-  it("appends a task.created event", async () => {
+  it("appends a task.created event with depends_on_task_ids", async () => {
     await Effect.runPromise(
       Effect.provide(
-        enqueueCommand({ scope: "global", capability: "watch", title: "Watch task" }),
+        enqueueCommand({
+          scope: "global",
+          capability: "watch",
+          title: "Watch task",
+          dependsOn: [],
+        }),
         makeLayer(),
       ),
     )
@@ -139,10 +165,12 @@ describe("enqueueCommand (integration — real SQLite)", () => {
       scope_id: string
       capability: string
       title: string
+      depends_on_task_ids: string[]
     }
     expect(payload.scope_id).toBe("global")
     expect(payload.capability).toBe("watch")
     expect(payload.title).toBe("Watch task")
+    expect(payload.depends_on_task_ids).toEqual([])
   })
 
   it("reads body from --body-file when provided", async () => {
@@ -197,31 +225,8 @@ describe("enqueueCommand (integration — real SQLite)", () => {
     expect(Exit.isFailure(exit)).toBe(true)
   })
 
-  it("stores scope_id, capability, status correctly", async () => {
-    await Effect.runPromise(
-      Effect.provide(
-        enqueueCommand({ scope: "global", capability: "triage", title: "Scoped task" }),
-        makeLayer(),
-      ),
-    )
-
-    const db = new Database(dbPath)
-    const row = db
-      .prepare("SELECT scope_id, capability, status FROM tasks")
-      .get() as { scope_id: string; capability: string; status: string } | undefined
-    db.close()
-
-    expect(row?.scope_id).toBe("global")
-    expect(row?.capability).toBe("triage")
-    expect(row?.status).toBe("queued")
-  })
-
   it("records created_by_run_id when --run is provided", async () => {
-    // First register a real run so the FK constraint is satisfied.
-    const runLayer = Layer.mergeAll(dbLayer, makeIdServiceTest(["run_creator"]), FsServiceLive, silentOutput)
-    await Effect.runPromise(
-      Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_creator" }), runLayer),
-    )
+    await registerRun("run_creator")
 
     await Effect.runPromise(
       Effect.provide(
@@ -249,39 +254,119 @@ describe("enqueueCommand (integration — real SQLite)", () => {
     expect(Exit.isFailure(exit)).toBe(true)
   })
 
-  it("stores parent_id when valid --parent-id is provided", async () => {
-    // Create a parent task first.
+  it("creates repeatable cross-scope dependency edges", async () => {
+    const repoScopeId = await upsertRepoScope("repo-a")
+
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: repoScopeId, capability: "build", title: "Backend blocker" }),
+        makeLayer(["task_backend"]),
+      ),
+    )
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({
+          scope: "global",
+          capability: "build",
+          title: "Frontend task",
+          dependsOn: ["task_backend"],
+        }),
+        makeLayer(["task_frontend"]),
+      ),
+    )
+
+    const db = new Database(dbPath)
+    const dependencyRows = db
+      .prepare(
+        `SELECT task_id, depends_on_task_id
+         FROM task_dependencies
+         ORDER BY task_id ASC, depends_on_task_id ASC`,
+      )
+      .all() as { task_id: string; depends_on_task_id: string }[]
+    db.close()
+
+    expect(dependencyRows).toEqual([
+      { task_id: "task_frontend", depends_on_task_id: "task_backend" },
+    ])
+  })
+
+  it("fails NOT_FOUND for an unknown --depends-on target", async () => {
+    const exit = await runEff(
+      Effect.provide(
+        enqueueCommand({
+          scope: "global",
+          capability: "triage",
+          title: "Bad dependency",
+          dependsOn: ["task_ghost"],
+        }),
+        makeLayer(),
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    const cause = Exit.isFailure(exit) ? String(exit.cause) : ""
+    expect(cause).toContain("Dependency task not found")
+  })
+
+  it("fails VALIDATION_ERROR for duplicate --depends-on values", async () => {
     await Effect.runPromise(
       Effect.provide(
         enqueueCommand({ scope: "global", capability: "triage", title: "Parent" }),
         makeLayer(["task_parent"]),
       ),
     )
-    // Create child task referencing parent.
+
+    const exit = await runEff(
+      Effect.provide(
+        enqueueCommand({
+          scope: "global",
+          capability: "triage",
+          title: "Child",
+          dependsOn: ["task_parent", "task_parent"],
+        }),
+        makeLayer(["task_child"]),
+      ),
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    const cause = Exit.isFailure(exit) ? String(exit.cause) : ""
+    expect(cause).toContain("Duplicate --depends-on task IDs")
+  })
+
+  it("fails USER_ERROR when a dependency target has already been superseded", async () => {
     await Effect.runPromise(
       Effect.provide(
-        enqueueCommand({ scope: "global", capability: "triage", title: "Child", parentId: "task_parent" }),
-        makeLayer(["task_child"]),
+        enqueueCommand({ scope: "global", capability: "triage", title: "Old blocker" }),
+        makeLayer(["task_old"]),
+      ),
+    )
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "triage", title: "Replacement blocker" }),
+        makeLayer(["task_new"]),
       ),
     )
 
     const db = new Database(dbPath)
-    const row = db
-      .prepare("SELECT parent_id FROM tasks WHERE id = 'task_child'")
-      .get() as { parent_id: string | null } | undefined
+    db.prepare(
+      `INSERT INTO task_supersessions (old_task_id, new_task_id, reason)
+       VALUES ('task_old', 'task_new', 'replacement')`,
+    ).run()
     db.close()
 
-    expect(row?.parent_id).toBe("task_parent")
-  })
-
-  it("fails NOT_FOUND for an unknown --parent-id", async () => {
     const exit = await runEff(
       Effect.provide(
-        enqueueCommand({ scope: "global", capability: "triage", title: "Bad parent", parentId: "task_ghost" }),
-        makeLayer(),
+        enqueueCommand({
+          scope: "global",
+          capability: "triage",
+          title: "Blocked by old task",
+          dependsOn: ["task_old"],
+        }),
+        makeLayer(["task_child"]),
       ),
     )
+
     expect(Exit.isFailure(exit)).toBe(true)
+    const cause = Exit.isFailure(exit) ? String(exit.cause) : ""
+    expect(cause).toContain("Dependency task task_old has been superseded by task_new")
   })
 
   it("fails VALIDATION_ERROR when both --body and --body-file are supplied", async () => {
@@ -297,11 +382,7 @@ describe("enqueueCommand (integration — real SQLite)", () => {
   })
 
   it("stores actor_run_id in task.created event when --run is supplied", async () => {
-    // Register a run first.
-    const runLayer = Layer.mergeAll(dbLayer, makeIdServiceTest(["run_actor"]), FsServiceLive, silentOutput)
-    await Effect.runPromise(
-      Effect.provide(runRegisterCommand({ agentKind: "envy", run: "run_actor" }), runLayer),
-    )
+    await registerRun("run_actor")
 
     await Effect.runPromise(
       Effect.provide(
@@ -324,30 +405,158 @@ describe("inspectTaskCommand (integration — real SQLite)", () => {
   let tempDir: string
   let dbPath: string
   let dbLayer: ReturnType<typeof makeDbServiceLive>
-  const taskId = "task_inspect1"
 
   beforeEach(async () => {
     tempDir = makeTempDir()
     dbPath = join(tempDir, "pithos.sqlite")
     dbLayer = makeDbServiceLive(dbPath)
     await Effect.runPromise(Effect.provide(initCommand, Layer.merge(dbLayer, silentOutput)))
-
-    const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
-    await Effect.runPromise(
-      Effect.provide(
-        enqueueCommand({ scope: "global", capability: "triage", title: "For inspection" }),
-        layer,
-      ),
-    )
   })
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it("returns the task row for a known ID", async () => {
-    const exit = await runEff(Effect.provide(inspectTaskCommand(taskId), Layer.merge(dbLayer, silentOutput)))
-    expect(Exit.isSuccess(exit)).toBe(true)
+  const makeLayer = (ids: string[] = ["task_test1"]) =>
+    Layer.mergeAll(dbLayer, makeIdServiceTest(ids), FsServiceLive, silentOutput)
+
+  const upsertRepoScope = async (pathSuffix: string): Promise<string> => {
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        scopeUpsertCommand({ kind: "repo", path: join(tempDir, pathSuffix) }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
+    const parsed = JSON.parse(out.lines()[0]!) as { ok: boolean; scope: { id: string } }
+    expect(parsed.ok).toBe(true)
+    return parsed.scope.id
+  }
+
+  it("returns machine-readable dependencies, dependents, and unresolved blockers without parent_id", async () => {
+    const repoScopeId = await upsertRepoScope("repo-b")
+
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: repoScopeId, capability: "build", title: "Backend blocker" }),
+        makeLayer(["task_backend"]),
+      ),
+    )
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({
+          scope: "global",
+          capability: "build",
+          title: "Frontend work",
+          dependsOn: ["task_backend"],
+        }),
+        makeLayer(["task_frontend"]),
+      ),
+    )
+
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(inspectTaskCommand("task_frontend"), Layer.merge(dbLayer, out.layer)),
+    )
+
+    expect(out.lines()).toHaveLength(1)
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      task: {
+        id: string
+        scope_id: string
+        claimable: boolean
+        unresolved_dependency_ids: string[]
+        parent_id?: string
+      }
+      dependencies: { id: string; scope_id: string; status: string; title: string }[]
+      dependents: { id: string; scope_id: string; status: string; title: string }[]
+      supersedes: unknown
+      superseded_by: unknown
+      artifacts: unknown[]
+    }
+
+    expect(parsed.ok).toBe(true)
+    expect(parsed.task.id).toBe("task_frontend")
+    expect(parsed.task.scope_id).toBe("global")
+    expect(parsed.task.claimable).toBe(false)
+    expect(parsed.task.unresolved_dependency_ids).toEqual(["task_backend"])
+    expect("parent_id" in parsed.task).toBe(false)
+    expect(parsed.dependencies).toEqual([
+      {
+        id: "task_backend",
+        scope_id: repoScopeId,
+        status: "queued",
+        title: "Backend blocker",
+      },
+    ])
+    expect(parsed.dependents).toEqual([])
+    expect(parsed.supersedes).toBeNull()
+    expect(parsed.superseded_by).toBeNull()
+    expect(parsed.artifacts).toEqual([])
+  })
+
+  it("returns direct dependents ordered as summaries", async () => {
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({ scope: "global", capability: "build", title: "Shared blocker" }),
+        makeLayer(["task_blocker"]),
+      ),
+    )
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({
+          scope: "global",
+          capability: "build",
+          title: "Dependent A",
+          dependsOn: ["task_blocker"],
+        }),
+        makeLayer(["task_dependent_a"]),
+      ),
+    )
+    await Effect.runPromise(
+      Effect.provide(
+        enqueueCommand({
+          scope: "global",
+          capability: "build",
+          title: "Dependent B",
+          dependsOn: ["task_blocker"],
+        }),
+        makeLayer(["task_dependent_b"]),
+      ),
+    )
+
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(inspectTaskCommand("task_blocker"), Layer.merge(dbLayer, out.layer)),
+    )
+
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      task: { id: string; claimable: boolean; unresolved_dependency_ids: string[] }
+      dependencies: unknown[]
+      dependents: { id: string; scope_id: string; status: string; title: string }[]
+    }
+
+    expect(parsed.ok).toBe(true)
+    expect(parsed.task.id).toBe("task_blocker")
+    expect(parsed.task.claimable).toBe(true)
+    expect(parsed.task.unresolved_dependency_ids).toEqual([])
+    expect(parsed.dependencies).toEqual([])
+    expect(parsed.dependents).toEqual([
+      {
+        id: "task_dependent_a",
+        scope_id: "global",
+        status: "queued",
+        title: "Dependent A",
+      },
+      {
+        id: "task_dependent_b",
+        scope_id: "global",
+        status: "queued",
+        title: "Dependent B",
+      },
+    ])
   })
 
   it("fails NOT_FOUND for an unknown task ID", async () => {

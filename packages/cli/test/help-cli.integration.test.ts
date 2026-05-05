@@ -225,6 +225,12 @@ describe("pithos enqueue --help", () => {
     expect(exitCode).toBe(0)
   })
 
+  it("documents repeatable --depends-on and no longer mentions --parent-id", async () => {
+    const { stdout } = await help(["enqueue", "--help"])
+    expect(stdout).toContain("depends-on")
+    expect(stdout).not.toContain("parent-id")
+  })
+
   it("contains required sections", async () => {
     const { stdout } = await help(["enqueue", "--help"])
     assertRequiredSections(stdout, "enqueue --help")
@@ -371,6 +377,12 @@ describe("pithos inspect --help", () => {
   it("inspect task --help exits 0", async () => {
     const { exitCode } = await help(["inspect", "task", "--help"])
     expect(exitCode).toBe(0)
+  })
+
+  it("inspect task help mentions blockers and dependents", async () => {
+    const { stdout } = await help(["inspect", "task", "--help"])
+    expect(stdout).toContain("dependencies")
+    expect(stdout).toContain("dependents")
   })
 
   it("contains required sections", async () => {

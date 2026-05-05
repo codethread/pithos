@@ -1,8 +1,65 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
+import { ArtifactRow, TaskRow } from "../db/rows.ts"
+import {
+  computeTaskClaimability,
+  loadDirectDependencies,
+  loadDirectDependents,
+  loadSupersededBySummary,
+  loadSupersedesSummary,
+  loadUnresolvedDependencyIds,
+} from "../domain/task-graph.ts"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 import { withCommandObservability } from "../layers/metrics.ts"
+
+const decodeTaskRow = (row: unknown): Effect.Effect<TaskRow, PithosError> =>
+  Schema.decodeUnknown(TaskRow)(row).pipe(
+    Effect.mapError(
+      () =>
+        new PithosError({
+          code: "INTERNAL_ERROR",
+          message: "TaskRow shape violation from DB",
+        }),
+    ),
+  )
+
+const decodeArtifactRow = (row: unknown): Effect.Effect<ArtifactRow, PithosError> =>
+  Schema.decodeUnknown(ArtifactRow)(row).pipe(
+    Effect.mapError(
+      () =>
+        new PithosError({
+          code: "INTERNAL_ERROR",
+          message: "ArtifactRow shape violation from DB",
+        }),
+    ),
+  )
+
+const toInspectableTask = (
+  task: TaskRow,
+  claimable: boolean,
+  unresolvedDependencyIds: readonly string[],
+) => ({
+  id: task.id,
+  scope_id: task.scope_id,
+  capability: task.capability,
+  status: task.status,
+  title: task.title,
+  body: task.body,
+  payload_json: task.payload_json,
+  lease_owner_run_id: task.lease_owner_run_id,
+  lease_until: task.lease_until,
+  fencing_token: task.fencing_token,
+  attempts: task.attempts,
+  max_attempts: task.max_attempts,
+  result_json: task.result_json,
+  created_by_run_id: task.created_by_run_id,
+  created_at: task.created_at,
+  updated_at: task.updated_at,
+  completed_at: task.completed_at,
+  claimable,
+  unresolved_dependency_ids: unresolvedDependencyIds,
+})
 
 /**
  * `pithos inspect scope <id>`
@@ -33,8 +90,8 @@ export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError
 /**
  * `pithos inspect task <id>`
  *
- * Fetches the task row and its associated artifacts, then prints as JSON.
- * Exits with code 3 (NOT_FOUND) if the task does not exist.
+ * Fetches the task, direct graph relationships, and artifacts, then prints
+ * machine-readable JSON.
  */
 export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
@@ -50,12 +107,32 @@ export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError,
       return
     }
 
+    const task = yield* decodeTaskRow(rows[0]!)
+    const dependencies = yield* loadDirectDependencies(id)
+    const dependents = yield* loadDirectDependents(id)
+    const unresolvedDependencyIds = yield* loadUnresolvedDependencyIds(id)
+    const supersedes = yield* loadSupersedesSummary(id)
+    const supersededBy = yield* loadSupersededBySummary(id)
+    const claimability = computeTaskClaimability(task, unresolvedDependencyIds, supersededBy)
+
     const artifacts = yield* db.query(
       `SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at ASC`,
       [id],
+    ).pipe(
+      Effect.flatMap((artifactRows) => Effect.forEach(artifactRows, decodeArtifactRow)),
     )
 
-    yield* output.print(JSON.stringify({ ok: true, task: rows[0], artifacts }))
+    yield* output.print(
+      JSON.stringify({
+        ok: true,
+        task: toInspectableTask(task, claimability.claimable, claimability.unresolvedDependencyIds),
+        dependencies,
+        dependents,
+        supersedes,
+        superseded_by: supersededBy,
+        artifacts,
+      }),
+    )
   }).pipe(
     Effect.withLogSpan("pithos.inspect.task"),
     withCommandObservability("inspect.task"),
@@ -100,12 +177,12 @@ Options:
 Subcommands:
   scope <id>    Show a scope by ID
   run <id>      Show a run by ID
-  task <id>     Show a task by ID (includes artifacts array)
+  task <id>     Show a task by ID with direct dependencies, dependents, blockers, supersession links, and artifacts
 
 Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
   { "ok": true, "run": { "id": "...", "agent_kind": "...", ... } }
-  { "ok": true, "task": { "id": "...", "status": "queued", ... }, "artifacts": [ ... ] }
+  { "ok": true, "task": { "id": "...", "status": "queued", "claimable": false, "unresolved_dependency_ids": [ ... ], ... }, "dependencies": [ ... ], "dependents": [ ... ], "supersedes": null, "superseded_by": null, "artifacts": [ ... ] }
 
 Examples:
   pithos inspect scope global

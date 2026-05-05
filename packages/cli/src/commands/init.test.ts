@@ -31,15 +31,15 @@ describe("initCommand (unit — fake DB)", () => {
 })
 
 describe("runMigrations (unit — fake DB)", () => {
-  it("applies migration 1 when schema_migrations returns no rows", async () => {
+  it("applies migrations when schema_migrations returns no rows", async () => {
     const exit = await Effect.runPromiseExit(
       Effect.provide(runMigrations, makeDbServiceTest()),
     )
     expect(Exit.isSuccess(exit)).toBe(true)
   })
 
-  it("skips migration 1 when it is already recorded in schema_migrations", async () => {
-    const seeded = new Map([["SELECT version FROM schema_migrations", [{ version: 1 }]]])
+  it("skips already-recorded migrations", async () => {
+    const seeded = new Map([["SELECT version FROM schema_migrations", [{ version: 1 }, { version: 2 }]]])
     const exit = await Effect.runPromiseExit(
       Effect.provide(runMigrations, makeDbServiceTest(seeded)),
     )

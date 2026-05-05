@@ -35,7 +35,8 @@ export type StatusCliInput = Schema.Schema.Type<typeof StatusCliInputSchema>
 
 export const NudgeCliInputSchema = Schema.Struct({
   target: Schema.NonEmptyString,
-  message: Schema.NonEmptyString,
+  message: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
+  messageStdin: Schema.Boolean,
 })
 export type NudgeCliInput = Schema.Schema.Type<typeof NudgeCliInputSchema>
 
@@ -102,17 +103,30 @@ export const makePandoraSpawnCommand = (handlers: CliHandlers) => {
         Options.withDescription("tmux target/session name"),
       ),
       message: Options.text("message").pipe(
-        Options.withSchema(Schema.NonEmptyString),
-        Options.withDescription("Message to send followed by Enter"),
+        Options.optional,
+        Options.withDescription("Message to send followed by Enter (mutually exclusive with --message-stdin)"),
+      ),
+      messageStdin: Options.boolean("message-stdin").pipe(
+        Options.withDescription(
+          "Read single-line message from stdin instead of --message (safe for special characters; embedded newlines are rejected)",
+        ),
       ),
     },
-    ({ target, message }) => handlers.nudge({ target, message }),
+    ({ target, message, messageStdin }) =>
+      handlers.nudge({
+        target,
+        messageStdin,
+        ...(Option.isSome(message) ? { message: message.value } : {}),
+      }),
   ).pipe(
     Command.withDescription(
       desc(
         "Send a nudge into a tmux-backed harness session",
         "pandora-spawn nudge",
-        ["pandora-spawn nudge --target pithos-envy-12345678 --message 'status?'"],
+        [
+          "pandora-spawn nudge --target pithos-envy-12345678 --message 'status?'",
+          "pandora-spawn nudge --target pithos-envy-12345678 --message-stdin <<'__PITHOS_NUDGE_END__'\n<tag>hello</tag>\n__PITHOS_NUDGE_END__",
+        ],
         "0 success | 2 validation error | 1 tmux error",
       ),
     ),

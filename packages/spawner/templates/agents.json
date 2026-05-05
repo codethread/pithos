@@ -6,7 +6,7 @@
       "commands": {
         "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
         "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
-        "nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
+        "nudge": "pandora-spawn nudge --target {{target}} --message-stdin <<'__PITHOS_NUDGE_END__'\n{{message}}\n__PITHOS_NUDGE_END__",
         "kill": "pandora-spawn kill --target {{target}}",
         "tty_status": "pandora-spawn tty-status --target {{target}}"
       },

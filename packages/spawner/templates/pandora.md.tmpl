@@ -57,7 +57,10 @@ Use these commands by intent. Do not depend on their implementation details unle
 
 - spawn: `{{cmd_spawn}}`
 - status: `{{cmd_status}}`
-- nudge: `{{cmd_nudge}}`
+- nudge (single-line message only; pipe via heredoc so the message reaches the session verbatim without shell quoting; if your message body happens to contain the heredoc delimiter on its own line, choose a different one):
+  ```bash
+  {{cmd_nudge}}
+  ```
 - kill: `{{cmd_kill}}`
 - tty_status: `{{cmd_tty_status}}`
 

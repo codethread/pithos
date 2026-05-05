@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
 import { CliConfig, Command } from "@effect/cli"
@@ -286,41 +285,7 @@ const nudge = (raw: NudgeCliInput) =>
       "VALIDATION_ERROR",
       "invalid nudge invocation",
     )
-    if (opts.messageStdin && opts.message !== undefined) {
-      return yield* Effect.fail(
-        new SpawnerError({
-          code: "VALIDATION_ERROR",
-          message: "--message and --message-stdin are mutually exclusive",
-        }),
-      )
-    }
-    if (!opts.messageStdin && opts.message === undefined) {
-      return yield* Effect.fail(
-        new SpawnerError({
-          code: "VALIDATION_ERROR",
-          message: "one of --message or --message-stdin is required",
-        }),
-      )
-    }
-    // heredocs always append a trailing newline; strip exactly one so the message is verbatim
-    const message = opts.messageStdin
-      ? readFileSync(0, "utf8").replace(/\n$/, "")
-      : opts.message!
-    if (message.length === 0) {
-      return yield* Effect.fail(
-        new SpawnerError({ code: "VALIDATION_ERROR", message: "nudge message must not be empty" }),
-      )
-    }
-    if (message.includes("\n")) {
-      return yield* Effect.fail(
-        new SpawnerError({
-          code: "VALIDATION_ERROR",
-          message:
-            "nudge message must be a single line; embedded newlines would submit the message prematurely in tmux",
-        }),
-      )
-    }
-    for (const command of tmuxNudgeCommands(opts.target, message)) {
+    for (const command of tmuxNudgeCommands(opts.target, opts.message)) {
       execText(command)
     }
   })

@@ -4,13 +4,13 @@ The Pithos agent roster, their capabilities, and how work routes through the sys
 
 ## Agent roster
 
-| Agent    | Type   | Claims      | Tools                    | CWD          | Role                                          |
-|----------|--------|-------------|--------------------------|--------------|-----------------------------------------------|
-| Pandora  | AFK    | —           | Bash, Read, Grep, Glob   | `~/.pandora` | Global orchestrator. Delegates, never does.   |
-| Toil     | AFK    | `triage`    | Bash, Read, Grep, Glob   | caller-cwd   | Breaks down goals, finds repos, enqueues.     |
-| Envy     | AFK    | `implement` | Bash, Read, Grep, Glob   | caller-cwd   | Watcher. Spawns workers, monitors, reports.   |
-| Worker   | AFK    | —           | Bash, Read, Write, Edit, Grep, Glob | caller-cwd | Ephemeral. Does mutation, reports, exits. Pithos-unaware. |
-| Greed    | HITL   | `design`    | TBD                      | caller-cwd   | Design partner. Research + discussion w/ Adam.|
+| Agent   | Type | Claims      | Toolset              | CWD          | Role                                                      |
+| ------- | ---- | ----------- | -------------------- | ------------ | --------------------------------------------------------- |
+| Pandora | AFK  | —           | Bash                 | `~/.pandora` | Global orchestrator. Delegates, never does.               |
+| Toil    | AFK  | `triage`    | RO Filesystem        | caller-cwd   | Breaks down goals, finds repos, enqueues.                 |
+| Envy    | AFK  | `implement` | Bash                 | caller-cwd   | Watcher. Spawns workers, monitors, reports.               |
+| Worker  | AFK  | —           | inherits user choice | caller-cwd   | Ephemeral. Does mutation, reports, exits. Pithos-unaware. |
+| Greed   | HITL | `design`    | Ro Filesystem        | caller-cwd   | Design partner. Research + discussion w/ Adam.            |
 
 ## Delegation chain
 
@@ -60,6 +60,7 @@ If Adam's brief already names a scope, Pandora goes straight to per-repo Toil. I
 Her only mutation is her own workspace (`~/.pandora`). She does not break down goals herself — that's Toil's job. She does not monitor workers — that's Envy's job.
 
 **How Pandora sees state** (the Pithos DB is her memory):
+
 - `pithos briefing --agent <agent>` — recent activity per agent, with task outcomes and artifacts
 - `pithos inspect task <id>` — full task detail, its run, and attached artifacts
 - `pithos inspect run <id>` — run state, session, parent chain

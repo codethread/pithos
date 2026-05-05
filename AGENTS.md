@@ -16,7 +16,7 @@ Fast dev run without the full build/link pipeline:
 pnpm --filter @pithos/cli start --help
 ```
 
-`pnpm run build` builds all workspace packages and links the `@pithos/cli` package bin (`pithos`) onto the global PATH via `package.json#bin`. The package scripts use esbuild directly; no `tsx`.
+`pnpm run build` builds all workspace packages and links the `pithos` and `pandora-spawn` bins onto the global PATH via `package.json#bin`. The package scripts use esbuild directly; no `tsx`.
 
 ## 1. Checks pass between commits
 
@@ -106,7 +106,7 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
   The logger emits JSON to stderr with span labels, level, timestamp, and annotations.
 - **Wrap non-trivial units of work in `Effect.withSpan`.** Spans give the causal tree; logs alone are flat. Span labels appear in every log line emitted inside the span.
 - **Errors carry context.** A `PithosError` with `code` + `message` an agent can grep beats a generic stack trace. No interactive-only debug paths — if the only way to understand a failure is attaching a debugger, add the log / span / structured error first.
-- **Session logs are the ground truth.** When investigating agent behavior during or after a run, inspect the Claude JSONL session log first — not raw tmux capture. See `docs/specs/spawner-spec.md#15-session-log-introspection` for the jq recipe.
+- **Session logs are the ground truth.** When investigating agent behavior during or after a run, inspect the harness JSONL session log first — not raw tmux capture. See `packages/spawner/README.md` for the session-log introspection recipe.
 
 ## Effect.ts
 
@@ -115,14 +115,11 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 
 ## Docs
 
-- `README.md`: Project intro and human-facing docs, discusses why, what and API boundaries
+- `README.md`: project intro, agent model, delegation chain, and current architecture
 - `CONTRIBUTING.md`: build, verify, commit baseline, and doc map
 - `AGENTS.md`: non-negotiable rules beyond what can be enforced statically, injected transparently into agents
 - `AGENT_LOOP.md`: autonomous implementation loop; intentionally kept at repo root
-- `docs/README.md`: index for specs and planned docs
-- `docs/specs/mvp-spec.md`: MVP product/domain spec
-- `docs/specs/technical-design.md`: technical contracts, DB schema, CLI shape, migrations
-- `docs/specs/spawner-spec.md`: `@pithos/spawner` / `pandora-spawn` package spec; includes session log introspection (§15)
-- `docs/planned/ambition.md`: long-term direction; do not overbuild from it
 - `scripts/tasks-adhoc.md`, then `scripts/tasks.md`: implementation queues
+- `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md`: CLI surface, package quality bar, add-a-command checklist
+- `packages/spawner/README.md`, `packages/spawner/HOOKS.md`, `packages/spawner/CONTRIBUTING.md`: spawner surface, hook contract, session-log introspection, package constraints
 - Each `packages/<package>/` repeats this pattern, providing more granular details as scope narrows

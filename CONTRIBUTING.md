@@ -52,22 +52,19 @@ Checks must be green before every commit. No "leftover issues", no "next commit"
 
 ## Doc map
 
-| When you want to…                                | Read…                             |
-| ------------------------------------------------ | --------------------------------- |
-| Browse project specs and planned docs            | `docs/README.md`                  |
-| Understand product intent                        | `docs/specs/mvp-spec.md`          |
-| Understand agent architecture and delegation      | `docs/evils-and-claims.md`        |
-| Understand long-term direction (don't overbuild) | `docs/planned/ambition.md`        |
-| Find the next slice to work on                   | `scripts/tasks-adhoc.md`, then `scripts/tasks.md` |
-| Understand engineering rules (fail loudly etc)   | `AGENTS.md`                       |
-| Touch DB schema, CLI shape, or migrations        | `docs/specs/technical-design.md`  |
-| Touch templates, hooks, or harness wiring        | `docs/specs/spawner-spec.md`      |
-| Touch the Claude Code plugin manifest or hooks   | `packages/spawner/claude-plugin/README.md` |
-| Look at prior art                                | `references/` (read-only)         |
+| When you want to… | Read… |
+| ---------------- | ----- |
+| Understand the product, agent model, and current architecture | `README.md` |
+| Find the next slice to work on | `scripts/tasks-adhoc.md`, then `scripts/tasks.md` |
+| Understand engineering rules (fail loudly etc) | `AGENTS.md` |
+| Touch DB schema, CLI shape, or migrations | `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md` |
+| Touch templates, hooks, harness wiring, or session status | `packages/spawner/README.md`, `packages/spawner/HOOKS.md`, `packages/spawner/CONTRIBUTING.md` |
+| Touch the Claude Code plugin manifest or hooks | `packages/spawner/claude-plugin/README.md` |
+| Look at prior art | `references/` (read-only) |
 
 ## Per-package contributing notes
 
 Each package has its own `CONTRIBUTING.md` with quality bar and add-a-feature checklist:
 
 - `packages/cli/CONTRIBUTING.md` — full Effect quality bar (tagged errors, schemas at IO, structured logs).
-- `packages/spawner/CONTRIBUTING.md` — relaxed bar per `docs/specs/spawner-spec.md` §2 (plain TS glue, one snapshot test).
+- `packages/spawner/CONTRIBUTING.md` — spawner package constraints, change checklist, and harness/template guidance.

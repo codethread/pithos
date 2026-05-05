@@ -4,10 +4,10 @@
 2. Read `scripts/tasks-adhoc.md` first, then `scripts/tasks.md`.
 3. Pick the first unimplemented task in `scripts/tasks-adhoc.md` whose `Blocked by` dependencies are complete; if none are available, pick the first unbuilt task in `scripts/tasks.md` whose `Blocked by` dependencies are complete.
 4. Read only the supporting docs needed for that task:
-   - `docs/specs/mvp-spec.md` for product/domain intent
-   - `docs/specs/technical-design.md` for implementation contracts
-   - `docs/planned/ambition.md` only for direction beyond MVP
-5. If the active queue file (`scripts/tasks-adhoc.md` or `scripts/tasks.md`) and supporting specs conflict, follow the queue file and flag the conflict in the report.
+   - `README.md` for product intent, agent model, and current architecture
+   - `packages/cli/README.md` / `packages/cli/CONTRIBUTING.md` for CLI contracts
+   - `packages/spawner/README.md` / `packages/spawner/HOOKS.md` / `packages/spawner/CONTRIBUTING.md` for spawner and hook contracts
+5. If the active queue file (`scripts/tasks-adhoc.md` or `scripts/tasks.md`) and supporting docs conflict, follow the queue file and flag the conflict in the report.
 6. Implement exactly that slice in `~/dev/pithos`.
 7. Validate the slice's `Vertical slice` acceptance criteria plus standard checks:
    - `pnpm lint`
@@ -28,7 +28,7 @@
 - Build from scratch in `~/dev/pithos`; existing vault scripts are prior art only.
 - Do not skip ahead to blocked slices.
 - Do not add daemon/spawn automation/recipe engine before the MVP slices ask for it.
-- Don't expand the spawner package surface beyond `docs/specs/spawner-spec.md`.
+- Don't expand the spawner package surface beyond the contracts documented in `packages/spawner/README.md` and `packages/spawner/HOOKS.md`.
 - Do not use real Claude/tmux in AFK tests.
 - Docker/Podman DB smoke tests are okay; real Claude-in-container is HITL only.
 - Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness.

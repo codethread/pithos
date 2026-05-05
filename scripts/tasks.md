@@ -1,7 +1,7 @@
 # Pithos MVP tracer-bullet slices
 
 **Status:** Core MVP slices built; slice 21 pending  
-**Source specs:** `docs/specs/mvp-spec.md`, `docs/specs/technical-design.md`
+**Source docs:** `README.md`, `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md`
 
 ## User stories covered
 
@@ -130,8 +130,8 @@
     **Type:** AFK
     **Blocked by:** 15
     **User stories covered:** US10
-    **Spec:** `docs/specs/spawner-spec.md` (authoritative — read this before starting).
-    **Vertical slice:** Create a new workspace package `packages/spawner` (workspace name `@pithos/spawner`, global bin `pandora-spawn`). Ship template files `templates/{_common.md, envy.md.tmpl, toil.md.tmpl}`, a single hook script `hooks/claude-code/dispatch.sh`, frontmatter parser + `{{var}}` renderer, and a claude/fake harness module. Default verb is spawn (`pandora-spawn --agent envy --scope ...`); fake harness emits `{ env, argv, prompt }` JSON instead of execing claude. **Quality bar is intentionally lower than `@pithos/cli`** — minimal Effect plumbing, no tagged-error hierarchy, ONE Vitest snapshot smoke test exercising the fake harness end-to-end. No agent files in `.claude/agents/`; templates live entirely inside this package so they don't leak into consumer repos. Drop the `skills/pithos-cli/SKILL.md` direction — its content moves into `templates/_common.md` as a partial. See spec §2 for the strict simplicity bar.
+    **Docs:** `packages/spawner/README.md`, `packages/spawner/HOOKS.md`, `packages/spawner/CONTRIBUTING.md` (authoritative — read these before starting).
+    **Vertical slice:** Create a new workspace package `packages/spawner` (workspace name `@pithos/spawner`, global bin `pandora-spawn`). Ship template files `templates/{_common.md, envy.md.tmpl, toil.md.tmpl}`, a single hook script `hooks/dispatch.sh`, frontmatter parser + `{{var}}` renderer, and a claude/fake harness module. Default verb is spawn (`pandora-spawn --agent envy --scope ...`); fake harness emits `{ env, argv, prompt }` JSON instead of execing claude. Templates live entirely inside this package so they don't leak into consumer repos. Drop the `skills/pithos-cli/SKILL.md` direction — its content moves into `templates/_common.md` as a partial.
 
 17. **Title:** Wire heartbeat/SessionEnd hook via `pandora-spawn hooks install`
     **Status:** Built

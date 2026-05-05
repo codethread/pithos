@@ -18,7 +18,8 @@ The package keeps Pithos state in the `pithos` CLI subprocess and treats the har
 
 ```sh
 pandora-spawn --agent envy --scope repo:work/example --harness fake
-pandora-spawn --agent envy --scope repo:work/example --harness pi
+pandora-spawn --agent envy --scope repo:work/example --harness claude
+pandora-spawn --agent pandora --scope repo:work/example --harness pi
 pandora-spawn --agent envy --scope repo:work/example --preview
 pandora-spawn templates list
 ```
@@ -39,10 +40,12 @@ All user-tuned agent config lives in `templates/`:
 
 ```text
 templates/
-  agents.json      # agent manifest list
-  _common.md       # shared include text
-  envy.md.tmpl     # system prompt template for envy
-  toil.md.tmpl     # system prompt template for toil
+  agents.json       # agent manifest list
+  _common.md        # shared include text
+  pandora.md.tmpl   # system prompt template for pandora
+  envy.md.tmpl      # system prompt template for envy
+  toil.md.tmpl      # system prompt template for toil
+  worker.md.tmpl    # system prompt template for worker
 ```
 
 ### `agents.json`
@@ -67,9 +70,9 @@ templates/
     {
       "agent": "envy",
       "harness": {
-        "kind": "pi",
-        "model": "github-copilot/claude-sonnet-4.6",
-        "tools": ["bash", "read", "grep", "find"],
+        "kind": "claude",
+        "model": "sonnet",
+        "tools": ["Bash", "Read", "Edit", "Write", "Grep", "Glob", "LS"],
         "system_prompt_mode": "replace"
       },
       "capability": "implement",
@@ -158,13 +161,13 @@ pandora-spawn --agent envy \
   --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
   --harness fake | jq .
 
-# 4b. Same spawn with real Claude
+# 4b. Same spawn with real Claude (matches Envy's manifest)
 pandora-spawn --agent envy \
   --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
   --harness claude
 
-# 4c. Same spawn with Pi
-pandora-spawn --agent envy \
+# 4c. Pi-backed spawn (matches Pandora's manifest)
+pandora-spawn --agent pandora \
   --scope repo:$(echo "$PWD" | sed "s|$HOME/||g") \
   --harness pi
 
@@ -192,3 +195,41 @@ TTY regardless of how `pandora-spawn` was invoked. The JSON envelope returns
 
 Hooks no-op in normal sessions — they only activate when `PITHOS_AGENT`
 and `PITHOS_RUN_ID` are set, which `pandora-spawn` injects automatically.
+
+## Session log introspection
+
+Session JSONL logs are the ground truth for understanding what an agent actually did.
+Prefer them over raw tmux capture.
+
+Claude Code logs live under:
+
+```text
+~/.claude/projects/<project-dir>/<session-id>.jsonl
+```
+
+Pi logs live under:
+
+```text
+~/.pi/agent/sessions/**/<session-id>.jsonl
+```
+
+Quick recipes:
+
+```sh
+# Find a session log
+find ~/.claude/projects ~/.pi/agent/sessions -name '<session-id>.jsonl'
+
+LOG="$(find ~/.claude/projects ~/.pi/agent/sessions -name '<session-id>.jsonl' | head -n1)"
+
+# Assistant text
+jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' "$LOG"
+
+# Claude Code Bash tool calls
+jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Bash") | .input.command' "$LOG"
+```
+
+For live summaries without raw jq, use:
+
+```sh
+pandora-spawn status --session-id <session-id> --lines 20
+```

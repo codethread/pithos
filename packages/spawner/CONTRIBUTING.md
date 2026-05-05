@@ -1,18 +1,19 @@
 # Contributing to `@pithos/spawner`
 
-This package is **intentionally less robust** than `@pithos/cli`. Read `../../docs/specs/spawner-spec.md` §2 before adding anything.
+This package is still lighter-weight than `@pithos/cli`, but the current implementation already uses Effect, `@effect/cli`, schemas, and tagged errors. Read `README.md` and `HOOKS.md` before adding anything.
 
-The spawner is glue: it turns a versioned agent template into a Claude Code or Pi session. It never touches SQLite. It calls the `pithos` CLI subprocess for state.
+The spawner is glue: it turns a versioned agent template into a Claude Code or Pi session. It never touches SQLite directly. It calls the `pithos` CLI subprocess for state.
 
-## Quality bar (intentionally low)
+## Quality bar
 
-- Plain TypeScript and a few small modules. The one allowed Effect abstraction is the injected harness service used to swap Claude/Pi/fake adapters. No DB imports.
-- **No tagged-error hierarchy.** Throw with a clear message; the wrapper prints it; the user re-runs.
-- Keep tests light: snapshot/integration smoke for spawn shape plus focused unit tests for harness-specific parsing/mapping.
-- Hooks are not tested. They are ~10 lines of bash (`hooks/dispatch.sh`); manual spawn proves they fire.
-- Lint and typecheck still apply. No `any`. Beyond that, prefer the smallest correct code.
+- Keep the package small and glue-focused. No DB imports.
+- Follow the current codebase pattern when touching existing modules: Effect-based CLI handlers, schema-decoded boundaries, tagged `SpawnerError` failures.
+- Prefer adding to the existing harness/template/status seams over inventing new abstractions.
+- Keep tests light but real: snapshot/integration smoke for spawn shape plus focused unit tests for harness/template/status parsing.
+- Hooks are still not tested directly; manual spawn proves they fire.
+- Lint and typecheck still apply. No `any`.
 
-If you find yourself adding speculative abstractions beyond the harness adapter seam, **stop**. This is glue.
+If you find yourself adding speculative orchestration beyond the existing harness/template/status seams, **stop**. This is still glue.
 
 ## Build
 
@@ -47,6 +48,6 @@ If you change argv building, prompt position, env injection, or hook wiring:
 1. Update `src/harness.ts` and the injected harness service.
 2. Update `src/main.ts` envelope shape if you add output fields.
 3. Update `HOOKS.md` plus the harness-specific README (`claude-plugin/` or `pi-extension/`) when the shared contract changes.
-4. Update `../../docs/specs/spawner-spec.md` §8 step 10 + §9.
+4. Update `README.md` and/or `HOOKS.md` when the external contract changes.
 5. Refresh tests/snapshots.
 6. Manual real-spawn smoke (HITL) — confirm the agent actually starts working, not idle at `❯`.

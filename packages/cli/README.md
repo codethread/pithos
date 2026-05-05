@@ -37,7 +37,7 @@ The `--help` output is the contract — agents read it instead of memorising fla
 | `PITHOS_TASK_ID`       | Current claimed task id                                |
 | `PITHOS_FENCING_TOKEN` | Current claim's fencing token                          |
 | `PITHOS_SCOPE_ID`      | Scope hint for the current session                     |
-| `PITHOS_OUTPUT`        | `json` (default) or `text`                             |
+| `PITHOS_OUTPUT`        | Output mode hint injected into spawned sessions; current command output is JSON except `briefing`, which renders markdown |
 | `PITHOS_LOG_LEVEL`     | `trace`/`debug`/`info`/`warning`/`error`/`fatal`/`none`; default `none` (silent) |
 
 ## Exit codes
@@ -51,7 +51,7 @@ The `--help` output is the contract — agents read it instead of memorising fla
 | `4`  | Stale lease/fencing token        |
 | `5`  | No claimable work                |
 
-Always check exit codes before parsing output. Successful mutations write JSON `{ "ok": true, ... }` to stdout; failures write JSON errors to stderr.
+Successful structured commands write JSON `{ "ok": true, ... }` to stdout; failures write JSON errors to stderr. `pithos briefing` is the human-facing exception and renders markdown.
 
 ## Layout
 

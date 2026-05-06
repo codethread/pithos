@@ -46,7 +46,7 @@ type GraphEdge =
 type GraphSelector =
   | { readonly kind: "task"; readonly value: string }
   | { readonly kind: "scope"; readonly value: string }
-  | { readonly kind: "live" }
+  | { readonly kind: "current" }
 
 interface GraphResponse {
   readonly ok: boolean
@@ -312,7 +312,7 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
     expectClosedGraph(parsed.graph)
   })
 
-  it("returns the live graph and includes cancelled neighbors only when required for closure", async () => {
+  it("returns the current graph and includes cancelled neighbours only when required for closure", async () => {
     const fixture = await seedSupersededGraph({ createCancelledHistoricalDependent: true })
     await enqueue("task_f", {
       scope: fixture.frontendScopeId,
@@ -322,10 +322,10 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
     })
     markTaskStatus("task_f", "cancelled")
 
-    const parsed = await inspectGraph({ kind: "live" })
+    const parsed = await inspectGraph({ kind: "current" })
 
     expect(parsed.ok).toBe(true)
-    expect(parsed.graph.selector).toEqual({ kind: "live" })
+    expect(parsed.graph.selector).toEqual({ kind: "current" })
     expect(parsed.graph.nodes).toEqual(fixture.expectedNodes)
     expect(parsed.graph.edges).toEqual(fixture.expectedEdges)
     expect(parsed.graph.nodes.some((node) => node.id === "task_e")).toBe(false)

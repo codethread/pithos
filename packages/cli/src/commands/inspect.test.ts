@@ -17,7 +17,7 @@ async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Ex
 describe("decodeInspectGraphSelector", () => {
   it("fails VALIDATION_ERROR when no selector is provided", async () => {
     const exit = await runEff(
-      decodeInspectGraphSelector({ taskId: undefined, scopeId: undefined, live: false }),
+      decodeInspectGraphSelector({ taskId: undefined, scopeId: undefined, current: false }),
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
@@ -25,7 +25,7 @@ describe("decodeInspectGraphSelector", () => {
 
   it("fails VALIDATION_ERROR when multiple selectors are provided", async () => {
     const exit = await runEff(
-      decodeInspectGraphSelector({ taskId: "task_a", scopeId: "scope_a", live: false }),
+      decodeInspectGraphSelector({ taskId: "task_a", scopeId: "scope_a", current: false }),
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
@@ -55,11 +55,11 @@ describe("inspectGraphCommand (unit — fake DB)", () => {
     expect(Exit.isFailure(exit)).toBe(true)
   })
 
-  it("returns an empty graph for --live when there are no non-cancelled tasks", async () => {
+  it("returns an empty graph for --current when there are no non-cancelled tasks", async () => {
     const out = makeOutputServiceTest()
     await Effect.runPromise(
       Effect.provide(
-        inspectGraphCommand({ kind: "live" }),
+        inspectGraphCommand({ kind: "current" }),
         Layer.merge(makeDbServiceTest(), out.layer),
       ),
     )
@@ -68,7 +68,7 @@ describe("inspectGraphCommand (unit — fake DB)", () => {
       JSON.stringify({
         ok: true,
         graph: {
-          selector: { kind: "live" },
+          selector: { kind: "current" },
           nodes: [],
           edges: [],
         },

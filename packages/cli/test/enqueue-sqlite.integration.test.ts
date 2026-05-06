@@ -433,7 +433,7 @@ describe("inspectTaskCommand (integration — real SQLite)", () => {
     return parsed.scope.id
   }
 
-  it("returns machine-readable dependencies, dependents, and unresolved blockers without parent_id", async () => {
+  it("returns machine-readable dependencies, dependents, and unresolved blockers", async () => {
     const repoScopeId = await upsertRepoScope("repo-b")
 
     await Effect.runPromise(
@@ -467,7 +467,6 @@ describe("inspectTaskCommand (integration — real SQLite)", () => {
         scope_id: string
         claimable: boolean
         unresolved_dependency_ids: string[]
-        parent_id?: string
       }
       dependencies: { id: string; scope_id: string; status: string; title: string }[]
       dependents: { id: string; scope_id: string; status: string; title: string }[]
@@ -481,7 +480,6 @@ describe("inspectTaskCommand (integration — real SQLite)", () => {
     expect(parsed.task.scope_id).toBe("global")
     expect(parsed.task.claimable).toBe(false)
     expect(parsed.task.unresolved_dependency_ids).toEqual(["task_backend"])
-    expect("parent_id" in parsed.task).toBe(false)
     expect(parsed.dependencies).toEqual([
       {
         id: "task_backend",

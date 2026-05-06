@@ -11,8 +11,6 @@ import { PithosError as PE } from "../errors/errors.ts"
 interface Migration {
   readonly version: number
   readonly name: string
-  /** Optional preflight run inside the migration transaction before any SQL. */
-  readonly preflight?: Effect.Effect<void, PithosError, DbService>
   /** Individual SQL statements (each run separately). */
   readonly statements: readonly string[]
 }
@@ -56,7 +54,6 @@ const MIGRATION_1: Migration = {
     )`,
     `CREATE TABLE IF NOT EXISTS tasks (
       id                 TEXT PRIMARY KEY,
-      parent_id          TEXT REFERENCES tasks(id),
       scope_id           TEXT NOT NULL REFERENCES scopes(id),
       capability         TEXT NOT NULL,
       status             TEXT NOT NULL CHECK (status IN ('queued','claimed','running','done','failed','dead_letter','cancelled')),
@@ -73,6 +70,21 @@ const MIGRATION_1: Migration = {
       created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       completed_at       TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS task_dependencies (
+      task_id            TEXT NOT NULL REFERENCES tasks(id),
+      depends_on_task_id TEXT NOT NULL REFERENCES tasks(id),
+      created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (task_id, depends_on_task_id),
+      CHECK (task_id <> depends_on_task_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS task_supersessions (
+      old_task_id       TEXT PRIMARY KEY REFERENCES tasks(id),
+      new_task_id       TEXT NOT NULL UNIQUE REFERENCES tasks(id),
+      created_by_run_id TEXT REFERENCES runs(id),
+      reason            TEXT NOT NULL,
+      created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CHECK (old_task_id <> new_task_id)
     )`,
     `CREATE TABLE IF NOT EXISTS artifacts (
       id            TEXT PRIMARY KEY,
@@ -93,85 +105,17 @@ const MIGRATION_1: Migration = {
       type         TEXT NOT NULL,
       payload_json TEXT NOT NULL DEFAULT '{}'
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_tasks_claimable ON tasks(scope_id, capability, status, lease_until)`,
-    `CREATE INDEX IF NOT EXISTS idx_tasks_parent    ON tasks(parent_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_runs_status     ON runs(status, last_heartbeat_at)`,
-    `CREATE INDEX IF NOT EXISTS idx_events_task     ON events(task_id, id)`,
-    `CREATE INDEX IF NOT EXISTS idx_events_created  ON events(id)`,
+    `CREATE INDEX IF NOT EXISTS idx_tasks_claimable        ON tasks(scope_id, capability, status, lease_until)`,
+    `CREATE INDEX IF NOT EXISTS idx_task_dependencies_task ON task_dependencies(task_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker ON task_dependencies(depends_on_task_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_task_supersessions_new ON task_supersessions(new_task_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_runs_status           ON runs(status, last_heartbeat_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_events_task           ON events(task_id, id)`,
+    `CREATE INDEX IF NOT EXISTS idx_events_created        ON events(id)`,
   ],
 }
 
-const MIGRATION_2: Migration = {
-  version: 2,
-  name: "task_graph_tables",
-  preflight: Effect.gen(function* () {
-    const db = yield* DbService
-    const rows = yield* db.query(
-      `SELECT id
-       FROM tasks
-       WHERE parent_id IS NOT NULL
-         AND status IN ('queued', 'claimed', 'running')
-       ORDER BY created_at ASC, id ASC`,
-    )
-
-    const offendingIds = yield* Effect.all(
-      rows.map((row) =>
-        Schema.decodeUnknown(Schema.Struct({ id: Schema.String }))(row).pipe(
-          Effect.map((decoded) => decoded.id),
-          Effect.mapError(
-            () =>
-              new PE({
-                code: "INTERNAL_ERROR",
-                message: "migration preflight task row shape violation",
-              }),
-          ),
-        ),
-      ),
-    )
-
-    if (offendingIds.length > 0) {
-      yield* Effect.fail(
-        new PE({
-          code: "USER_ERROR",
-          message:
-            "Migration 2 blocked by unfinished tasks still using legacy parent_id: " +
-            offendingIds.join(", ") +
-            ". Finish, cancel, or re-enqueue replacement tasks with --depends-on after upgrading, then re-run pithos init. Migration only backfills parent_id rows once no unfinished legacy links remain.",
-        }),
-      )
-      return
-    }
-  }),
-  statements: [
-    `CREATE TABLE IF NOT EXISTS task_dependencies (
-      task_id            TEXT NOT NULL REFERENCES tasks(id),
-      depends_on_task_id TEXT NOT NULL REFERENCES tasks(id),
-      created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (task_id, depends_on_task_id),
-      CHECK (task_id <> depends_on_task_id)
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_task_dependencies_task
-      ON task_dependencies(task_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker
-      ON task_dependencies(depends_on_task_id)`,
-    `CREATE TABLE IF NOT EXISTS task_supersessions (
-      old_task_id       TEXT PRIMARY KEY REFERENCES tasks(id),
-      new_task_id       TEXT NOT NULL UNIQUE REFERENCES tasks(id),
-      created_by_run_id TEXT REFERENCES runs(id),
-      reason            TEXT NOT NULL,
-      created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CHECK (old_task_id <> new_task_id)
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
-      ON task_supersessions(new_task_id)`,
-    `INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_task_id)
-     SELECT id, parent_id
-     FROM tasks
-     WHERE parent_id IS NOT NULL`,
-  ],
-}
-
-const MIGRATIONS: readonly Migration[] = [MIGRATION_1, MIGRATION_2]
+const MIGRATIONS: readonly Migration[] = [MIGRATION_1]
 
 // ---------------------------------------------------------------------------
 // Runner
@@ -223,9 +167,6 @@ export const runMigrations: Effect.Effect<void, PithosError, DbService> = Effect
       if (!appliedVersions.has(migration.version)) {
         yield* db.withTransaction(
           Effect.gen(function* () {
-            if (migration.preflight) {
-              yield* Effect.provideService(migration.preflight, DbService, db)
-            }
             for (const sql of migration.statements) {
               yield* db.run(sql)
             }

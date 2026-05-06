@@ -10,3 +10,11 @@
 - Attach a useful artifact before completing substantial work. For worker-backed `implement` work, that artifact kind is `worker-completion`.
 - Queue capabilities are `triage`, `design`, or `implement`. Recipe stage names (such as `execute`, `watch`, `run`) must never be used as `--capability` values.
 - For mutating `implement` work, Envy is the coordinator. A separate worker sub-session performs repo/worktree mutations; direct coordinator-side mutation does not satisfy the worker-backed execution contract.
+- Use the graph-aware read APIs before guessing from prose:
+  - `pithos inspect task <id>` shows the task, direct dependencies, direct dependents, unresolved blockers, supersession links, and artifacts.
+  - `pithos inspect graph --task <id>` shows the closed dependency/supersession graph around one task.
+  - `pithos inspect graph --scope <scope-id>` shows the closed graph seeded from non-cancelled work in one scope.
+  - `pithos inspect graph --current` shows the closed graph for all non-cancelled work.
+- Use `pithos enqueue --depends-on <task-id>` (repeatable) to encode blocking relationships directly in Pithos. Dependencies may point across scopes.
+- Use `pithos supersede <task-id> --run <run-id> --reason <text>` when a queued task is wrong and must be replaced without losing history. Claimed/running tasks cannot be superseded.
+- `claim` only returns ready queued work. Blocked tasks stay queued and must be understood via `inspect` or `briefing`.

@@ -44,9 +44,9 @@ Workers produce a COMPLETION REPORT at the end of their output. The report has s
 
 1. Extract the COMPLETION REPORT from the worker's output
 2. Run any verification (tests, lint) to confirm the result
-3. Attach the result: `pithos artifact add --task {{task_id}} --run {{run_id}} --kind worker-completion --title "<summary>" --body-file <report-file>`
+3. Attach the result: `pithos artifact add --task <claimed-task-id> --run {{run_id}} --kind worker-completion --title "<summary>" --body-file <report-file>`
 4. **Kill the worker session immediately**: `pandora-spawn kill --target <worker-session-id>`
-5. Complete your task: `pithos complete --run {{run_id}} --token <token> {{task_id}}`
+5. Complete your task: `pithos complete --run {{run_id}} --token <token> <claimed-task-id>`
 
 ### Worker lifecycle is your responsibility
 
@@ -57,6 +57,15 @@ Rules:
 - Kill a worker as soon as you have its COMPLETION REPORT and have attached the artifact. Do not wait until your own task ends.
 - If a worker gets stuck or you need to restart it: `pandora-spawn kill --target <worker-session-id>` then spawn a new one.
 - Before running the final `pithos run end ... && pandora-spawn kill --target {{session_target}}` command, walk your tracked `session_id` list and kill any you have not already killed. Use `pandora-spawn kill` and `pandora-spawn status` — do not reach for `tmux` directly.
+
+## Pithos APIs you should reach for
+
+- After `claim`, run `pithos inspect task <claimed-task-id>` to see direct blockers/dependents, unresolved blockers, supersession links, and artifacts.
+- `pithos inspect graph --task <claimed-task-id>` when the implementation touches multiple scopes or you need to understand what this task unlocks downstream.
+- `pithos heartbeat --run {{run_id}} --task <claimed-task-id> --token <claim-token>` during long coordination or verification.
+- `pithos artifact add --task <claimed-task-id> --run {{run_id}} --kind worker-completion ...` before `complete` for worker-backed results.
+- `pithos complete <claimed-task-id> --run {{run_id}} --token <claim-token>` or `pithos fail <claimed-task-id> --run {{run_id}} --token <claim-token> --reason ...` ends the claim cleanly.
+- If the assignment is wrong after you claimed it, do **not** try to rewrite the claimed task with `supersede`; claimed/running tasks cannot be superseded. Fail loudly or escalate with enough context for Pandora/Toil to replace the plan.
 
 ## Pithos CLI for this session
 

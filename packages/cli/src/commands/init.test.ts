@@ -39,7 +39,7 @@ describe("runMigrations (unit — fake DB)", () => {
   })
 
   it("skips already-recorded migrations", async () => {
-    const seeded = new Map([["SELECT version FROM schema_migrations", [{ version: 1 }, { version: 2 }]]])
+    const seeded = new Map([["SELECT version FROM schema_migrations", [{ version: 1 }]]])
     const exit = await Effect.runPromiseExit(
       Effect.provide(runMigrations, makeDbServiceTest(seeded)),
     )

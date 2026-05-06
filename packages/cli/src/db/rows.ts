@@ -39,7 +39,6 @@ export class RunRow extends Schema.Class<RunRow>("RunRow")({
 
 export class TaskRow extends Schema.Class<TaskRow>("TaskRow")({
   id: Schema.String,
-  parent_id: Schema.NullOr(Schema.String),
   scope_id: Schema.String,
   capability: Schema.String,
   status: Schema.String,

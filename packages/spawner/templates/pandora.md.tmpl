@@ -28,13 +28,24 @@ The Pithos DB is your memory. You don't need to remember — you inspect:
 
 | Command | What it tells you |
 |---------|-------------------|
-| `pithos briefing --agent <agent>` | Recent activity per agent: tasks, outcomes, attached artifacts |
-| `pithos inspect task <id>` | Full task detail, its run, and artifacts |
+| `pithos briefing --agent pandora` | Top-level summary: ready work, blocked work, reviewable completions, stale/failed items |
+| `pithos inspect graph --current` | Closed graph of all non-cancelled work across scopes; best machine-grade orchestration view |
+| `pithos inspect graph --scope <scope-id>` | Closed graph for one repo/scope, including imported blockers and supersession neighbors |
+| `pithos inspect task <id>` | Full task detail: direct blockers/dependents, unresolved blockers, supersession links, and artifacts |
 | `pithos inspect run <id>` | Run state, session, parent chain |
-| `pithos tail` | Recent events across all scopes |
+| `pithos tail` | Audit trail of recent state transitions; useful when you need history, not as the primary dashboard |
 | `pandora-spawn status --session-id <id>` | Live agent session transcript tail |
 
 Artifacts (especially `worker-completion`) are your primary result format — agents attach them before completing. Read artifacts to understand what was accomplished.
+
+## Pithos APIs you should prefer
+
+- Start with `pithos briefing --agent pandora` for a summary, then move to `pithos inspect graph --current` for the authoritative cross-scope DAG.
+- Use `pithos inspect graph --scope <scope-id>` before spawning repo-local Toil or Envy so you understand existing blockers and downstream dependents.
+- Use `pithos inspect task <id>` when you need the exact blocker/dependent/supersession/artifact picture for one task.
+- Use `pithos enqueue --depends-on <task-id>` when delegating multi-step or cross-scope work so prerequisites live in Pithos, not just in prose.
+- Use `pithos supersede <task-id> --run {{run_id}} --reason ...` when a queued orchestration/planning task is wrong and should be replaced without losing history.
+- Use `pithos tail` only when you need an audit trail of how the graph changed.
 
 ## Pithos CLI for this session
 
@@ -62,7 +73,7 @@ Use these commands by intent. Do not depend on their implementation details unle
 - tty_status: `{{cmd_tty_status}}`
 
 Rules:
-- **IMPORTANT: `pithos enqueue` is the primary mechanism for delegating work.** Nudges are only for guiding or unblocking agents that already have work — never use nudges to assign new tasks.
+- **IMPORTANT: `pithos enqueue` is the primary mechanism for delegating work.** Use repeatable `--depends-on` when the delegation has real prerequisites. Nudges are only for guiding or unblocking agents that already have work — never use nudges to assign new tasks.
 - Use `spawn` to delegate. Spawn Toil for breakdown, Envy for implementation.
 - Use `status` to inspect progress and completion reports. Prefer it over raw tty capture.
 - Use `nudge` to wake or provide follow-up input to a delegated session.

@@ -53,14 +53,11 @@ These rules apply to every slice unless a slice says otherwise:
   - related unit + integration tests
 - **Scope:**
   - add `task_dependencies`
-  - add migration/backfill guardrails for legacy `parent_id`
-  - replace `enqueue --parent-id` with repeatable `--depends-on`
+  - support repeatable `enqueue --depends-on`
   - reject cycles, duplicate deps, and deps targeting superseded tasks
   - extend `inspect task` with direct dependencies, dependents, unresolved blockers
   - update tests, help text, and docs
 - **Must implement exactly:**
-  - migration preflight: if any unfinished task (`queued`, `claimed`, `running`) still has non-null `parent_id`, fail migration loudly and list offending task IDs; do not guess how to convert them
-  - remediation rule for failed migration: operator must finish/cancel/re-enqueue those tasks after upgrade; migration only backfills remaining `parent_id` rows
   - `enqueue --depends-on <task-id>` is repeatable and cross-scope
   - duplicate dependency IDs are `VALIDATION_ERROR`
   - dependency targets must exist
@@ -75,7 +72,6 @@ These rules apply to every slice unless a slice says otherwise:
     - `supersedes`: `null | { id, scope_id, status, title }`
     - `superseded_by`: `null | { id, scope_id, status, title }`
     - `artifacts`
-  - `parent_id` must not appear in the `inspect task` response contract
   - relationship arrays are sorted by the related task row's `created_at`, then related task `id`
 - **Done when:**
   - cross-scope dependency authoring works end-to-end
@@ -199,7 +195,7 @@ These rules apply to every slice unless a slice says otherwise:
   - invalid supersede attempts fail loudly before partial rewrites
   - the old task remains explainable via inspect/event history
 
-### 5. Graph inspection for scopes and live work
+### 5. Graph inspection for scopes and current work
 - **Type:** AFK
 - **Status:** complete
 - **Blocked by:** 3, 4
@@ -211,7 +207,7 @@ These rules apply to every slice unless a slice says otherwise:
   - related tests
 - **Scope:**
   - add `pithos inspect graph --scope <id>`
-  - add `pithos inspect graph --live`
+  - add `pithos inspect graph --current`
   - include dependency and supersession closure rules
   - keep node/edge ordering deterministic
   - update tests, help text, and docs
@@ -219,14 +215,14 @@ These rules apply to every slice unless a slice says otherwise:
   - `--scope <scope-id>`:
     - seed with all non-cancelled tasks in that scope
     - walk dependency and supersession edges in both directions recursively until the response is closed
-  - `--live`:
+  - `--current`:
     - include all non-cancelled tasks
-    - include any referenced dependency or supersession neighbors needed to keep the response closed, even if those neighbors are cancelled
+    - include any referenced dependency or supersession neighbors needed to keep the response closed, even if those neighbours are cancelled
   - reuse the same node/edge schema and ordering rules as slice 3
 - **Done when:**
-  - agents can inspect a scope-level graph or the whole live graph directly from CLI JSON
+  - agents can inspect a scope-level graph or the whole current graph directly from CLI JSON
   - returned graphs are closed under all emitted references
-  - cancelled supersession/dependency neighbors appear when needed to explain the live graph
+  - cancelled supersession/dependency neighbours appear when needed to explain the current graph
 
 ### 6. Tail/event contract completion
 - **Type:** AFK

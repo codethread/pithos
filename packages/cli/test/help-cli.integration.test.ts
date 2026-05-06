@@ -225,10 +225,9 @@ describe("pithos enqueue --help", () => {
     expect(exitCode).toBe(0)
   })
 
-  it("documents repeatable --depends-on and no longer mentions --parent-id", async () => {
+  it("documents repeatable --depends-on", async () => {
     const { stdout } = await help(["enqueue", "--help"])
     expect(stdout).toContain("depends-on")
-    expect(stdout).not.toContain("parent-id")
   })
 
   it("contains required sections", async () => {

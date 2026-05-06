@@ -4,7 +4,7 @@ import {
   computeTaskClaimability,
   loadDirectDependencies,
   loadDirectDependents,
-  loadLiveTaskGraph,
+  loadCurrentTaskGraph,
   loadScopeTaskGraph,
   loadSupersededBySummary,
   loadSupersedesSummary,
@@ -150,19 +150,19 @@ export const inspectTaskCommand = (
 export type InspectGraphSelector =
   | { readonly kind: "task"; readonly value: string }
   | { readonly kind: "scope"; readonly value: string }
-  | { readonly kind: "live" }
+  | { readonly kind: "current" }
 
 export interface InspectGraphSelectorArgs {
   readonly taskId: string | undefined
   readonly scopeId: string | undefined
-  readonly live: boolean
+  readonly current: boolean
 }
 
 export const decodeInspectGraphSelector = (
   args: InspectGraphSelectorArgs,
 ): Effect.Effect<InspectGraphSelector, PithosError> =>
   Effect.gen(function* () {
-    const selectedCount = [args.taskId !== undefined, args.scopeId !== undefined, args.live].filter(
+    const selectedCount = [args.taskId !== undefined, args.scopeId !== undefined, args.current].filter(
       Boolean,
     ).length
 
@@ -170,7 +170,7 @@ export const decodeInspectGraphSelector = (
       yield* Effect.fail(
         new PithosError({
           code: "VALIDATION_ERROR",
-          message: "inspect graph requires exactly one selector: choose one of --task, --scope, or --live",
+          message: "inspect graph requires exactly one selector: choose one of --task, --scope, or --current",
         }),
       )
       return yield* Effect.never
@@ -182,11 +182,11 @@ export const decodeInspectGraphSelector = (
     if (args.scopeId !== undefined) {
       return { kind: "scope", value: args.scopeId } as const
     }
-    return { kind: "live" } as const
+    return { kind: "current" } as const
   })
 
 /**
- * `pithos inspect graph --task <id> | --scope <scope-id> | --live`
+ * `pithos inspect graph --task <id> | --scope <scope-id> | --current`
  *
  * Returns a closed transitive dependency/supersession graph for the selected seed set.
  */
@@ -200,7 +200,7 @@ export const inspectGraphCommand = (
         ? yield* loadTaskGraph(selector.value)
         : selector.kind === "scope"
           ? yield* loadScopeTaskGraph(selector.value)
-          : yield* loadLiveTaskGraph()
+          : yield* loadCurrentTaskGraph()
 
     yield* output.print(
       JSON.stringify({
@@ -253,7 +253,7 @@ Usage:
   pithos inspect task <id>
   pithos inspect graph --task <id>
   pithos inspect graph --scope <scope-id>
-  pithos inspect graph --live
+  pithos inspect graph --current
 
 Options:
   --help, -h    Show this help
@@ -264,13 +264,13 @@ Subcommands:
   task <id>              Show a task by ID with direct dependencies, dependents, blockers, supersession links, and artifacts
   graph --task <id>      Show a closed transitive dependency/supersession graph around one task
   graph --scope <id>     Show a closed transitive dependency/supersession graph around a scope's non-cancelled tasks
-  graph --live           Show the closed transitive dependency/supersession graph for all non-cancelled tasks
+  graph --current        Show the closed transitive dependency/supersession graph for all non-cancelled tasks
 
 Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
   { "ok": true, "run": { "id": "...", "agent_kind": "...", ... } }
   { "ok": true, "task": { "id": "...", "status": "queued", "claimable": false, "unresolved_dependency_ids": [ ... ], ... }, "dependencies": [ ... ], "dependents": [ ... ], "unresolved_blockers": [ { "id": "...", "scope_id": "...", "status": "queued", "title": "Blocker title" } ], "supersedes": null, "superseded_by": null, "artifacts": [ ... ] }
-  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "live" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }
+  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "current" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }
 
 Examples:
   pithos inspect scope global
@@ -279,7 +279,7 @@ Examples:
   pithos inspect task task_abc123
   pithos inspect graph --task task_abc123
   pithos inspect graph --scope repo:work/perkbox-services/protobuf
-  pithos inspect graph --live
+  pithos inspect graph --current
 
 Exit codes: 0 success | 2 validation error | 3 not found
 `

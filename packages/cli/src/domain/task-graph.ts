@@ -612,7 +612,7 @@ const buildTaskGraph = (
     return graph
   })
 
-const loadLiveTaskGraphConnectedTaskIds = (
+const loadCurrentTaskGraphConnectedTaskIds = (
   seedTaskIds: readonly string[],
 ): Effect.Effect<readonly string[], PithosError, DbService> =>
   Effect.gen(function* () {
@@ -714,13 +714,13 @@ export const loadScopeTaskGraph = (
     return yield* loadTaskGraphFromSeedTaskIds(seedTaskIds)
   })
 
-export const loadLiveTaskGraph = (): Effect.Effect<TaskGraph, PithosError, DbService> =>
+export const loadCurrentTaskGraph = (): Effect.Effect<TaskGraph, PithosError, DbService> =>
   loadIdRows(
     `SELECT id
      FROM tasks
      WHERE status <> 'cancelled'
      ORDER BY created_at ASC, id ASC`,
   ).pipe(
-    Effect.flatMap(loadLiveTaskGraphConnectedTaskIds),
+    Effect.flatMap(loadCurrentTaskGraphConnectedTaskIds),
     Effect.flatMap(buildTaskGraph),
   )

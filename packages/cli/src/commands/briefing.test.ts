@@ -38,7 +38,6 @@ function makeTaskRow(overrides: {
 }): DbRow {
   return {
     id: overrides.id,
-    parent_id: null,
     scope_id: overrides.scope_id ?? "global",
     capability: overrides.capability ?? "triage",
     status: overrides.status,

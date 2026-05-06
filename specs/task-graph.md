@@ -1,13 +1,13 @@
 # Task Graph
 
-**Status:** Planned
-**Last Updated:** 2026-05-05
+**Status:** Implemented
+**Last Updated:** 2026-05-06
 
 ## 1. Overview
 
 ### Purpose
 
-Pithos tasks currently store a single `parent_id` that is validated on enqueue but ignored by `claim`, `inspect`, and `briefing`. The task graph system replaces that write-only parent link with a first-class dependency DAG plus a linear supersession history. It lets agents create cross-scope blocked work, claim only ready tasks, replace a wrong middle task with a new one without mutating task contents, and inspect the current graph in machine-readable form.
+Pithos tasks use a first-class dependency DAG plus a linear supersession history. This lets agents create cross-scope blocked work, claim only ready tasks, replace a wrong middle task with a new one without mutating task contents, and inspect the current graph in machine-readable form.
 
 ### Goals
 
@@ -17,8 +17,6 @@ Pithos tasks currently store a single `parent_id` that is validated on enqueue b
 - Preserve history when one task replaces another.
 - Let agents inspect blockers, dependents, and the current connected graph without reconstructing it from prose.
 - Surface ready versus blocked work in `pithos briefing`.
-- Migrate existing `tasks.parent_id` data into the new dependency model.
-
 ### Non-Goals
 
 - A generic mutable graph editor for arbitrary post-creation rewiring.
@@ -29,7 +27,7 @@ Pithos tasks currently store a single `parent_id` that is validated on enqueue b
 
 ## 2. Design Decisions
 
-- **Decision:** Model blocking with a dedicated `task_dependencies` join table instead of overloading `tasks.parent_id` or storing relationship arrays in JSON.
+- **Decision:** Model blocking with a dedicated `task_dependencies` join table.
   - **Rationale:** Blocking is many-to-many, must support cross-scope edges, and must be queryable from SQLite for atomic claim decisions.
 
 - **Decision:** Keep dependency edges current-state only, and preserve graph history through `task_supersessions` plus `events` rows.
@@ -53,8 +51,7 @@ Pithos tasks currently store a single `parent_id` that is validated on enqueue b
 - **Decision:** Support cross-scope dependency edges without special casing the claim path.
   - **Rationale:** The user’s primary use case is FE/BE/design/spec work spanning repos. Claim already filters by the task being claimed; blocker lookup can naturally join across scopes.
 
-- **Decision:** Migrate existing `parent_id` links into `task_dependencies`, then treat `parent_id` as deprecated storage only.
-  - **Rationale:** Existing local databases may already contain parent-linked tasks. Backfilling preserves history without forcing an immediate table rebuild; the CLI will stop writing and surfacing `parent_id`.
+- **Decision:** The schema is a clean break. Fresh databases get the DAG and supersession tables directly, with no legacy parent-model compatibility path.
 
 ## 3. Architecture
 
@@ -70,7 +67,7 @@ packages/cli/src/
     briefing.ts             # ready vs blocked rendering
     supersede.ts            # new command: replace a task with a new one
   db/
-    migrate.ts              # migration 2: dependency + supersession tables and backfill
+    migrate.ts              # initial schema with dependency + supersession tables
     rows.ts                 # TaskDependencyRow / TaskSupersessionRow
   domain/
     task-graph.ts           # shared graph queries, cycle checks, claimability helpers
@@ -97,21 +94,15 @@ inspect/briefing
   -> print structured JSON or markdown
 ```
 
-### Migration flow
+### Schema deployment
 
-1. Preflight existing data. If any unfinished task (`queued`, `claimed`, `running`) still has a non-null `parent_id`, fail migration with a tagged operator-facing error that lists the offending task IDs. This avoids silently converting legacy organizational links into claim blockers.
-2. Operator remediation for rejected rows is explicit: finish them, cancel them, or re-enqueue equivalent replacement tasks after upgrade using `--depends-on`. Migration must not guess.
-3. Create `task_dependencies` and `task_supersessions`.
-4. Backfill every remaining non-null `tasks.parent_id` as one dependency edge: `task_id -> parent_id`. Historical tasks in `done`, `failed`, `dead_letter`, or `cancelled` may be backfilled because they no longer participate in claim ordering.
-5. Stop writing `parent_id` from the CLI.
-6. Stop surfacing `parent_id` in task inspection output.
-7. Leave the column in place for this phase; a later cleanup migration may remove it after the new model is proven.
+The initial schema (migration 1) creates all tables — `tasks`, `task_dependencies`, `task_supersessions`, etc. — in a single atomic migration. There is no separate migration 2. The `tasks` table does not include `parent_id`; the DAG tables are the sole relationship model from the start.
 
 ## 4. Data Model
 
 ### Database schema
 
-Migration 2 adds the following tables and indexes:
+The initial schema includes the following tables and indexes:
 
 ```sql
 CREATE TABLE IF NOT EXISTS task_dependencies (
@@ -141,14 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
   ON task_supersessions(new_task_id);
 ```
 
-Backfill step (after the unfinished-task preflight passes):
 
-```sql
-INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_task_id)
-SELECT id, parent_id
-FROM tasks
-WHERE parent_id IS NOT NULL;
-```
 
 ### Readiness contract
 
@@ -188,10 +172,10 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 | Command | Change | Contract |
 | ------- | ------ | -------- |
-| `pithos enqueue` | Modify | Replace `--parent-id` with repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. |
+| `pithos enqueue` | Modify | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. |
 | `pithos claim` | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. |
 | `pithos inspect task <id>` | Expand output | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links. |
-| `pithos inspect graph` | New | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--live`. |
+| `pithos inspect graph` | New | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--current`. |
 | `pithos supersede <task-id>` | New | Create a replacement task, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued. |
 | `pithos briefing` | Modify output | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items. |
 | `pithos tail` | New event types | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows. |
@@ -296,8 +280,6 @@ Requirements:
 - relationship arrays must be deterministic and sorted by `created_at`, then `id`
 - dependency/dependent summaries must always include `scope_id`
 - `claimable` and `unresolved_dependency_ids` are computed, never stored
-- `parent_id` must not appear in the response contract
-
 ### `pithos inspect graph`
 
 Selectors are mutually exclusive:
@@ -306,7 +288,7 @@ Selectors are mutually exclusive:
 | -------- | ------ |
 | `--task <id>` | Transitive closure around that task following dependency and supersession edges both directions |
 | `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency and supersession edges in both directions recursively until the response is closed |
-| `--live` | All non-cancelled tasks and all current graph edges, plus any referenced dependency or supersession neighbors needed to keep the response closed |
+| `--current` | All non-cancelled tasks and all current graph edges, plus any referenced dependency or supersession neighbors needed to keep the response closed |
 
 Graph closure requirement:
 
@@ -417,39 +399,38 @@ New/changed event contracts:
 
 ### Phase 1: Schema and shared graph helpers (0.5-1 day)
 
-- [ ] Add migration 2 for `task_dependencies` and `task_supersessions`
-- [ ] Backfill `parent_id` into dependency rows
-- [ ] Add row decoders for new tables
-- [ ] Add a shared graph helper module for dependency reads and cycle checks
+- [x] Add `task_dependencies` and `task_supersessions` to initial schema
+- [x] Add row decoders for new tables
+- [x] Add a shared graph helper module for dependency reads and cycle checks
 
 ### Phase 2: Write-path changes (1-2 days)
 
-- [ ] Replace `enqueue --parent-id` with repeatable `--depends-on`
-- [ ] Include dependency IDs in `task.created` payloads
-- [ ] Implement `pithos supersede`
-- [ ] Add cancellation write-path for superseded queued tasks
+- [x] Support repeatable `enqueue --depends-on`
+- [x] Include dependency IDs in `task.created` payloads
+- [x] Implement `pithos supersede`
+- [x] Add cancellation write-path for superseded queued tasks
 
 ### Phase 3: Read-path and scheduling changes (1-2 days)
 
-- [ ] Make `claim` filter by dependency readiness
-- [ ] Extend `inspect task` with relationship output
-- [ ] Add `inspect graph`
-- [ ] Update `briefing` to show ready vs blocked work with blocker summaries
-- [ ] Update `tail` help/docs for new event types
+- [x] Make `claim` filter by dependency readiness
+- [x] Extend `inspect task` with relationship output
+- [x] Add `inspect graph`
+- [x] Update `briefing` to show ready vs blocked work with blocker summaries
+- [x] Update `tail` help/docs for new event types
 
 ### Phase 4: Verification and docs (0.5-1 day)
 
-- [ ] Add unit tests for cycle detection, supersede preconditions, and graph rendering
-- [ ] Add integration tests for cross-scope dependencies, claimability, and supersession rewrites
-- [ ] Update `packages/cli/README.md` help surface and exit-code references
-- [ ] Run `pnpm verify`
+- [x] Add unit tests for cycle detection, supersede preconditions, and graph rendering
+- [x] Add integration tests for cross-scope dependencies, claimability, and supersession rewrites
+- [x] Update `packages/cli/README.md` help surface and exit-code references
+- [x] Run `pnpm verify`
 
 ## 7. Code Locations
 
 | File | Change |
 | ---- | ------ |
-| `packages/cli/src/db/migrate.ts` | Modify: add migration 2, backfill `parent_id`, add indexes |
-| `packages/cli/src/db/rows.ts` | Modify: add relationship row decoders; stop relying on `parent_id` in response contracts |
+| `packages/cli/src/db/migrate.ts` | Modify: add `task_dependencies` and `task_supersessions` to initial schema |
+| `packages/cli/src/db/rows.ts` | Modify: add relationship row decoders |
 | `packages/cli/src/domain/task-graph.ts` | New: graph queries, summaries, cycle detection, claimability helpers |
 | `packages/cli/src/commands/enqueue.ts` | Modify: repeated `--depends-on`, dependency validation, event payload update |
 | `packages/cli/src/commands/claim.ts` | Modify: dependency-aware claim query |
@@ -464,4 +445,4 @@ New/changed event contracts:
 ## 8. Open Questions
 
 - Do we need an explicit future `pithos dependency waive` command for human-approved unblocking, or is `supersede` enough until a real workflow demands waivers?
-- After the new graph model ships, should a follow-up migration fully remove `tasks.parent_id`, or is leaving it deprecated in SQLite acceptable long-term?
+

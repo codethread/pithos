@@ -621,27 +621,27 @@ const inspectGraph = Command.make(
       Options.optional,
       Options.withDescription("Seed scope ID; starts from all non-cancelled tasks in that scope"),
     ),
-    live: Options.boolean("live").pipe(
+    current: Options.boolean("current").pipe(
       Options.withDescription("Inspect the closed graph for all non-cancelled tasks"),
     ),
   },
-  ({ task, scope, live }) =>
-    decodeInspectGraphSelector({ taskId: opt(task), scopeId: opt(scope), live }).pipe(
+  ({ task, scope, current }) =>
+    decodeInspectGraphSelector({ taskId: opt(task), scopeId: opt(scope), current }).pipe(
       Effect.flatMap(inspectGraphCommand),
     ),
 ).pipe(
   Command.withDescription(
     HelpDoc.blocks([
       HelpDoc.p("pithos inspect graph - Inspect a closed transitive dependency/supersession graph"),
-      HelpDoc.p("Choose exactly one selector: --task <id>, --scope <scope-id>, or --live."),
+      HelpDoc.p("Choose exactly one selector: --task <id>, --scope <scope-id>, or --current."),
       HelpDoc.p("Output (JSON):"),
       HelpDoc.p(
-        '  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "live" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }',
+        '  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "current" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }',
       ),
       HelpDoc.p("Examples:"),
       HelpDoc.p("  pithos inspect graph --task task_abc123"),
       HelpDoc.p("  pithos inspect graph --scope repo:work/perkbox-services/protobuf"),
-      HelpDoc.p("  pithos inspect graph --live"),
+      HelpDoc.p("  pithos inspect graph --current"),
       HelpDoc.p("Exit codes: 0 success | 2 validation error | 3 not found"),
     ]),
   ),
@@ -652,14 +652,14 @@ const inspect = Command.make("inspect").pipe(
     HelpDoc.blocks([
       HelpDoc.p("Inspect persisted state: scope, run, task, or graph."),
       HelpDoc.p("Task inspection includes direct dependencies, direct dependents, unresolved blockers, and immediate supersession links."),
-      HelpDoc.p("Graph inspection returns a closed transitive dependency/supersession graph for one task, one scope, or all live work."),
+      HelpDoc.p("Graph inspection returns a closed transitive dependency/supersession graph for one task, one scope, or all non-cancelled work."),
       HelpDoc.p("Examples:"),
       HelpDoc.p("  pithos inspect scope global"),
       HelpDoc.p("  pithos inspect run run_abc"),
       HelpDoc.p("  pithos inspect task task_abc"),
       HelpDoc.p("  pithos inspect graph --task task_abc"),
       HelpDoc.p("  pithos inspect graph --scope repo:work/repo"),
-      HelpDoc.p("  pithos inspect graph --live"),
+      HelpDoc.p("  pithos inspect graph --current"),
       HelpDoc.p("Exit codes: 0 success | 2 validation error | 3 not found"),
     ]),
   ),

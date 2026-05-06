@@ -379,10 +379,28 @@ describe("pithos inspect --help", () => {
     expect(exitCode).toBe(0)
   })
 
+  it("inspect graph --help exits 0", async () => {
+    const { exitCode } = await help(["inspect", "graph", "--help"])
+    expect(exitCode).toBe(0)
+  })
+
   it("inspect task help mentions blockers and dependents", async () => {
     const { stdout } = await help(["inspect", "task", "--help"])
     expect(stdout).toContain("dependencies")
     expect(stdout).toContain("dependents")
+  })
+
+  it("inspect graph help documents the graph node and edge contract", async () => {
+    const { stdout } = await help(["inspect", "graph", "--help"])
+    expect(stdout).toContain("closed transitive")
+    expect(stdout).toContain("--task")
+    expect(stdout).toContain("claimable")
+    expect(stdout).toContain("unresolved_dependency_ids")
+    expect(stdout).toContain("supersedes_task_id")
+    expect(stdout).toContain("superseded_by_task_id")
+    expect(stdout).toContain("depends_on")
+    expect(stdout).toContain("satisfied")
+    expect(stdout).toContain("supersedes")
   })
 
   it("contains required sections", async () => {
@@ -462,6 +480,7 @@ describe("agent-usability invariants", () => {
       ["fail", "--help"],
       ["artifact", "add", "--help"],
       ["inspect", "--help"],
+      ["inspect", "graph", "--help"],
       ["tail", "--help"],
       ["sweep", "--help"],
       ["briefing", "--help"],

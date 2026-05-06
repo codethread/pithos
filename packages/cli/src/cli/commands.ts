@@ -10,7 +10,12 @@ import { Args, Command, HelpDoc, Options } from "@effect/cli"
 import { Option } from "effect"
 import { initCommand } from "../commands/init.ts"
 import { scopeUpsertCommand } from "../commands/scope.ts"
-import { inspectScopeCommand, inspectRunCommand, inspectTaskCommand } from "../commands/inspect.ts"
+import {
+  inspectGraphCommand,
+  inspectScopeCommand,
+  inspectRunCommand,
+  inspectTaskCommand,
+} from "../commands/inspect.ts"
 import { runRegisterCommand, runEndCommand } from "../commands/run.ts"
 import { enqueueCommand } from "../commands/enqueue.ts"
 import { supersedeCommand } from "../commands/supersede.ts"
@@ -604,19 +609,44 @@ const inspectTask = Command.make(
   ),
 )
 
+const inspectGraph = Command.make(
+  "graph",
+  {
+    task: Options.text("task").pipe(
+      Options.withDescription("Seed task ID for closed transitive graph inspection [required]"),
+    ),
+  },
+  ({ task }) => inspectGraphCommand(task),
+).pipe(
+  Command.withDescription(
+    HelpDoc.blocks([
+      HelpDoc.p("pithos inspect graph - Inspect a closed transitive dependency/supersession graph around one task"),
+      HelpDoc.p("Output (JSON):"),
+      HelpDoc.p(
+        '  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }',
+      ),
+      HelpDoc.p("Examples:"),
+      HelpDoc.p("  pithos inspect graph --task task_abc123"),
+      HelpDoc.p("Exit codes: 0 success | 3 not found"),
+    ]),
+  ),
+)
+
 const inspect = Command.make("inspect").pipe(
   Command.withDescription(
     HelpDoc.blocks([
-      HelpDoc.p("Inspect persisted state: scope, run, or task."),
+      HelpDoc.p("Inspect persisted state: scope, run, task, or graph."),
       HelpDoc.p("Task inspection includes direct dependencies, direct dependents, unresolved blockers, and immediate supersession links."),
+      HelpDoc.p("Graph inspection returns a closed transitive dependency/supersession graph around one seed task."),
       HelpDoc.p("Examples:"),
       HelpDoc.p("  pithos inspect scope global"),
       HelpDoc.p("  pithos inspect run run_abc"),
       HelpDoc.p("  pithos inspect task task_abc"),
+      HelpDoc.p("  pithos inspect graph --task task_abc"),
       HelpDoc.p("Exit codes: 0 success | 3 not found"),
     ]),
   ),
-  Command.withSubcommands([inspectScope, inspectRun, inspectTask]),
+  Command.withSubcommands([inspectScope, inspectRun, inspectTask, inspectGraph]),
 )
 
 // ---------------------------------------------------------------------------

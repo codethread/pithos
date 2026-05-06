@@ -117,7 +117,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 3. Task-centric graph inspection
 - **Type:** AFK
-- **Status:** pending
+- **Status:** complete
 - **Blocked by:** 1, 4
 - **User stories covered:** US2, US4, US6
 - **Primary files:**

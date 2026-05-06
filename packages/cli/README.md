@@ -24,7 +24,7 @@ pithos <command> --help              # per-command flags + examples + exit codes
 - `pithos heartbeat` — extend lease while working; throttled.
 - `pithos complete|fail` — terminate a claim, fenced.
 - `pithos artifact add` — attach a worker-completion or other artifact to a task.
-- `pithos inspect scope|run|task` — read structured state; `inspect task` includes direct dependencies, dependents, unresolved blockers, supersession links, and artifacts.
+- `pithos inspect scope|run|task|graph` — read structured state; `inspect task` includes direct dependencies, dependents, unresolved blockers, supersession links, and artifacts, while `inspect graph --task <id>` returns a closed transitive dependency/supersession graph whose nodes include `claimable`, `unresolved_dependency_ids`, `supersedes_task_id`, and `superseded_by_task_id`, and whose edges are `depends_on`/`supersedes` records with dependency `satisfied` state.
 - `pithos tail [--limit N]` — recent events.
 - `pithos sweep` — requeue expired leases, dead-letter exhausted tasks, mark stale runs.
 - `pithos briefing --agent pandora` — markdown briefing with `as_of_event_id` watermark plus ready vs blocked queued work.

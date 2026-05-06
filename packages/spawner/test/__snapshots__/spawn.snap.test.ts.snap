@@ -196,6 +196,8 @@ Exit codes:
 
   - inspect task <task-id>                                                                                                               
 
+  - inspect graph --task text                                                                                                            
+
   - tail [--limit integer]                                                                                                               
 
   - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                                  
@@ -425,6 +427,8 @@ Exit codes:
   - inspect run <run-id>                                                                                                                 
 
   - inspect task <task-id>                                                                                                               
+
+  - inspect graph --task text                                                                                                            
 
   - tail [--limit integer]                                                                                                               
 

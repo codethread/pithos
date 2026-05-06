@@ -6,6 +6,7 @@ import {
   loadDirectDependents,
   loadSupersededBySummary,
   loadSupersedesSummary,
+  loadTaskGraph,
   loadUnresolvedDependencyIds,
 } from "../domain/task-graph.ts"
 import { DbService } from "../services/db.ts"
@@ -67,7 +68,9 @@ const toInspectableTask = (
  * Fetches the scope row and prints it as JSON.
  * Exits with code 3 (NOT_FOUND) if the scope does not exist.
  */
-export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError, DbService | OutputService> =>
+export const inspectScopeCommand = (
+  id: string,
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const db = yield* DbService
     const output = yield* OutputService
@@ -93,7 +96,9 @@ export const inspectScopeCommand = (id: string): Effect.Effect<void, PithosError
  * Fetches the task, direct graph relationships, and artifacts, then prints
  * machine-readable JSON.
  */
-export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError, DbService | OutputService> =>
+export const inspectTaskCommand = (
+  id: string,
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const db = yield* DbService
     const output = yield* OutputService
@@ -139,12 +144,41 @@ export const inspectTaskCommand = (id: string): Effect.Effect<void, PithosError,
   )
 
 /**
+ * `pithos inspect graph --task <id>`
+ *
+ * Returns a closed transitive dependency/supersession graph around a single task.
+ */
+export const inspectGraphCommand = (
+  taskId: string,
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
+  Effect.gen(function* () {
+    const output = yield* OutputService
+    const graph = yield* loadTaskGraph(taskId)
+
+    yield* output.print(
+      JSON.stringify({
+        ok: true,
+        graph: {
+          selector: { kind: "task", value: taskId },
+          nodes: graph.nodes,
+          edges: graph.edges,
+        },
+      }),
+    )
+  }).pipe(
+    Effect.withLogSpan("pithos.inspect.graph"),
+    withCommandObservability("inspect.graph"),
+  )
+
+/**
  * `pithos inspect run <id>`
  *
  * Fetches the run row and prints it as JSON.
  * Exits with code 3 (NOT_FOUND) if the run does not exist.
  */
-export const inspectRunCommand = (id: string): Effect.Effect<void, PithosError, DbService | OutputService> =>
+export const inspectRunCommand = (
+  id: string,
+): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const db = yield* DbService
     const output = yield* OutputService
@@ -170,25 +204,29 @@ Usage:
   pithos inspect scope <id>
   pithos inspect run <id>
   pithos inspect task <id>
+  pithos inspect graph --task <id>
 
 Options:
   --help, -h    Show this help
 
 Subcommands:
-  scope <id>    Show a scope by ID
-  run <id>      Show a run by ID
-  task <id>     Show a task by ID with direct dependencies, dependents, blockers, supersession links, and artifacts
+  scope <id>          Show a scope by ID
+  run <id>            Show a run by ID
+  task <id>           Show a task by ID with direct dependencies, dependents, blockers, supersession links, and artifacts
+  graph --task <id>   Show a closed transitive dependency/supersession graph around one task
 
 Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
   { "ok": true, "run": { "id": "...", "agent_kind": "...", ... } }
   { "ok": true, "task": { "id": "...", "status": "queued", "claimable": false, "unresolved_dependency_ids": [ ... ], ... }, "dependencies": [ ... ], "dependents": [ ... ], "supersedes": null, "superseded_by": null, "artifacts": [ ... ] }
+  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }
 
 Examples:
   pithos inspect scope global
   pithos inspect scope repo:work/perkbox-services/protobuf
   pithos inspect run run_abc123
   pithos inspect task task_abc123
+  pithos inspect graph --task task_abc123
 
 Exit codes: 0 success | 3 not found
 `

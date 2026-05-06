@@ -1,5 +1,9 @@
 {
   "name": "pithos-marketplace",
+  "owner": {
+    "name": "codethread",
+    "email": "adamhalldesigns@gmail.com"
+  },
   "metadata": {
     "description": "Pithos Claude Code plugin marketplace"
   },

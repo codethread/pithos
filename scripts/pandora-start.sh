@@ -9,10 +9,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Check for an existing pithos-pandora-* session and attach if found.
+# Check for an existing pithos-pandora-* session.
+# --fresh kills it so the clean-reset path can proceed; otherwise attach.
 existing="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^pithos-pandora-' | head -n1 || true)"
 if [[ -n "$existing" ]]; then
-  if [[ -n "${TMUX:-}" ]]; then
+  if $fresh; then
+    tmux kill-session -t "$existing"
+  elif [[ -n "${TMUX:-}" ]]; then
     exec tmux switch-client -t "$existing"
   else
     exec tmux attach -t "$existing"

@@ -121,3 +121,7 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 - `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md`: CLI surface, package quality bar, add-a-command checklist
 - `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md`: spawner surface, hook contract, session-log introspection, package constraints
 - Each `packages/<package>/` repeats this pattern, providing more granular details as scope narrows
+
+## Testing
+
+- Use `vitest run --update` to fix snapshots after corrections, don't manually edit the snapshots.

@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest"
 import { Effect, Exit, Layer } from "effect"
 
 import { briefingCommand, BRIEFING_SQL } from "./briefing.ts"
+import { LOAD_UNRESOLVED_DEPENDENCIES_SQL } from "../domain/task-graph.ts"
 import { makeDbServiceTest } from "../layers/db.ts"
 import type { DbRow } from "../services/db.ts"
 import { makeOutputServiceSilent, makeOutputServiceTest } from "../layers/output.ts"
@@ -33,6 +34,7 @@ function makeTaskRow(overrides: {
   max_attempts?: number
   lease_owner_run_id?: string | null
   lease_until?: string | null
+  created_at?: string
 }): DbRow {
   return {
     id: overrides.id,
@@ -50,7 +52,7 @@ function makeTaskRow(overrides: {
     max_attempts: overrides.max_attempts ?? 3,
     result_json: "{}",
     created_by_run_id: null,
-    created_at: "2026-05-01T12:00:00Z",
+    created_at: overrides.created_at ?? "2026-05-01T12:00:00Z",
     updated_at: "2026-05-01T12:00:00Z",
     completed_at: null,
   }
@@ -117,6 +119,9 @@ describe("briefingCommand (unit — fake DB)", () => {
     expect(text).toContain("### Needs Adam")
     expect(text).toContain("### Ready for review")
     expect(text).toContain("### Active")
+    expect(text).toContain("#### Ready queued")
+    expect(text).toContain("#### Blocked queued")
+    expect(text).toContain("#### Claimed / running")
     expect(text).toContain("### Stale / failed")
   })
 
@@ -241,7 +246,7 @@ describe("briefingCommand (unit — fake DB)", () => {
     expect(text).toContain("task_running_1")
   })
 
-  it("places queued tasks in Active section", async () => {
+  it("places ready queued tasks under the Ready queued subsection", async () => {
     const seedRows = new Map<string, readonly DbRow[]>([
       [BRIEFING_SQL.WATERMARK, []],
       [BRIEFING_SQL.TASKS, [makeTaskRow({ id: "task_q_1", status: "queued", title: "Queued task" })]],
@@ -252,8 +257,34 @@ describe("briefingCommand (unit — fake DB)", () => {
     const layer = Layer.merge(makeDbServiceTest(seedRows), out.layer)
     await runEff(Effect.provide(briefingCommand(), layer))
     const text = out.lines().join("\n")
+    expect(text).toContain("#### Ready queued")
     expect(text).toContain("[queued]")
     expect(text).toContain("task_q_1")
+  })
+
+  it("renders blocked queued tasks with blocker scope and status", async () => {
+    const seedRows = new Map<string, readonly DbRow[]>([
+      [BRIEFING_SQL.WATERMARK, []],
+      [BRIEFING_SQL.TASKS, [makeTaskRow({ id: "task_blocked", status: "queued", title: "Blocked task" })]],
+      [LOAD_UNRESOLVED_DEPENDENCIES_SQL, [
+        {
+          id: "task_dep_1",
+          scope_id: "repo:api",
+          status: "running",
+          title: "API blocker",
+          created_at: "2026-05-01T12:00:00Z",
+        },
+      ]],
+      [BRIEFING_SQL.STALE_RUNS, []],
+      [BRIEFING_SQL.ARTIFACTS, []],
+    ])
+    const out = makeOutputServiceTest()
+    const layer = Layer.merge(makeDbServiceTest(seedRows), out.layer)
+    await runEff(Effect.provide(briefingCommand(), layer))
+    const text = out.lines().join("\n")
+    expect(text).toContain("#### Blocked queued")
+    expect(text).toContain("[queued blocked] `task_blocked`")
+    expect(text).toContain("blocked by `task_dep_1` (scope: repo:api, status: running)")
   })
 
   it("places stale runs in Stale / failed section", async () => {

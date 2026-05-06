@@ -31,11 +31,6 @@ class TaskRelationshipSummaryRow extends Schema.Class<TaskRelationshipSummaryRow
   created_at: Schema.String,
 }) {}
 
-class TaskIdRow extends Schema.Class<TaskIdRow>("TaskIdRow")({
-  id: Schema.String,
-  created_at: Schema.String,
-}) {}
-
 const decodeTaskDependencyRow = (row: unknown): Effect.Effect<TaskDependencyRow, PithosError> =>
   Schema.decodeUnknown(TaskDependencyRow)(row).pipe(
     Effect.mapError(
@@ -56,17 +51,6 @@ const decodeTaskRelationshipSummaryRow = (
         new PithosError({
           code: "INTERNAL_ERROR",
           message: "task relationship row shape violation",
-        }),
-    ),
-  )
-
-const decodeTaskIdRow = (row: unknown): Effect.Effect<TaskIdRow, PithosError> =>
-  Schema.decodeUnknown(TaskIdRow)(row).pipe(
-    Effect.mapError(
-      () =>
-        new PithosError({
-          code: "INTERNAL_ERROR",
-          message: "task id row shape violation",
         }),
     ),
   )
@@ -210,25 +194,31 @@ export const loadDirectDependents = (
     )
   })
 
-export const loadUnresolvedDependencyIds = (
-  taskId: string,
-): Effect.Effect<readonly string[], PithosError, DbService> =>
-  Effect.gen(function* () {
-    const db = yield* DbService
-    const rows = yield* db.query(
-      `SELECT t.id, t.created_at
+export const LOAD_UNRESOLVED_DEPENDENCIES_SQL = `SELECT t.id, t.scope_id, t.status, t.title, t.created_at
        FROM task_dependencies td
        JOIN tasks t ON t.id = td.depends_on_task_id
        WHERE td.task_id = ?
          AND t.status <> 'done'
-       ORDER BY t.created_at ASC, t.id ASC`,
-      [taskId],
-    )
+       ORDER BY t.created_at ASC, t.id ASC`
 
-    return yield* Effect.forEach(rows, decodeTaskIdRow).pipe(
-      Effect.map((decodedRows) => decodedRows.map((row) => row.id)),
+export const loadUnresolvedDependencies = (
+  taskId: string,
+): Effect.Effect<readonly TaskRelationshipSummary[], PithosError, DbService> =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const rows = yield* db.query(LOAD_UNRESOLVED_DEPENDENCIES_SQL, [taskId])
+
+    return yield* Effect.forEach(rows, decodeTaskRelationshipSummaryRow).pipe(
+      Effect.map((decodedRows) => decodedRows.map(toTaskRelationshipSummary)),
     )
   })
+
+export const loadUnresolvedDependencyIds = (
+  taskId: string,
+): Effect.Effect<readonly string[], PithosError, DbService> =>
+  loadUnresolvedDependencies(taskId).pipe(
+    Effect.map((dependencies) => dependencies.map((dependency) => dependency.id)),
+  )
 
 export const loadSupersedesSummary = (
   taskId: string,

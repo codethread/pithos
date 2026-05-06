@@ -25,7 +25,8 @@ const DEFAULT_LEASE_MINUTES = 10
 /**
  * `pithos claim --run <run-id> --scope <scope-id> --capability <cap> [--lease-minutes <n>]`
  *
- * Atomically claims the oldest queued task matching the scope and capability.
+ * Atomically claims the oldest ready queued task matching the scope and capability.
+ * A queued task is ready only when all direct dependencies are already `done`.
  * In a single transaction:
  *  - Sets status = 'claimed', lease_owner_run_id, lease_until
  *  - Increments fencing_token and attempts
@@ -107,11 +108,19 @@ export const claimCommand = (
              attempts           = attempts + 1,
              updated_at         = datetime('now')
            WHERE id = (
-             SELECT id FROM tasks
-             WHERE status     = 'queued'
-               AND scope_id   = ?
-               AND capability = ?
-             ORDER BY created_at ASC, id ASC
+             SELECT t.id
+             FROM tasks t
+             WHERE t.status     = 'queued'
+               AND t.scope_id   = ?
+               AND t.capability = ?
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM task_dependencies td
+                 JOIN tasks dep ON dep.id = td.depends_on_task_id
+                 WHERE td.task_id = t.id
+                   AND dep.status <> 'done'
+               )
+             ORDER BY t.created_at ASC, t.id ASC
              LIMIT 1
            )
            RETURNING *`,
@@ -193,7 +202,8 @@ Output (JSON, no work):
   { "ok": false, "error": "no_claimable_work" }
 
 Notes:
-  - Claims the oldest queued task matching the scope and capability (FIFO).
+  - Claims the oldest ready queued task matching the scope and capability (FIFO among claimable work).
+  - Queued tasks with unresolved dependencies stay queued and are skipped until every direct blocker is done.
   - The fencing_token must be passed to complete/fail/heartbeat commands.
   - A task can only be held by one run; concurrent claims are safe.
 

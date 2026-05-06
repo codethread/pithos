@@ -4,6 +4,10 @@ import { OutputService } from "../services/output.ts"
 import { PithosError } from "../errors/errors.ts"
 import { withCommandObservability } from "../layers/metrics.ts"
 import { TaskRow, RunRow, ArtifactRow } from "../db/rows.ts"
+import {
+  loadUnresolvedDependencies,
+  type TaskRelationshipSummary,
+} from "../domain/task-graph.ts"
 
 // ---------------------------------------------------------------------------
 // Options
@@ -23,7 +27,7 @@ export interface BriefingOptions {
 // ---------------------------------------------------------------------------
 
 export const BRIEFING_SQL = {
-  TASKS: `SELECT * FROM tasks WHERE status NOT IN ('cancelled') ORDER BY created_at ASC`,
+  TASKS: `SELECT * FROM tasks WHERE status NOT IN ('cancelled') ORDER BY created_at ASC, id ASC`,
   /** Stale runs: already marked stale OR active with heartbeat older than 15 minutes. */
   STALE_RUNS: `SELECT * FROM runs WHERE status = 'stale' OR (status IN ('starting', 'running', 'idle') AND ((last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) < datetime('now', '-15 minutes')) OR (last_heartbeat_at IS NULL AND datetime(created_at) < datetime('now', '-15 minutes')))) ORDER BY updated_at DESC`,
   ARTIFACTS: `SELECT * FROM artifacts WHERE kind IN ('worker-completion', 'design-brief', 'question') ORDER BY created_at DESC LIMIT 50`,
@@ -78,14 +82,30 @@ const decodeArtifactRow = (row: unknown): Effect.Effect<ArtifactRow, PithosError
  *   - as_of_event_id: <n>  — watermark (latest event ID in the DB at render time)
  *
  * Sections:
- *   ### Needs Adam      dead_letter tasks + question artifacts
+ *   ### Needs Adam        dead_letter tasks + question artifacts
  *   ### Ready for review  done tasks, with any worker-completion/design-brief artifact summaries
- *   ### Active          queued + claimed + running tasks
- *   ### Stale / failed  stale runs + failed tasks
+ *   ### Active            ready queued, blocked queued, then claimed/running tasks
+ *   ### Stale / failed    stale runs + failed tasks
  *
  * Output is markdown text (not JSON). The renderer formats facts;
  * Pandora interprets them. No summarisation in code.
  */
+interface QueuedTaskState {
+  readonly task: TaskRow
+  readonly unresolvedBlockers: readonly TaskRelationshipSummary[]
+}
+
+const renderActiveTaskLine = (task: TaskRow, statusLabel = task.status): string => {
+  const leaseInfo = task.lease_until !== null ? `, lease: ${task.lease_until}` : ""
+  const runInfo =
+    task.lease_owner_run_id !== null ? `, run: ${task.lease_owner_run_id}` : ""
+
+  return `- [${statusLabel}] \`${task.id}\`: "${task.title}" (scope: ${task.scope_id}, capability: ${task.capability}${runInfo}${leaseInfo})`
+}
+
+const renderBlockerLine = (blocker: TaskRelationshipSummary): string =>
+  `  - blocked by \`${blocker.id}\` (scope: ${blocker.scope_id}, status: ${blocker.status})`
+
 export const briefingCommand = (
   opts: BriefingOptions = {},
 ): Effect.Effect<void, PithosError, DbService | OutputService> =>
@@ -110,11 +130,24 @@ export const briefingCommand = (
     // rendered rows share a consistent SQLite snapshot. Watermark is read
     // last: it captures the max event ID as of the moment all task/run/
     // artifact rows were fetched, preserving the incremental-sync contract.
-    const { maxEventId, allTasks, staleRuns, artifacts } = yield* db.withTransaction(
+    const { maxEventId, allTasks, queuedTaskStates, staleRuns, artifacts } = yield* db.withTransaction(
       Effect.gen(function* () {
         // All non-cancelled tasks.
         const rawTaskRows = yield* db.query(BRIEFING_SQL.TASKS, [])
         const tasks = yield* Effect.forEach(rawTaskRows, decodeTaskRow)
+
+        const queuedTaskStates = yield* Effect.forEach(
+          tasks.filter((task) => task.status === "queued"),
+          (task) =>
+            Effect.provideService(loadUnresolvedDependencies(task.id), DbService, db).pipe(
+              Effect.map(
+                (unresolvedBlockers): QueuedTaskState => ({
+                  task,
+                  unresolvedBlockers,
+                }),
+              ),
+            ),
+        )
 
         // Stale/expired runs: already marked stale OR active with old heartbeat.
         const rawRunRows = yield* db.query(BRIEFING_SQL.STALE_RUNS, [])
@@ -130,7 +163,13 @@ export const briefingCommand = (
         const rawMaxId = firstRow !== undefined ? firstRow.max_id : null
         const maxId: number | null = typeof rawMaxId === "number" ? rawMaxId : null
 
-        return { maxEventId: maxId, allTasks: tasks, staleRuns: runs, artifacts: arts }
+        return {
+          maxEventId: maxId,
+          allTasks: tasks,
+          queuedTaskStates,
+          staleRuns: runs,
+          artifacts: arts,
+        }
       }),
     )
 
@@ -145,11 +184,19 @@ export const briefingCommand = (
     }
 
     // Categorise tasks by status.
-    const queuedTasks = allTasks.filter((t) => t.status === "queued")
-    const activeTasks = allTasks.filter((t) => t.status === "claimed" || t.status === "running")
+    const queuedTasks = queuedTaskStates.map((taskState) => taskState.task)
+    const claimedOrRunningTasks = allTasks.filter(
+      (t) => t.status === "claimed" || t.status === "running",
+    )
     const doneTasks = allTasks.filter((t) => t.status === "done")
     const failedTasks = allTasks.filter((t) => t.status === "failed")
     const deadLetterTasks = allTasks.filter((t) => t.status === "dead_letter")
+    const readyQueuedTasks = queuedTaskStates.filter(
+      (taskState) => taskState.unresolvedBlockers.length === 0,
+    )
+    const blockedQueuedTasks = queuedTaskStates.filter(
+      (taskState) => taskState.unresolvedBlockers.length > 0,
+    )
 
     // Question artifacts go in Needs Adam.
     const questionArtifacts = artifacts.filter((a) => a.kind === "question")
@@ -212,19 +259,31 @@ export const briefingCommand = (
     // --- Active ---
     lines.push(`### Active`)
     lines.push(``)
-    const activeItems: string[] = []
-    for (const task of [...queuedTasks, ...activeTasks]) {
-      const leaseInfo = task.lease_until !== null ? `, lease: ${task.lease_until}` : ""
-      const runInfo =
-        task.lease_owner_run_id !== null ? `, run: ${task.lease_owner_run_id}` : ""
-      activeItems.push(
-        `- [${task.status}] \`${task.id}\`: "${task.title}" (scope: ${task.scope_id}, capability: ${task.capability}${runInfo}${leaseInfo})`,
-      )
-    }
-    if (activeItems.length === 0) {
+
+    lines.push(`#### Ready queued`)
+    if (readyQueuedTasks.length === 0) {
       lines.push(`_nothing_`)
     } else {
-      lines.push(...activeItems)
+      lines.push(...readyQueuedTasks.map(({ task }) => renderActiveTaskLine(task)))
+    }
+    lines.push(``)
+
+    lines.push(`#### Blocked queued`)
+    if (blockedQueuedTasks.length === 0) {
+      lines.push(`_nothing_`)
+    } else {
+      for (const blockedTask of blockedQueuedTasks) {
+        lines.push(renderActiveTaskLine(blockedTask.task, "queued blocked"))
+        lines.push(...blockedTask.unresolvedBlockers.map(renderBlockerLine))
+      }
+    }
+    lines.push(``)
+
+    lines.push(`#### Claimed / running`)
+    if (claimedOrRunningTasks.length === 0) {
+      lines.push(`_nothing_`)
+    } else {
+      lines.push(...claimedOrRunningTasks.map((task) => renderActiveTaskLine(task)))
     }
     lines.push(``)
 
@@ -254,7 +313,9 @@ export const briefingCommand = (
       Effect.annotateLogs({
         agent: agentRaw,
         as_of_event_id: String(maxEventId ?? 0),
-        active: String(queuedTasks.length + activeTasks.length),
+        active: String(queuedTasks.length + claimedOrRunningTasks.length),
+        ready_queued: String(readyQueuedTasks.length),
+        blocked_queued: String(blockedQueuedTasks.length),
         done: String(doneTasks.length),
         failed: String(failedTasks.length),
         dead_letter: String(deadLetterTasks.length),
@@ -293,7 +354,14 @@ Output (markdown):
   - done tasks with their worker-completion and design-brief artifact summaries
 
   ### Active
-  - queued, claimed, and running tasks (work in the pipeline)
+  #### Ready queued
+  - queued tasks whose direct blockers are all done
+
+  #### Blocked queued
+  - queued tasks with direct unresolved blockers, each listing blocker task id, scope, and status
+
+  #### Claimed / running
+  - currently leased work
 
   ### Stale / failed
   - runs marked stale or with heartbeat older than 15 minutes, plus failed tasks
@@ -302,6 +370,8 @@ Notes:
   - as_of_event_id is the latest event ID at render time; use it as a briefing watermark.
   - All DB reads run inside a single transaction so the watermark and rows are consistent.
   - Cancelled tasks are excluded.
+  - Ready queued tasks appear before blocked queued tasks, which appear before claimed/running tasks.
+  - Blocked queued tasks list all direct unresolved blockers ordered by blocker created_at, then blocker id.
   - Stale run detection uses the same 15-minute heartbeat threshold as pithos sweep.
   - The renderer formats raw facts; Pandora interprets them. No summarisation in code.
 

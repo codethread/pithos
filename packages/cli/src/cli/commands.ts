@@ -288,13 +288,13 @@ const claim = Command.make(
 ).pipe(
   Command.withDescription(
     desc(
-      "Atomically claim one queued task for a run",
+      "Atomically claim the oldest ready queued task for a run",
       "pithos claim",
       [
         "pithos claim --run run_abc --scope global --capability triage",
         "pithos claim --run run_abc --scope repo:work/repo --capability watch --lease-minutes 15",
       ],
-      "0 success with fencing_token in output | 2 validation error | 5 no claimable work",
+      "0 success with fencing_token in output | 2 validation error | 5 no ready work",
     ),
   ),
 )
@@ -631,7 +631,7 @@ const briefing = Command.make(
 ).pipe(
   Command.withDescription(
     desc(
-      "Render Pandora briefing markdown with as_of_event_id watermark",
+      "Render Pandora briefing markdown with ready vs blocked queued work",
       "pithos briefing",
       [
         "pithos briefing --agent pandora",

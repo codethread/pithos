@@ -84,7 +84,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 2. Ready-only claim + blocked/ready briefing
 - **Type:** AFK
-- **Status:** pending
+- **Status:** complete
 - **Blocked by:** 1
 - **User stories covered:** US2, US3, US4, US6
 - **Primary files:**

@@ -12,6 +12,7 @@ import Database from "better-sqlite3"
 import { claimCommand } from "../src/commands/claim.ts"
 import { enqueueCommand } from "../src/commands/enqueue.ts"
 import { runRegisterCommand } from "../src/commands/run.ts"
+import { scopeUpsertCommand } from "../src/commands/scope.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
@@ -52,12 +53,38 @@ describe("claimCommand (integration — real SQLite)", () => {
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  /** Enqueue a task in the global scope. Returns the task id. */
-  const enqueue = async (taskId: string, capability = "triage"): Promise<string> => {
+  const upsertRepoScope = async (pathSuffix: string): Promise<string> => {
+    const scopePath = join(tempDir, pathSuffix)
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        scopeUpsertCommand({ kind: "repo", path: scopePath }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
+
+    return (JSON.parse(out.lines()[0]!) as { scope: { id: string } }).scope.id
+  }
+
+  /** Enqueue a task. Returns the task id. */
+  const enqueue = async (
+    taskId: string,
+    opts: {
+      capability?: string
+      scope?: string
+      dependsOn?: readonly string[]
+      title?: string
+    } = {},
+  ): Promise<string> => {
     const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
-        enqueueCommand({ scope: "global", capability, title: `Task ${taskId}` }),
+        enqueueCommand({
+          scope: opts.scope ?? "global",
+          capability: opts.capability ?? "triage",
+          title: opts.title ?? `Task ${taskId}`,
+          dependsOn: opts.dependsOn,
+        }),
         layer,
       ),
     )
@@ -194,7 +221,7 @@ describe("claimCommand (integration — real SQLite)", () => {
   })
 
   it("fails NO_CLAIMABLE_WORK when scope/capability has no matching tasks", async () => {
-    await enqueue("task_cap_mismatch", "watch") // different capability
+    await enqueue("task_cap_mismatch", { capability: "watch" }) // different capability
     await registerRun("run_cap_mismatch")
 
     const exit = await runEff(
@@ -205,6 +232,71 @@ describe("claimCommand (integration — real SQLite)", () => {
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("skips an older blocked task and claims the newer ready task", async () => {
+    const blockerScope = await upsertRepoScope("api")
+    await enqueue("task_blocker", { scope: blockerScope, title: "Cross-scope blocker" })
+    await enqueue("task_blocked", {
+      scope: "global",
+      dependsOn: ["task_blocker"],
+      title: "Older blocked task",
+    })
+    await enqueue("task_ready", { scope: "global", title: "Newer ready task" })
+    await registerRun("run_ready_first")
+
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        claimCommand({ run: "run_ready_first", scope: "global", capability: "triage" }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
+
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      ok: boolean
+      task: { id: string; status: string }
+    }
+
+    expect(parsed.ok).toBe(true)
+    expect(parsed.task.id).toBe("task_ready")
+    expect(parsed.task.status).toBe("claimed")
+
+    const db = new Database(dbPath)
+    const blockedRow = db
+      .prepare("SELECT status FROM tasks WHERE id = 'task_blocked'")
+      .get() as { status: string }
+    db.close()
+
+    expect(blockedRow.status).toBe("queued")
+  })
+
+  it("treats cross-scope unfinished dependencies as not claimable", async () => {
+    const blockerScope = await upsertRepoScope("design")
+    await enqueue("task_design_blocker", { scope: blockerScope, title: "Design spec" })
+    await enqueue("task_waiting", {
+      scope: "global",
+      dependsOn: ["task_design_blocker"],
+      title: "Waiting on design",
+    })
+    await registerRun("run_blocked_claim")
+
+    const exit = await runEff(
+      Effect.provide(
+        claimCommand({ run: "run_blocked_claim", scope: "global", capability: "triage" }),
+        Layer.merge(dbLayer, silentOutput),
+      ),
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+
+    const db = new Database(dbPath)
+    const waitingRow = db
+      .prepare("SELECT status FROM tasks WHERE id = 'task_waiting'")
+      .get() as { status: string }
+    db.close()
+
+    expect(waitingRow.status).toBe("queued")
   })
 
   it("fails NOT_FOUND when run does not exist", async () => {

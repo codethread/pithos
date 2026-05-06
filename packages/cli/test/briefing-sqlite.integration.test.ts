@@ -17,6 +17,7 @@ import { claimCommand } from "../src/commands/claim.ts"
 import { completeCommand } from "../src/commands/complete.ts"
 import { artifactAddCommand } from "../src/commands/artifact.ts"
 import { initCommand } from "../src/commands/init.ts"
+import { scopeUpsertCommand } from "../src/commands/scope.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
 import { FsServiceLive } from "../src/layers/fs.ts"
@@ -48,9 +49,27 @@ describe("briefingCommand (integration — real SQLite)", () => {
   // Helpers
   // ---------------------------------------------------------------------------
 
+  const upsertRepoScope = async (pathSuffix: string): Promise<string> => {
+    const scopePath = join(tempDir, pathSuffix)
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(
+        scopeUpsertCommand({ kind: "repo", path: scopePath }),
+        Layer.merge(dbLayer, out.layer),
+      ),
+    )
+
+    return (JSON.parse(out.lines()[0]!) as { scope: { id: string } }).scope.id
+  }
+
   const enqueue = async (
     taskId: string,
-    opts: { capability?: string; title?: string; scope?: string } = {},
+    opts: {
+      capability?: string
+      title?: string
+      scope?: string
+      dependsOn?: readonly string[]
+    } = {},
   ): Promise<string> => {
     const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
@@ -59,6 +78,7 @@ describe("briefingCommand (integration — real SQLite)", () => {
           scope: opts.scope ?? "global",
           capability: opts.capability ?? "triage",
           title: opts.title ?? `Task ${taskId}`,
+          dependsOn: opts.dependsOn,
         }),
         layer,
       ),
@@ -68,16 +88,26 @@ describe("briefingCommand (integration — real SQLite)", () => {
 
   const registerRun = async (runId: string): Promise<string> => {
     const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput)
-    await Effect.runPromise(Effect.provide(runRegisterCommand({ agentKind: "envy" }), layer))
+    await Effect.runPromise(
+      Effect.provide(runRegisterCommand({ agentKind: "envy", run: runId }), layer),
+    )
     return runId
   }
 
-  const claim = async (runId: string): Promise<number> => {
+  const claim = async (
+    runId: string,
+    opts: { scope?: string; capability?: string } = {},
+  ): Promise<number> => {
     const out = makeOutputServiceTest()
     const layer = Layer.mergeAll(dbLayer, out.layer)
     await Effect.runPromise(
       Effect.provide(
-        claimCommand({ run: runId, scope: "global", capability: "triage", leaseMinutes: 10 }),
+        claimCommand({
+          run: runId,
+          scope: opts.scope ?? "global",
+          capability: opts.capability ?? "triage",
+          leaseMinutes: 10,
+        }),
         layer,
       ),
     )
@@ -120,6 +150,9 @@ describe("briefingCommand (integration — real SQLite)", () => {
     expect(text).toContain("### Needs Adam")
     expect(text).toContain("### Ready for review")
     expect(text).toContain("### Active")
+    expect(text).toContain("#### Ready queued")
+    expect(text).toContain("#### Blocked queued")
+    expect(text).toContain("#### Claimed / running")
     expect(text).toContain("### Stale / failed")
   })
 
@@ -145,12 +178,58 @@ describe("briefingCommand (integration — real SQLite)", () => {
   // Active section tests
   // ---------------------------------------------------------------------------
 
-  it("shows queued task in Active section", async () => {
+  it("shows ready queued task in the Ready queued subsection", async () => {
     await enqueue("task_queued_br", { title: "A queued task" })
     const text = await runBriefing()
+    expect(text).toContain("#### Ready queued")
     expect(text).toContain("[queued]")
     expect(text).toContain("A queued task")
     expect(text).toContain("task_queued_br")
+  })
+
+  it("lists ready queued tasks before blocked queued tasks before claimed work", async () => {
+    const blockerScope = await upsertRepoScope("api")
+    await enqueue("task_blocker_br", { scope: blockerScope, title: "API blocker" })
+    await enqueue("task_ready_br", { title: "Ready task" })
+    await enqueue("task_blocked_br", {
+      title: "Blocked task",
+      dependsOn: ["task_blocker_br"],
+    })
+    await registerRun("run_claimed_order")
+    await enqueue("task_claimed_br", { title: "Claimed task", capability: "watch" })
+    await claim("run_claimed_order", { capability: "watch" })
+
+    const text = await runBriefing()
+    const readyIndex = text.indexOf("[queued] `task_ready_br`")
+    const blockedIndex = text.indexOf("[queued blocked] `task_blocked_br`")
+    const claimedIndex = text.indexOf("[claimed] `task_claimed_br`")
+
+    expect(readyIndex).toBeGreaterThan(-1)
+    expect(blockedIndex).toBeGreaterThan(readyIndex)
+    expect(claimedIndex).toBeGreaterThan(blockedIndex)
+  })
+
+  it("shows blocked queued tasks with all unresolved blocker ids, scopes, and statuses in blocker order", async () => {
+    const designScope = await upsertRepoScope("design")
+    const apiScope = await upsertRepoScope("api-2")
+    await enqueue("task_blocker_a", { scope: designScope, title: "Design blocker" })
+    await enqueue("task_blocker_b", { scope: apiScope, title: "API blocker" })
+    await enqueue("task_multi_blocked", {
+      title: "Blocked by two tasks",
+      dependsOn: ["task_blocker_a", "task_blocker_b"],
+    })
+
+    const text = await runBriefing()
+    expect(text).toContain("#### Blocked queued")
+    expect(text).toContain("[queued blocked] `task_multi_blocked`")
+
+    const blockerALine = `blocked by \`task_blocker_a\` (scope: ${designScope}, status: queued)`
+    const blockerBLine = `blocked by \`task_blocker_b\` (scope: ${apiScope}, status: queued)`
+    const blockerAIndex = text.indexOf(blockerALine)
+    const blockerBIndex = text.indexOf(blockerBLine)
+
+    expect(blockerAIndex).toBeGreaterThan(-1)
+    expect(blockerBIndex).toBeGreaterThan(blockerAIndex)
   })
 
   it("shows claimed task in Active section with run reference", async () => {

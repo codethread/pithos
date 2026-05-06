@@ -391,10 +391,14 @@ export const computeTaskClaimability = (
 })
 
 const loadTaskGraphConnectedTaskIds = (
-  seedTaskId: string,
+  seedTaskIds: readonly string[],
 ): Effect.Effect<readonly string[], PithosError, DbService> =>
   Effect.gen(function* () {
-    const queue = [seedTaskId]
+    if (seedTaskIds.length === 0) {
+      return []
+    }
+
+    const queue = [...seedTaskIds].sort(sortStrings)
     const seen = new Set(queue)
 
     while (queue.length > 0) {
@@ -592,6 +596,73 @@ const assertClosedTaskGraph = (graph: TaskGraph): Effect.Effect<void, PithosErro
     }
   })
 
+const dedupeTaskIds = (taskIds: readonly string[]): readonly string[] =>
+  [...new Set(taskIds)].sort(sortStrings)
+
+const buildTaskGraph = (
+  taskIds: readonly string[],
+): Effect.Effect<TaskGraph, PithosError, DbService> =>
+  Effect.gen(function* () {
+    const nodes = yield* loadTaskGraphNodes(taskIds)
+    const edges = yield* loadTaskGraphEdges(taskIds)
+    const graph = { nodes, edges } satisfies TaskGraph
+
+    yield* assertClosedTaskGraph(graph)
+
+    return graph
+  })
+
+const loadLiveTaskGraphConnectedTaskIds = (
+  seedTaskIds: readonly string[],
+): Effect.Effect<readonly string[], PithosError, DbService> =>
+  Effect.gen(function* () {
+    const queue = [...dedupeTaskIds(seedTaskIds)]
+    const seen = new Set(queue)
+
+    while (queue.length > 0) {
+      const currentTaskId = queue.shift()!
+      const unresolvedDependencies = yield* loadUnresolvedDependencies(currentTaskId)
+      const supersedes = yield* loadSupersedesSummary(currentTaskId)
+      const supersededBy = yield* loadSupersededBySummary(currentTaskId)
+      const directDependencies = yield* loadDirectDependencies(currentTaskId)
+
+      const neighbors = [
+        ...directDependencies,
+        ...unresolvedDependencies,
+        ...(supersedes === null ? [] : [supersedes]),
+        ...(supersededBy === null ? [] : [supersededBy]),
+      ]
+
+      for (const neighbor of neighbors) {
+        if (!seen.has(neighbor.id)) {
+          seen.add(neighbor.id)
+          queue.push(neighbor.id)
+        }
+      }
+    }
+
+    return [...seen].sort(sortStrings)
+  })
+
+const loadTaskGraphFromSeedTaskIds = (
+  seedTaskIds: readonly string[],
+): Effect.Effect<TaskGraph, PithosError, DbService> =>
+  Effect.gen(function* () {
+    const taskIds = yield* loadTaskGraphConnectedTaskIds(dedupeTaskIds(seedTaskIds))
+    return yield* buildTaskGraph(taskIds)
+  })
+
+const loadIdRows = (
+  sql: string,
+  params: readonly unknown[] = [],
+): Effect.Effect<readonly string[], PithosError, DbService> =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const rows = yield* db.query(sql, [...params])
+    const decodedRows = yield* Effect.forEach(rows, decodeIdRow)
+    return decodedRows.map((row) => row.id)
+  })
+
 export const loadTaskGraph = (
   seedTaskId: string,
 ): Effect.Effect<TaskGraph, PithosError, DbService> =>
@@ -610,12 +681,46 @@ export const loadTaskGraph = (
     }
     yield* decodeIdRow(seedRows[0]!)
 
-    const taskIds = yield* loadTaskGraphConnectedTaskIds(seedTaskId)
-    const nodes = yield* loadTaskGraphNodes(taskIds)
-    const edges = yield* loadTaskGraphEdges(taskIds)
-    const graph = { nodes, edges } satisfies TaskGraph
-
-    yield* assertClosedTaskGraph(graph)
-
-    return graph
+    return yield* loadTaskGraphFromSeedTaskIds([seedTaskId])
   })
+
+export const loadScopeTaskGraph = (
+  scopeId: string,
+): Effect.Effect<TaskGraph, PithosError, DbService> =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const scopeRows = yield* db.query(`SELECT id FROM scopes WHERE id = ?`, [scopeId])
+
+    if (scopeRows.length === 0) {
+      yield* Effect.fail(
+        new PithosError({
+          code: "NOT_FOUND",
+          message: `Scope not found: ${scopeId}`,
+        }),
+      )
+      return yield* Effect.never
+    }
+    yield* decodeIdRow(scopeRows[0]!)
+
+    const seedTaskIds = yield* loadIdRows(
+      `SELECT id
+       FROM tasks
+       WHERE scope_id = ?
+         AND status <> 'cancelled'
+       ORDER BY created_at ASC, id ASC`,
+      [scopeId],
+    )
+
+    return yield* loadTaskGraphFromSeedTaskIds(seedTaskIds)
+  })
+
+export const loadLiveTaskGraph = (): Effect.Effect<TaskGraph, PithosError, DbService> =>
+  loadIdRows(
+    `SELECT id
+     FROM tasks
+     WHERE status <> 'cancelled'
+     ORDER BY created_at ASC, id ASC`,
+  ).pipe(
+    Effect.flatMap(loadLiveTaskGraphConnectedTaskIds),
+    Effect.flatMap(buildTaskGraph),
+  )

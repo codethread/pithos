@@ -196,7 +196,7 @@ Exit codes:
 
   - inspect task <task-id>                                                                                                               
 
-  - inspect graph --task text                                                                                                            
+  - inspect graph [--task text] [--scope text] [--live]                                                                                  
 
   - tail [--limit integer]                                                                                                               
 
@@ -428,7 +428,7 @@ Exit codes:
 
   - inspect task <task-id>                                                                                                               
 
-  - inspect graph --task text                                                                                                            
+  - inspect graph [--task text] [--scope text] [--live]                                                                                  
 
   - tail [--limit integer]                                                                                                               
 

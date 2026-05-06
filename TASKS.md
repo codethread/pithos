@@ -201,7 +201,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 5. Graph inspection for scopes and live work
 - **Type:** AFK
-- **Status:** pending
+- **Status:** complete
 - **Blocked by:** 3, 4
 - **User stories covered:** US2, US4, US6
 - **Primary files:**

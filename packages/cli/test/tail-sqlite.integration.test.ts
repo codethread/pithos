@@ -8,10 +8,12 @@ import { Effect, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import Database from "better-sqlite3"
 
 import { tailCommand } from "../src/commands/tail.ts"
 import { enqueueCommand } from "../src/commands/enqueue.ts"
 import { runRegisterCommand } from "../src/commands/run.ts"
+import { supersedeCommand } from "../src/commands/supersede.ts"
 import { initCommand } from "../src/commands/init.ts"
 import { makeDbServiceLive } from "../src/layers/db.ts"
 import { makeIdServiceTest } from "../src/layers/ids.ts"
@@ -44,11 +46,25 @@ describe("tailCommand (integration — real SQLite)", () => {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  const enqueue = async (taskId: string, capability = "triage"): Promise<void> => {
+  const enqueue = async (
+    taskId: string,
+    opts: {
+      capability?: string
+      title?: string
+      dependsOn?: readonly string[]
+      run?: string
+    } = {},
+  ): Promise<void> => {
     const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([taskId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
       Effect.provide(
-        enqueueCommand({ scope: "global", capability, title: `Task ${taskId}` }),
+        enqueueCommand({
+          scope: "global",
+          capability: opts.capability ?? "triage",
+          title: opts.title ?? `Task ${taskId}`,
+          dependsOn: opts.dependsOn,
+          run: opts.run,
+        }),
         layer,
       ),
     )
@@ -57,8 +73,42 @@ describe("tailCommand (integration — real SQLite)", () => {
   const registerRun = async (runId: string): Promise<void> => {
     const layer = Layer.mergeAll(dbLayer, makeIdServiceTest([runId]), FsServiceLive, silentOutput)
     await Effect.runPromise(
-      Effect.provide(runRegisterCommand({ agentKind: "envy" }), layer),
+      Effect.provide(runRegisterCommand({ agentKind: "envy", run: runId }), layer),
     )
+  }
+
+  const supersede = async (
+    taskId: string,
+    replacementTaskId: string,
+    opts: {
+      run: string
+      reason: string
+      title?: string
+    },
+  ): Promise<void> => {
+    const layer = Layer.mergeAll(
+      dbLayer,
+      makeIdServiceTest([replacementTaskId]),
+      FsServiceLive,
+      silentOutput,
+    )
+    await Effect.runPromise(
+      Effect.provide(
+        supersedeCommand({
+          taskId,
+          run: opts.run,
+          reason: opts.reason,
+          title: opts.title,
+        }),
+        layer,
+      ),
+    )
+  }
+
+  const setTaskStatus = (taskId: string, status: string): void => {
+    const db = new Database(dbPath)
+    db.prepare(`UPDATE tasks SET status = ? WHERE id = ?`).run(status, taskId)
+    db.close()
   }
 
   // ---------------------------------------------------------------------------
@@ -115,6 +165,50 @@ describe("tailCommand (integration — real SQLite)", () => {
     expect(taskEvent!.task_id).toBe("task_tail_ref")
   })
 
+  it("surfaces task.created graph payloads for dependency authoring", async () => {
+    await registerRun("run_tail_creator")
+    await enqueue("task_tail_parent", { title: "Parent task" })
+    await enqueue("task_tail_child", {
+      capability: "build",
+      title: "Child task",
+      dependsOn: ["task_tail_parent"],
+      run: "run_tail_creator",
+    })
+
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(tailCommand({ limit: 10 }), Layer.merge(dbLayer, out.layer)),
+    )
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      events: {
+        type: string
+        task_id: string | null
+        actor_run_id: string | null
+        payload_json: string
+      }[]
+    }
+    const createdEvent = parsed.events.find(
+      (event) => event.type === "task.created" && event.task_id === "task_tail_child",
+    )
+    expect(createdEvent).toBeDefined()
+    expect(createdEvent?.actor_run_id).toBe("run_tail_creator")
+
+    const payload = JSON.parse(createdEvent?.payload_json ?? "{}") as {
+      scope_id: string
+      capability: string
+      title: string
+      depends_on_task_ids: string[]
+      supersedes_task_id?: string
+    }
+    expect(payload).toEqual({
+      scope_id: "global",
+      capability: "build",
+      title: "Child task",
+      depends_on_task_ids: ["task_tail_parent"],
+    })
+    expect("supersedes_task_id" in payload).toBe(false)
+  })
+
   it("includes run_id reference in run.registered events", async () => {
     await registerRun("run_tail_ref")
 
@@ -128,6 +222,84 @@ describe("tailCommand (integration — real SQLite)", () => {
     const runEvent = parsed.events.find((e) => e.type === "run.registered")
     expect(runEvent).toBeDefined()
     expect(runEvent!.run_id).toBe("run_tail_ref")
+  })
+
+  it("surfaces task supersession and cancellation graph payloads end-to-end", async () => {
+    await registerRun("run_tail_actor")
+    await enqueue("task_tail_a", { title: "Task A" })
+    await enqueue("task_tail_b", {
+      capability: "build",
+      title: "Task B",
+      dependsOn: ["task_tail_a"],
+    })
+    await enqueue("task_tail_c", {
+      capability: "build",
+      title: "Task C",
+      dependsOn: ["task_tail_b"],
+    })
+    setTaskStatus("task_tail_a", "done")
+    await supersede("task_tail_b", "task_tail_d", {
+      run: "run_tail_actor",
+      reason: "Wrong middle task",
+      title: "Task D",
+    })
+
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(tailCommand({ limit: 20 }), Layer.merge(dbLayer, out.layer)),
+    )
+    const parsed = JSON.parse(out.lines()[0]!) as {
+      events: {
+        type: string
+        task_id: string | null
+        actor_run_id: string | null
+        payload_json: string
+      }[]
+    }
+
+    const graphEvents = parsed.events.filter(
+      (event) =>
+        (event.type === "task.created" && event.task_id === "task_tail_d") ||
+        (event.type === "task.cancelled" && event.task_id === "task_tail_b") ||
+        (event.type === "task.superseded" && event.task_id === "task_tail_b"),
+    )
+    const createdEvent = graphEvents.find(
+      (event) => event.type === "task.created" && event.task_id === "task_tail_d",
+    )
+    const cancelledEvent = graphEvents.find(
+      (event) => event.type === "task.cancelled" && event.task_id === "task_tail_b",
+    )
+    const supersededEvent = graphEvents.find(
+      (event) => event.type === "task.superseded" && event.task_id === "task_tail_b",
+    )
+
+    expect(graphEvents.map((event) => event.type)).toEqual([
+      "task.cancelled",
+      "task.created",
+      "task.superseded",
+    ])
+    expect(createdEvent).toBeDefined()
+    expect(cancelledEvent).toBeDefined()
+    expect(supersededEvent).toBeDefined()
+    expect(createdEvent?.actor_run_id).toBe("run_tail_actor")
+    expect(cancelledEvent?.actor_run_id).toBe("run_tail_actor")
+    expect(supersededEvent?.actor_run_id).toBe("run_tail_actor")
+    expect(JSON.parse(createdEvent?.payload_json ?? "{}")).toEqual({
+      scope_id: "global",
+      capability: "build",
+      title: "Task D",
+      depends_on_task_ids: ["task_tail_a"],
+      supersedes_task_id: "task_tail_b",
+    })
+    expect(JSON.parse(cancelledEvent?.payload_json ?? "{}")).toEqual({
+      reason: "Wrong middle task",
+      superseded_by_task_id: "task_tail_d",
+    })
+    expect(JSON.parse(supersededEvent?.payload_json ?? "{}")).toEqual({
+      new_task_id: "task_tail_d",
+      reason: "Wrong middle task",
+      retargeted_dependent_task_ids: ["task_tail_c"],
+    })
   })
 
   it("events are ordered ascending by id (oldest-first)", async () => {

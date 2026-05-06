@@ -25,7 +25,7 @@ pithos <command> --help              # per-command flags + examples + exit codes
 - `pithos complete|fail` — terminate a claim, fenced.
 - `pithos artifact add` — attach a worker-completion or other artifact to a task.
 - `pithos inspect scope|run|task|graph` — read structured state; `inspect task` includes direct dependencies, dependents, unresolved blockers, supersession links, and artifacts, while `inspect graph --task <id> | --scope <scope-id> | --live` returns a closed dependency/supersession graph for one task, one scope, or all live work. Graph nodes include `claimable`, `unresolved_dependency_ids`, `supersedes_task_id`, and `superseded_by_task_id`; graph edges are `depends_on`/`supersedes` records with dependency `satisfied` state.
-- `pithos tail [--limit N]` — recent events.
+- `pithos tail [--limit N]` — recent events, including graph-history payloads for `task.created` (`depends_on_task_ids`, optional `supersedes_task_id`), `task.cancelled` (`reason`, `superseded_by_task_id`), and `task.superseded` (`new_task_id`, `reason`, `retargeted_dependent_task_ids`).
 - `pithos sweep` — requeue expired leases, dead-letter exhausted tasks, mark stale runs.
 - `pithos briefing --agent pandora` — markdown briefing with `as_of_event_id` watermark plus ready vs blocked queued work.
 

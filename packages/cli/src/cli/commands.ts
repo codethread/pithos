@@ -681,12 +681,18 @@ const tail = Command.make(
   ({ limit }) => tailCommand({ limit: opt(limit) }),
 ).pipe(
   Command.withDescription(
-    desc(
-      "Show recent events for debugging",
-      "pithos tail",
-      ["pithos tail", "pithos tail --limit 100"],
-      "0 success | 2 validation error",
-    ),
+    HelpDoc.blocks([
+      HelpDoc.p("pithos tail - Show recent events for debugging and graph-history audit"),
+      HelpDoc.p("Graph-history payloads in payload_json:"),
+      HelpDoc.p("  task.created     => scope_id, capability, title, depends_on_task_ids, optional supersedes_task_id"),
+      HelpDoc.p("  task.cancelled   => reason, superseded_by_task_id"),
+      HelpDoc.p("  task.superseded  => new_task_id, reason, retargeted_dependent_task_ids"),
+      HelpDoc.p("Examples:"),
+      HelpDoc.p("  pithos tail"),
+      HelpDoc.p("  pithos tail --limit 100"),
+      HelpDoc.p("  pithos tail --limit 100  # inspect task.created/task.cancelled/task.superseded payloads"),
+      HelpDoc.p("Exit codes: 0 success | 2 validation error"),
+    ]),
   ),
 )
 

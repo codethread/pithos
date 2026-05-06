@@ -230,7 +230,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 6. Tail/event contract completion
 - **Type:** AFK
-- **Status:** pending
+- **Status:** complete
 - **Blocked by:** 1, 4
 - **User stories covered:** US4, US5, US6
 - **Primary files:**

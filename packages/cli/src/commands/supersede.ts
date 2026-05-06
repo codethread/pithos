@@ -32,6 +32,25 @@ class DirectDependencyIdRow extends Schema.Class<DirectDependencyIdRow>(
   depends_on_task_id: Schema.String,
 }) {}
 
+interface TaskCreatedEventPayload {
+  readonly scope_id: string
+  readonly capability: string
+  readonly title: string
+  readonly depends_on_task_ids: readonly string[]
+  readonly supersedes_task_id?: string
+}
+
+interface TaskCancelledEventPayload {
+  readonly reason: string
+  readonly superseded_by_task_id: string
+}
+
+interface TaskSupersededEventPayload {
+  readonly new_task_id: string
+  readonly reason: string
+  readonly retargeted_dependent_task_ids: readonly string[]
+}
+
 const decodeTaskRow = (row: unknown): Effect.Effect<TaskRow, PithosError> =>
   Schema.decodeUnknown(TaskRow)(row).pipe(
     Effect.mapError(
@@ -371,49 +390,43 @@ export const supersedeCommand = (
           yield* decodeIdRow(cancelledRows[0]!)
         }
 
-        yield* db.run(
-          `INSERT INTO events (task_id, actor_run_id, type, payload_json)
-           VALUES (?, ?, 'task.created', ?)`,
-          [
-            replacementTaskId,
-            runId,
-            JSON.stringify({
-              scope_id: replacementScopeId,
-              capability: replacementCapability,
-              title: replacementTitle,
-              depends_on_task_ids: dependencyIds,
-              supersedes_task_id: taskId,
-            }),
-          ],
-        )
-
         if (oldTask.status === "queued") {
+          const taskCancelledEventPayload = {
+            reason,
+            superseded_by_task_id: replacementTaskId,
+          } satisfies TaskCancelledEventPayload
+
           yield* db.run(
             `INSERT INTO events (task_id, actor_run_id, type, payload_json)
              VALUES (?, ?, 'task.cancelled', ?)`,
-            [
-              taskId,
-              runId,
-              JSON.stringify({
-                reason,
-                superseded_by_task_id: replacementTaskId,
-              }),
-            ],
+            [taskId, runId, JSON.stringify(taskCancelledEventPayload)],
           )
         }
+
+        const taskCreatedEventPayload = {
+          scope_id: replacementScopeId,
+          capability: replacementCapability,
+          title: replacementTitle,
+          depends_on_task_ids: dependencyIds,
+          supersedes_task_id: taskId,
+        } satisfies TaskCreatedEventPayload
+
+        yield* db.run(
+          `INSERT INTO events (task_id, actor_run_id, type, payload_json)
+           VALUES (?, ?, 'task.created', ?)`,
+          [replacementTaskId, runId, JSON.stringify(taskCreatedEventPayload)],
+        )
+
+        const taskSupersededEventPayload = {
+          new_task_id: replacementTaskId,
+          reason,
+          retargeted_dependent_task_ids: retargetedDependentTaskIds,
+        } satisfies TaskSupersededEventPayload
 
         yield* db.run(
           `INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.superseded', ?)`,
-          [
-            taskId,
-            runId,
-            JSON.stringify({
-              new_task_id: replacementTaskId,
-              reason,
-              retargeted_dependent_task_ids: retargetedDependentTaskIds,
-            }),
-          ],
+          [taskId, runId, JSON.stringify(taskSupersededEventPayload)],
         )
 
         yield* Effect.provideService(assertTaskGraphAcyclic, DbService, db)

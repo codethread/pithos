@@ -34,7 +34,11 @@ export interface TailOptions {
  *   { "ok": true, "count": N, "events": [...] }
  *
  * Each event includes id, created_at, type, payload_json, task_id, run_id,
- * and actor_run_id (the task/run references).
+ * and actor_run_id (the task/run references). Graph-history events keep their
+ * typed payload in payload_json: task.created includes depends_on_task_ids and
+ * optional supersedes_task_id; task.superseded includes new_task_id, reason,
+ * and retargeted_dependent_task_ids; task.cancelled includes reason and
+ * superseded_by_task_id.
  */
 export const tailCommand = (
   opts: TailOptions = {},
@@ -115,7 +119,7 @@ export const tailCommand = (
 // Help text
 // ---------------------------------------------------------------------------
 
-export const TAIL_HELP = `pithos tail - Show recent events
+export const TAIL_HELP = `pithos tail - Show recent events and graph history
 
 Usage:
   pithos tail [options]
@@ -132,15 +136,37 @@ Output (JSON):
       {
         "id": 1,
         "created_at": "2026-05-01T12:00:00Z",
-        "actor_run_id": null,
-        "task_id": "task_...",
+        "actor_run_id": "run_actor",
+        "task_id": "task_new",
         "run_id": null,
         "type": "task.created",
-        "payload_json": "{}"
+        "payload_json": "{\\"scope_id\\":\\"repo:be\\",\\"capability\\":\\"build\\",\\"title\\":\\"Fix API\\",\\"depends_on_task_ids\\":[\\"task_a\\"],\\"supersedes_task_id\\":\\"task_b\\"}"
       },
-      ...
+      {
+        "id": 2,
+        "created_at": "2026-05-01T12:00:01Z",
+        "actor_run_id": "run_actor",
+        "task_id": "task_b",
+        "run_id": null,
+        "type": "task.cancelled",
+        "payload_json": "{\\"reason\\":\\"Wrong middle task\\",\\"superseded_by_task_id\\":\\"task_new\\"}"
+      },
+      {
+        "id": 3,
+        "created_at": "2026-05-01T12:00:02Z",
+        "actor_run_id": "run_actor",
+        "task_id": "task_b",
+        "run_id": null,
+        "type": "task.superseded",
+        "payload_json": "{\\"new_task_id\\":\\"task_new\\",\\"reason\\":\\"Wrong middle task\\",\\"retargeted_dependent_task_ids\\":[\\"task_c\\"]}"
+      }
     ]
   }
+
+Graph-history payloads in payload_json:
+  task.created     => scope_id, capability, title, depends_on_task_ids, optional supersedes_task_id
+  task.cancelled   => reason, superseded_by_task_id
+  task.superseded  => new_task_id, reason, retargeted_dependent_task_ids
 
 Events are ordered oldest-first (ascending by id).
 task_id, run_id, and actor_run_id are null when not applicable.
@@ -148,7 +174,7 @@ task_id, run_id, and actor_run_id are null when not applicable.
 Examples:
   pithos tail
   pithos tail --limit 50
-  pithos tail --limit 100
+  pithos tail --limit 100   # audit task.created / task.cancelled / task.superseded history
 
 Exit codes: 0 success | 2 validation error
 `

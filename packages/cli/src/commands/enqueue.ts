@@ -21,6 +21,14 @@ class SupersededDependencyRow extends Schema.Class<SupersededDependencyRow>(
   title: Schema.String,
 }) {}
 
+interface TaskCreatedEventPayload {
+  readonly scope_id: string
+  readonly capability: string
+  readonly title: string
+  readonly depends_on_task_ids: readonly string[]
+  readonly supersedes_task_id?: string
+}
+
 const decodeTaskIdRow = (row: unknown): Effect.Effect<TaskIdRow, PithosError> =>
   Schema.decodeUnknown(TaskIdRow)(row).pipe(
     Effect.mapError(
@@ -135,63 +143,64 @@ export const enqueueCommand = (
       body = yield* fs.readFile(opts.bodyFile)
     }
 
-    const scopeRows = yield* db.query(`SELECT id FROM scopes WHERE id = ?`, [scope])
-    if (scopeRows.length === 0) {
-      yield* Effect.fail(
-        new PithosError({ code: "NOT_FOUND", message: `Scope not found: ${scope}` }),
-      )
-      return
-    }
-
-    if (opts.run) {
-      const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [opts.run])
-      if (runRows.length === 0) {
-        yield* Effect.fail(
-          new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
-        )
-        return
-      }
-    }
-
-    for (const dependencyId of dependsOnTaskIds) {
-      const dependencyRows = yield* db.query(`SELECT id FROM tasks WHERE id = ?`, [dependencyId])
-      if (dependencyRows.length === 0) {
-        yield* Effect.fail(
-          new PithosError({
-            code: "NOT_FOUND",
-            message: `Dependency task not found: ${dependencyId}`,
-          }),
-        )
-        return
-      }
-      yield* decodeTaskIdRow(dependencyRows[0]!)
-
-      const supersededRows = yield* db.query(
-        `SELECT ts.old_task_id, ts.new_task_id, t.scope_id, t.status, t.title
-         FROM task_supersessions ts
-         JOIN tasks t ON t.id = ts.new_task_id
-         WHERE ts.old_task_id = ?`,
-        [dependencyId],
-      )
-      if (supersededRows.length > 0) {
-        const replacement = yield* decodeSupersededDependencyRow(supersededRows[0]!)
-        yield* Effect.fail(
-          new PithosError({
-            code: "USER_ERROR",
-            message:
-              `Dependency task ${replacement.old_task_id} has been superseded by ${replacement.new_task_id} ` +
-              `(scope ${replacement.scope_id}, status ${replacement.status}, title ${JSON.stringify(replacement.title)}). ` +
-              `Enqueue against the replacement task instead.`,
-          }),
-        )
-        return
-      }
-    }
-
     const id = yield* ids.generate("task")
 
     yield* db.withTransaction(
       Effect.gen(function* () {
+        const scopeRows = yield* db.query(`SELECT id FROM scopes WHERE id = ?`, [scope])
+        if (scopeRows.length === 0) {
+          yield* Effect.fail(
+            new PithosError({ code: "NOT_FOUND", message: `Scope not found: ${scope}` }),
+          )
+          return yield* Effect.never
+        }
+        yield* decodeTaskIdRow(scopeRows[0]!)
+
+        if (opts.run) {
+          const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [opts.run])
+          if (runRows.length === 0) {
+            yield* Effect.fail(
+              new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
+            )
+            return yield* Effect.never
+          }
+          yield* decodeTaskIdRow(runRows[0]!)
+        }
+
+        for (const dependencyId of dependsOnTaskIds) {
+          const dependencyRows = yield* db.query(`SELECT id FROM tasks WHERE id = ?`, [dependencyId])
+          if (dependencyRows.length === 0) {
+            yield* Effect.fail(
+              new PithosError({
+                code: "NOT_FOUND",
+                message: `Dependency task not found: ${dependencyId}`,
+              }),
+            )
+            return yield* Effect.never
+          }
+          yield* decodeTaskIdRow(dependencyRows[0]!)
+
+          const supersededRows = yield* db.query(
+            `SELECT ts.old_task_id, ts.new_task_id, t.scope_id, t.status, t.title
+             FROM task_supersessions ts
+             JOIN tasks t ON t.id = ts.new_task_id
+             WHERE ts.old_task_id = ?`,
+            [dependencyId],
+          )
+          if (supersededRows.length > 0) {
+            const replacement = yield* decodeSupersededDependencyRow(supersededRows[0]!)
+            yield* Effect.fail(
+              new PithosError({
+                code: "USER_ERROR",
+                message:
+                  `Dependency task ${replacement.old_task_id} has been superseded by ${replacement.new_task_id} ` +
+                  `(scope ${replacement.scope_id}, status ${replacement.status}, title ${JSON.stringify(replacement.title)}). ` +
+                  `Enqueue against the replacement task instead.`,
+              }),
+            )
+            return yield* Effect.never
+          }
+        }
         yield* db.run(
           `INSERT INTO tasks
              (id, scope_id, capability, status, title, body, created_by_run_id)
@@ -209,19 +218,17 @@ export const enqueueCommand = (
 
         yield* Effect.provideService(assertTaskGraphAcyclic, DbService, db)
 
+        const taskCreatedEventPayload = {
+          scope_id: scope,
+          capability,
+          title,
+          depends_on_task_ids: dependsOnTaskIds,
+        } satisfies TaskCreatedEventPayload
+
         yield* db.run(
           `INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.created', ?)`,
-          [
-            id,
-            opts.run ?? null,
-            JSON.stringify({
-              scope_id: scope,
-              capability,
-              title,
-              depends_on_task_ids: dependsOnTaskIds,
-            }),
-          ],
+          [id, opts.run ?? null, JSON.stringify(taskCreatedEventPayload)],
         )
       }),
     )

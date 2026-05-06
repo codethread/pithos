@@ -419,6 +419,17 @@ describe("pithos tail --help", () => {
     expect(exitCode).toBe(0)
   })
 
+  it("documents graph-history event payloads", async () => {
+    const { stdout } = await help(["tail", "--help"])
+    expect(stdout).toContain("task.created")
+    expect(stdout).toContain("depends_on_task_ids")
+    expect(stdout).toContain("supersedes_task_id")
+    expect(stdout).toContain("task.cancelled")
+    expect(stdout).toContain("superseded_by_task_id")
+    expect(stdout).toContain("task.superseded")
+    expect(stdout).toContain("retargeted_dependent_task_ids")
+  })
+
   it("contains required sections", async () => {
     const { stdout } = await help(["tail", "--help"])
     assertRequiredSections(stdout, "tail --help")

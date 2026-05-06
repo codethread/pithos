@@ -2,7 +2,7 @@
 
 The `pithos` bin. SQLite-backed local control plane for Claude Code and Pi agents.
 
-`pithos` owns state. Each mutation is a single CLI invocation — register a run, enqueue a task, claim with a fencing token, heartbeat, attach an artifact, complete or fail, sweep stale work, brief Pandora. Nothing else writes to the database; all other agents and tools shell out to this binary.
+`pithos` owns state. Each mutation is a single CLI invocation — register a run, enqueue a task, supersede a wrong task with a replacement, claim with a fencing token, heartbeat, attach an artifact, complete or fail, sweep stale work, brief Pandora. Nothing else writes to the database; all other agents and tools shell out to this binary.
 
 ## Quick reference
 
@@ -19,6 +19,7 @@ pithos <command> --help              # per-command flags + examples + exit codes
 - `pithos scope upsert --kind {global|repo|worktree} --path <path>` — register the unit-of-work scope.
 - `pithos run register|end` — agent session lifecycle.
 - `pithos enqueue` — add a task to a scope with a capability and optional repeatable `--depends-on` blockers.
+- `pithos supersede <task-id> --run <run-id> --reason <text>` — replace a task with a fresh queued task, preserve supersession history, and retarget direct queued dependents.
 - `pithos claim` — atomic claim of the oldest ready queued task in the requested scope/capability, with lease + fencing token.
 - `pithos heartbeat` — extend lease while working; throttled.
 - `pithos complete|fail` — terminate a claim, fenced.

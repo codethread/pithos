@@ -160,45 +160,47 @@ Exit codes:
 
 [0;1mCOMMANDS[0m
 
-  - init                                                                                                                          
+  - init                                                                                                                                 
 
-  - scope                                                                                                                         Manage pithos scopes
+  - scope                                                                                                                                Manage pithos scopes
 
-  - scope upsert [--kind global | repo | worktree] [--path text]                                                                  
+  - scope upsert [--kind global | repo | worktree] [--path text]                                                                         
 
-  - run                                                                                                                           Manage pithos runs (Claude Code / worker / agent sessions)
+  - run                                                                                                                                  Manage pithos runs (Claude Code / worker / agent sessions)
 
-  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]             
+  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]                    
 
-  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                   
+  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                          
 
-  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] --depends-on text...  
+  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] --depends-on text...         
 
-  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                               
+  - supersede [--run text] [--reason text] [--title text] [--body text] [--body-file text] [--scope text] [--capability text] <task-id>  
 
-  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                             
+  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                                      
 
-  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                        
+  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                                    
 
-  - fail [--run text] [--token integer] [--reason text] <task-id>                                                                 
+  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                               
 
-  - artifact                                                                                                                      Manage pithos artifacts
+  - fail [--run text] [--token integer] [--reason text] <task-id>                                                                        
 
-  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                       
+  - artifact                                                                                                                             Manage pithos artifacts
 
-  - inspect                                                                                                                       
+  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                              
 
-  - inspect scope <scope-id>                                                                                                      
+  - inspect                                                                                                                              
 
-  - inspect run <run-id>                                                                                                          
+  - inspect scope <scope-id>                                                                                                             
 
-  - inspect task <task-id>                                                                                                        
+  - inspect run <run-id>                                                                                                                 
 
-  - tail [--limit integer]                                                                                                        
+  - inspect task <task-id>                                                                                                               
 
-  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                           
+  - tail [--limit integer]                                                                                                               
 
-  - briefing [--agent text]                                                                                                       
+  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                                  
+
+  - briefing [--agent text]                                                                                                              
 
 
 \`\`\`
@@ -388,45 +390,47 @@ Exit codes:
 
 [0;1mCOMMANDS[0m
 
-  - init                                                                                                                          
+  - init                                                                                                                                 
 
-  - scope                                                                                                                         Manage pithos scopes
+  - scope                                                                                                                                Manage pithos scopes
 
-  - scope upsert [--kind global | repo | worktree] [--path text]                                                                  
+  - scope upsert [--kind global | repo | worktree] [--path text]                                                                         
 
-  - run                                                                                                                           Manage pithos runs (Claude Code / worker / agent sessions)
+  - run                                                                                                                                  Manage pithos runs (Claude Code / worker / agent sessions)
 
-  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]             
+  - run register [--agent-kind text] [--scope text] [--cwd text] [--session-id text] [--parent-run text] [--run text]                    
 
-  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                   
+  - run end [--run text] [--status ended | failed | cancelled] [--summary text]                                                          
 
-  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] --depends-on text...  
+  - enqueue [--scope text] [--capability text] [--title text] [--body text] [--body-file text] [--run text] --depends-on text...         
 
-  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                               
+  - supersede [--run text] [--reason text] [--title text] [--body text] [--body-file text] [--scope text] [--capability text] <task-id>  
 
-  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                             
+  - claim [--run text] [--scope text] [--capability text] [--lease-minutes integer]                                                      
 
-  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                        
+  - heartbeat [--run text] [--task text] [--token integer] [--hook text] [--throttle-seconds integer]                                    
 
-  - fail [--run text] [--token integer] [--reason text] <task-id>                                                                 
+  - complete [--run text] [--token integer] [--result-file text] <task-id>                                                               
 
-  - artifact                                                                                                                      Manage pithos artifacts
+  - fail [--run text] [--token integer] [--reason text] <task-id>                                                                        
 
-  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                       
+  - artifact                                                                                                                             Manage pithos artifacts
 
-  - inspect                                                                                                                       
+  - artifact add [--task text] [--run text] [--kind text] [--title text] [--body-file text]                                              
 
-  - inspect scope <scope-id>                                                                                                      
+  - inspect                                                                                                                              
 
-  - inspect run <run-id>                                                                                                          
+  - inspect scope <scope-id>                                                                                                             
 
-  - inspect task <task-id>                                                                                                        
+  - inspect run <run-id>                                                                                                                 
 
-  - tail [--limit integer]                                                                                                        
+  - inspect task <task-id>                                                                                                               
 
-  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                           
+  - tail [--limit integer]                                                                                                               
 
-  - briefing [--agent text]                                                                                                       
+  - sweep [--lease-grace-seconds integer] [--run-stale-minutes integer]                                                                  
+
+  - briefing [--agent text]                                                                                                              
 
 
 \`\`\`

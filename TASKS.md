@@ -153,7 +153,7 @@ These rules apply to every slice unless a slice says otherwise:
 
 ### 4. Supersede a wrong middle task
 - **Type:** AFK
-- **Status:** pending
+- **Status:** complete
 - **Blocked by:** 1
 - **User stories covered:** US5, US6
 - **Primary files:**

@@ -13,6 +13,7 @@ import { scopeUpsertCommand } from "../commands/scope.ts"
 import { inspectScopeCommand, inspectRunCommand, inspectTaskCommand } from "../commands/inspect.ts"
 import { runRegisterCommand, runEndCommand } from "../commands/run.ts"
 import { enqueueCommand } from "../commands/enqueue.ts"
+import { supersedeCommand } from "../commands/supersede.ts"
 import { claimCommand } from "../commands/claim.ts"
 import { heartbeatCommand } from "../commands/heartbeat.ts"
 import { completeCommand } from "../commands/complete.ts"
@@ -248,6 +249,68 @@ const enqueue = Command.make(
       [
         "pithos enqueue --scope global --capability triage --title 'Review PR #42'",
         "pithos enqueue --scope repo:work/repo --capability watch --title 'Watch build' --depends-on task_design --depends-on task_api",
+      ],
+      "0 success | 1 user error | 2 validation error | 3 not found",
+    ),
+  ),
+)
+
+// ---------------------------------------------------------------------------
+// pithos supersede
+// ---------------------------------------------------------------------------
+
+const supersede = Command.make(
+  "supersede",
+  {
+    taskId: Args.text({ name: "task-id" }),
+    run: Options.text("run").pipe(
+      Options.optional,
+      Options.withDescription("Run ID performing the supersession [required]"),
+    ),
+    reason: Options.text("reason").pipe(
+      Options.optional,
+      Options.withDescription("Human-readable supersession reason [required]"),
+    ),
+    title: Options.text("title").pipe(
+      Options.optional,
+      Options.withDescription("Replacement task title (defaults to the old task title)"),
+    ),
+    body: Options.text("body").pipe(
+      Options.optional,
+      Options.withDescription("Inline replacement task body text (mutually exclusive with --body-file)"),
+    ),
+    bodyFile: Options.text("body-file").pipe(
+      Options.optional,
+      Options.withDescription("Path to a file containing the replacement task body"),
+    ),
+    scope: Options.text("scope").pipe(
+      Options.optional,
+      Options.withDescription("Replacement scope ID (defaults to the old task scope)"),
+    ),
+    capability: Options.text("capability").pipe(
+      Options.optional,
+      Options.withDescription("Replacement capability (defaults to the old task capability)"),
+    ),
+  },
+  ({ taskId, run, reason, title, body, bodyFile, scope, capability }) =>
+    supersedeCommand({
+      taskId,
+      run: opt(run),
+      reason: opt(reason),
+      title: opt(title),
+      body: opt(body),
+      bodyFile: opt(bodyFile),
+      scope: opt(scope),
+      capability: opt(capability),
+    }),
+).pipe(
+  Command.withDescription(
+    desc(
+      "Replace a task with a fresh queued task and record supersession history",
+      "pithos supersede",
+      [
+        "pithos supersede task_api --run run_pandora --reason 'Wrong interface; replacing with corrected task'",
+        "pithos supersede task_api --run run_pandora --reason 'Need repo-local fix' --scope repo:work/repo --capability build --title 'Fix API contract'",
       ],
       "0 success | 1 user error | 2 validation error | 3 not found",
     ),
@@ -676,6 +739,7 @@ export const pithosCommand = Command.make("pithos").pipe(
     scope,
     run,
     enqueue,
+    supersede,
     claim,
     heartbeat,
     complete,

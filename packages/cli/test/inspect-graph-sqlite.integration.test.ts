@@ -269,12 +269,6 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
       expectedEdges: [
         {
           kind: "depends_on",
-          from_task_id: "task_b",
-          to_task_id: "task_a",
-          satisfied: true,
-        },
-        {
-          kind: "depends_on",
           from_task_id: "task_c",
           to_task_id: "task_d",
           satisfied: false,

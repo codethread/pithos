@@ -9,7 +9,7 @@ import {
   loadSupersededBySummary,
   loadSupersedesSummary,
   loadTaskGraph,
-  loadUnresolvedDependencyIds,
+  loadUnresolvedDependencies,
 } from "../domain/task-graph.ts"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
@@ -117,7 +117,8 @@ export const inspectTaskCommand = (
     const task = yield* decodeTaskRow(rows[0]!)
     const dependencies = yield* loadDirectDependencies(id)
     const dependents = yield* loadDirectDependents(id)
-    const unresolvedDependencyIds = yield* loadUnresolvedDependencyIds(id)
+    const unresolvedBlockers = yield* loadUnresolvedDependencies(id)
+    const unresolvedDependencyIds = unresolvedBlockers.map((b) => b.id)
     const supersedes = yield* loadSupersedesSummary(id)
     const supersededBy = yield* loadSupersededBySummary(id)
     const claimability = computeTaskClaimability(task, unresolvedDependencyIds, supersededBy)
@@ -135,6 +136,7 @@ export const inspectTaskCommand = (
         task: toInspectableTask(task, claimability.claimable, claimability.unresolvedDependencyIds),
         dependencies,
         dependents,
+        unresolved_blockers: unresolvedBlockers,
         supersedes,
         superseded_by: supersededBy,
         artifacts,
@@ -267,7 +269,7 @@ Subcommands:
 Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
   { "ok": true, "run": { "id": "...", "agent_kind": "...", ... } }
-  { "ok": true, "task": { "id": "...", "status": "queued", "claimable": false, "unresolved_dependency_ids": [ ... ], ... }, "dependencies": [ ... ], "dependents": [ ... ], "supersedes": null, "superseded_by": null, "artifacts": [ ... ] }
+  { "ok": true, "task": { "id": "...", "status": "queued", "claimable": false, "unresolved_dependency_ids": [ ... ], ... }, "dependencies": [ ... ], "dependents": [ ... ], "unresolved_blockers": [ { "id": "...", "scope_id": "...", "status": "queued", "title": "Blocker title" } ], "supersedes": null, "superseded_by": null, "artifacts": [ ... ] }
   { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "live" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }
 
 Examples:

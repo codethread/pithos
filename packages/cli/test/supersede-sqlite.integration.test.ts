@@ -289,7 +289,6 @@ describe("supersedeCommand (integration — real SQLite)", () => {
       completed_at: null,
     })
     expect(dependencyRows).toEqual([
-      { task_id: "task_b", depends_on_task_id: "task_a" },
       { task_id: "task_c", depends_on_task_id: "task_d" },
       { task_id: "task_cancelled_child", depends_on_task_id: "task_b" },
       { task_id: "task_d", depends_on_task_id: "task_a" },
@@ -590,7 +589,6 @@ describe("supersedeCommand (integration — real SQLite)", () => {
     expect(dependencyRows).toEqual([
       { task_id: "task_child", depends_on_task_id: "task_new" },
       { task_id: "task_new", depends_on_task_id: "task_upstream" },
-      { task_id: "task_old", depends_on_task_id: "task_upstream" },
     ])
   })
 })

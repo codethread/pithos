@@ -336,6 +336,14 @@ export const supersedeCommand = (
           )
         }
 
+        // Remove the old task's direct upstream dependency rows so the current-state
+        // graph no longer includes obsolete old->blocker edges.
+        // Supersession history is preserved via task_supersessions and events.
+        yield* db.run(
+          `DELETE FROM task_dependencies WHERE task_id = ?`,
+          [taskId],
+        )
+
         for (const dependentTaskId of retargetedDependentTaskIds) {
           const rewiredRows = yield* db.query(
             `UPDATE task_dependencies

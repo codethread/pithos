@@ -134,14 +134,22 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
     db.close()
   }
 
-  const inspectGraph = async (selector: GraphSelector): Promise<GraphResponse> => {
+  const inspectGraph = async (selector: GraphSelector, dump = false): Promise<GraphResponse> => {
     const out = makeOutputServiceTest()
     await Effect.runPromise(
-      Effect.provide(inspectGraphCommand(selector), Layer.merge(dbLayer, out.layer)),
+      Effect.provide(inspectGraphCommand(selector, false, dump), Layer.merge(dbLayer, out.layer)),
     )
 
     expect(out.lines()).toHaveLength(1)
     return JSON.parse(out.lines()[0]!) as GraphResponse
+  }
+
+  const inspectGraphFlat = async (selector: GraphSelector, dump = false): Promise<string> => {
+    const out = makeOutputServiceTest()
+    await Effect.runPromise(
+      Effect.provide(inspectGraphCommand(selector, true, dump), Layer.merge(dbLayer, out.layer)),
+    )
+    return out.lines().join("\n")
   }
 
   const expectClosedGraph = (graph: GraphResponse["graph"]): void => {
@@ -336,11 +344,90 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
   it("fails NOT_FOUND when the seed task does not exist", async () => {
     const exit = await runEff(
       Effect.provide(
-        inspectGraphCommand({ kind: "task", value: "task_missing" }),
+        inspectGraphCommand({ kind: "task", value: "task_missing" }, false, false),
         Layer.merge(dbLayer, silentOutput),
       ),
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("--flat --current over an empty DB prints empty string", async () => {
+    const result = await inspectGraphFlat({ kind: "current" })
+    expect(result).toBe("")
+  })
+
+  it("--flat --scope renders a supersession chain as indented plain text without task IDs", async () => {
+    const fixture = await seedSupersededGraph()
+
+    // Use dump=true so filtering doesn't interfere with format verification
+    const result = await inspectGraphFlat({ kind: "scope", value: fixture.backendScopeId }, true)
+
+    // task_b (cancelled, original) at depth 0; task_d (queued, replacement) at depth 1
+    expect(result).toContain("[cancelled] Original API task")
+    expect(result).toContain("  [queued] Fix API")
+    const lines = result.split("\n")
+    const taskBLine = lines.find((l) => l.includes("Original API task"))!
+    const taskDLine = lines.find((l) => l.includes("Fix API"))!
+    expect(taskBLine.startsWith("[cancelled]")).toBe(true)
+    expect(taskDLine.startsWith("  [queued]")).toBe(true)
+    // Standalone nodes (no supersession links) appear as separate flat entries
+    expect(result).toContain("[done] Finalize API sketch")
+    expect(result).toContain("[queued] Update FE client")
+  })
+
+  it("--flat --all hides fully-terminal (done/cancelled) chains", async () => {
+    await seedSupersededGraph()
+    // Mark everything as done/cancelled to create a fully-terminal graph
+    markTaskStatus("task_c", "done")
+    markTaskStatus("task_d", "done")
+
+    // --flat without dump should hide the completed chain and standalone done nodes
+    const result = await inspectGraphFlat({ kind: "current" })
+    // task_a (done, standalone) filtered out
+    // task_b→task_d chain (cancelled→done) filtered out (fully terminal)
+    // task_c (done, standalone) filtered out
+    expect(result).toBe("")
+  })
+
+  it("--flat --all --dump shows everything including completed chains", async () => {
+    await seedSupersededGraph()
+    markTaskStatus("task_c", "done")
+    markTaskStatus("task_d", "done")
+
+    // --flat with dump should show everything
+    const result = await inspectGraphFlat({ kind: "current" }, true)
+    expect(result).toContain("[done] Finalize API sketch")
+    expect(result).toContain("[cancelled] Original API task")
+    expect(result).toContain("  [done] Fix API")
+    expect(result).toContain("[done] Update FE client")
+  })
+
+  it("JSON mode (no --flat) is unaffected by --dump flag", async () => {
+    await seedSupersededGraph()
+    markTaskStatus("task_c", "done")
+    markTaskStatus("task_d", "done")
+
+    // JSON with dump=true should produce same output as dump=false (dump no-op in JSON)
+    const parsedDump = await inspectGraph({ kind: "current" }, true)
+    const parsedNoDump = await inspectGraph({ kind: "current" }, false)
+
+    expect(parsedDump.graph.nodes).toEqual(parsedNoDump.graph.nodes)
+    expect(parsedDump.graph.edges).toEqual(parsedNoDump.graph.edges)
+  })
+
+  it("--flat --scope with only completed tasks returns empty output", async () => {
+    // Create a scope with a single completed task
+    const testScopeId = await upsertRepoScope("test-empty")
+    await registerRun("run_actor")
+    await enqueue("task_z", {
+      scope: testScopeId,
+      capability: "triage",
+      title: "Completed task",
+    })
+    markTaskStatus("task_z", "done")
+
+    const result = await inspectGraphFlat({ kind: "scope", value: testScopeId })
+    expect(result).toBe("")
   })
 })

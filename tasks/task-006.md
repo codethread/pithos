@@ -1,0 +1,62 @@
+# Slice 6 — Pandora singleton + death detection + DEMO GATE 2
+
+## What to build
+
+Stand up the reconcile loop in `packages/pdx/` enough to maintain the Pandora singleton and observe natural death. No spawning of Toil/Greed/War yet (that arrives in slice 8).
+
+Reconcile loop tick (default 5s; configurable via `--interval-seconds`):
+
+1. Observe in-memory registry entries.
+2. Probe deaths:
+   - HITL: `tmux has-session -t <target>`
+   - AFK: process handle / `kill(pid, 0)`
+3. On death of an entry: `pithos run cleanup` (which handles task requeue/dead-letter for any held task), then remove the registry entry.
+4. (Skipped this slice: Toil/Greed/War spawning, no-claim timeout — slice 8.)
+5. Heartbeat live HITL entries via `pithos task heartbeat --run <id>` (liveness only; Pandora normally has no held task).
+6. Maintain Pandora singleton: if no live Pandora registry entry, spawn fresh one via `spawnerLib.launchAgent` with `agent=pandora`, `mode=hitl`, `scope=global`, `cwd=<home>`. New `runId` and `sessionId` per spawn — no same-run resurrection.
+
+Registry entry shape (minimum): `runId`, `agentKind`, `mode`, `scopeId`, `state` (`launching | live | terminating`), `logicalName`, `pid` (AFK only), `tmuxTarget` (HITL only — Pandora always `pdx--pandora`).
+
+`pdx open` prints `tmux attach -t pdx--pandora` on success and exits. The Pandora session must be alive (or imminently launching) before `pdx open` returns.
+
+`pdx close` now also kills Pandora's tmux session before tearing down the system run, in line with spec §4.
+
+## Demo gate
+
+Second demo gate. Adam + an agent walk through:
+
+1. `pdx open` succeeds, prints attach command, daemon JSON log started.
+2. Adam runs `tmux attach -t pdx--pandora`, sees Pandora alive in a fresh harness session.
+3. Pandora can use `pithos` CLI from inside her session — e.g. `pithos task enqueue --capability triage ...` (the task sits queued; nothing claims it yet because slice 8 spawning isn't in).
+4. `pdx status --json` accurately reflects daemon up + Pandora registry entry + queue counts at each step.
+5. Adam runs `tmux kill-session -t pdx--pandora`. Within ~5s reconcile observes death, calls `run cleanup`, then spawns a fresh Pandora with a new run id. Adam re-attaches and confirms.
+6. `pdx close` cleans up Pandora's session, then the daemon, then the pdx system run.
+
+Commit a replayable demo script (e.g. `docs/demos/pdx-pandora.md`).
+
+## Test focus
+
+- Pandora singleton invariant: registry never holds two live Pandora entries
+- HITL death probe correctness: tmux-session disappearance triggers cleanup + respawn within one tick
+- AFK death probe (`kill(pid, 0)`) unit-tested in isolation against a known live and known dead pid (slice 8 uses it for real)
+- Fresh `runId` per respawn — no row reuse, no same-run resurrection
+- `pdx open` does not return until Pandora is launching/live
+- `pdx close` order: Pandora killed → daemon stopped → pdx system run cleaned up last
+
+Defer: tmux integration robustness beyond happy path; reconcile-tick scheduling stress.
+
+## Acceptance criteria
+
+- [ ] Reconcile loop runs at default 5s tick; `--interval-seconds` honored
+- [ ] Pandora singleton invariant maintained
+- [ ] HITL `tmux has-session` death probe; AFK `kill(pid,0)` probe; both unit-tested
+- [ ] Death of Pandora's tmux triggers `run cleanup` and a fresh respawn next tick
+- [ ] `pdx open` prints `tmux attach -t pdx--pandora` on success
+- [ ] `pdx close` tears down in spec §4 order
+- [ ] Demo script committed and Adam + agent successfully walk through (human-verified, not CI-checkable; record confirmation as a comment on this issue)
+
+## Blocked by
+
+- Slice 2 (task-002) — Pandora death triggers `pithos run cleanup`
+- Slice 4 (task-004)
+- Slice 5 (task-005)

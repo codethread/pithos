@@ -15,7 +15,6 @@ test("loadTemplate fails loudly when an agent manifest omits harness", () => {
       agents: [
         {
           agent: "envy",
-          type: "afk",
           system_prompt: "envy.md.tmpl",
         },
       ],

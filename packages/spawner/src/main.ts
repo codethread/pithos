@@ -185,7 +185,7 @@ const spawn = (raw: SpawnCliInput) =>
       PITHOS_OUTPUT: "json",
       ...(opts.task ? { PITHOS_TASK_ID: opts.task } : {}),
     }
-    const kickoffMessage = opts.message ?? (template.manifest.type === "afk" ? "begin" : undefined)
+    const kickoffMessage = opts.message ?? "begin"
     const harnessService = yield* HarnessService
     const harness = harnessService.get(selectedHarness)
     const description = harness.describe(
@@ -318,7 +318,6 @@ const templatesList = () =>
       name: manifest.agent,
       harness: manifest.harness,
       capability: manifest.capability,
-      type: manifest.type,
       cwd: manifest.cwd ?? null,
       launcher: manifest.launcher ?? null,
     }))

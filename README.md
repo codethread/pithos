@@ -118,14 +118,9 @@ The point of Pandora's Box is to distill HITL time, maximising busy work while t
 | ------- | ---- | ----------- | --------------- | ---------------------------------------------------------------------- |
 | Pandora | HITL | —           | Pi              | Global orchestrator. Delegates, inspects, asks questions.              |
 | Toil    | AFK  | `triage`    | Claude Code     | Breaks goals down, finds repos, enqueues concrete work.                |
+| Greed   | HITL | `design`    | Pi              | Design/research partner for risky or unclear work.                     |
 | Envy    | AFK  | `implement` | Claude Code     | Coordinator. Claims implementation work, spawns workers, reports back. |
 | Worker  | AFK  | —           | Claude Code     | Ephemeral executor. Performs repo/worktree mutation, reports, exits.   |
-
-### Planned roster
-
-| Agent | Type | Intended claims | Role                                                                    |
-| ----- | ---- | --------------- | ----------------------------------------------------------------------- |
-| Greed | HITL | `design`        | Design/research partner for risky or unclear work. Not yet implemented. |
 
 ### Delegation chain
 
@@ -155,7 +150,7 @@ Queue capabilities describe the requested outcome class, not the agent's interna
 ```text
 pithos enqueue --capability triage     -> Toil claims
 pithos enqueue --capability implement  -> Envy claims
-pithos enqueue --capability design     -> Greed claims once implemented
+pithos enqueue --capability design     -> Greed claims
 ```
 
 ### Per-agent notes
@@ -164,7 +159,7 @@ pithos enqueue --capability design     -> Greed claims once implemented
 - **Toil** — in `~/.pandora` she does broad repo discovery and breakdown; in a concrete repo scope she turns goals into actionable queue work and then exits.
 - **Envy** — coordinator, not mutator. Spawns a separate worker session for repo/worktree changes, watches progress, and records the result as a `worker-completion` artifact before completing or failing the task.
 - **Worker** — intentionally Pithos-unaware. Performs the mutation, produces a completion report, and exits. Envy translates that result back into Pithos state.
-- **Greed** — planned design-quality agent. Will own `design` tasks and run in a more human-in-the-loop style.
+- **Greed** — design-quality agent. Owns `design` tasks, explores code deeply, interviews Adam one question at a time, and records the outcome as a `design-brief` artifact.
 
 ## Documents
 

@@ -43,7 +43,7 @@ pithos <command> --help              # per-command flags + examples + exit codes
 
 ## Output and exit codes
 
-Successful structured commands write JSON `{ "ok": true, ... }` to stdout; failures write JSON errors to stderr. `pithos briefing` is the human-facing exception and renders markdown.
+Successful structured commands write JSON `{ "ok": true, ... }` to stdout; failures write JSON errors to stderr. Two commands are explicit prose exceptions: `pithos briefing` renders markdown, and `pithos inspect graph --flat` renders a plain-text supersession-chain tree (one line per task, indented by depth) — neither is machine-readable JSON.
 
 | Code | Meaning                   |
 | ---- | ------------------------- |

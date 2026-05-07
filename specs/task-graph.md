@@ -1,7 +1,7 @@
 # Task Graph
 
 **Status:** Implemented
-**Last Updated:** 2026-05-06
+**Last Updated:** 2026-05-07
 
 ## 1. Overview
 
@@ -13,7 +13,7 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 
 - Allow any task to depend on zero or more existing tasks.
 - Allow dependency edges to span scopes freely.
-- Make `pithos claim` return only queued tasks whose dependencies are all `done`.
+- Make `pithos task claim` return only queued tasks whose dependencies are all `done`.
 - Preserve history when one task replaces another.
 - Let agents inspect blockers, dependents, and the current connected graph without reconstructing it from prose.
 - Surface ready versus blocked work in `pithos briefing`.
@@ -170,27 +170,29 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 ### CLI commands
 
+> Note: `control-plane-supervision.md` supersedes the command paths, capability vocabulary, and authorization requirements below. The graph semantics in this spec remain normative, but the post-rewrite public surface uses nested commands such as `pithos task enqueue`, `pithos task claim`, `pithos task inspect`, and `pithos graph inspect`, with capabilities limited to `triage`, `design`, `execute`, and `escalate`.
+
 | Command | Change | Contract |
 | ------- | ------ | -------- |
-| `pithos enqueue` | Modify | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. |
-| `pithos claim` | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. |
-| `pithos inspect task <id>` | Expand output | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links. |
-| `pithos inspect graph` | New | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--current`. |
-| `pithos supersede <task-id>` | New | Create a replacement task, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued. |
+| `pithos task enqueue` | Modify | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. Requires a resolved run, non-empty body, known capability, and `agent_enqueues` authorization. |
+| `pithos task claim` | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
+| `pithos task inspect <id>` | Expand output | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links. |
+| `pithos graph inspect` | New | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`). |
+| `pithos task supersede <task-id>` | New | Create a replacement task, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued. |
 | `pithos briefing` | Modify output | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items. |
 | `pithos tail` | New event types | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows. |
 
-### `pithos enqueue`
+### `pithos task enqueue`
 
 New flag surface:
 
 | Flag | Description | Default |
 | ---- | ----------- | ------- |
 | `--scope <scope-id>` | Scope for the new task | required |
-| `--capability <cap>` | Capability for matching workers | required |
-| `--title <title>` | Human-readable title | required |
-| `--body <text>` / `--body-file <path>` | Task body | empty string if neither provided |
-| `--run <run-id>` | Creating run | optional |
+| `--capability <triage|design|execute|escalate>` | Capability for matching agents | required |
+| `--title <title>` | Human-readable title for the task | required |
+| `--body <text>` / `--body-file <path>` | Task body | required |
+| `--run <run-id>` | Creating run; defaults from `PITHOS_RUN_ID` for spawned agents | required after env resolution |
 | `--depends-on <task-id>` | Dependency edge to an existing task; repeatable | none |
 
 Behavioral rules:
@@ -199,6 +201,9 @@ Behavioral rules:
 - dependency targets may be in any scope
 - if a dependency target has already been superseded, `enqueue` must fail with a tagged user-facing error that points at the replacement task; the command must not silently rewrite to a different task ID
 - duplicate dependency IDs are rejected with `VALIDATION_ERROR`
+- the creating run must exist and its agent kind must be authorized in `agent_enqueues` for the requested capability
+- manual/operator enqueue without a resolved run is not exposed
+- body must be non-empty; capability-specific scope/body rules from `control-plane-supervision.md` apply
 - the transaction must fail if the resulting graph would contain a cycle
 - `task.created` event payload must include `depends_on_task_ids`
 
@@ -227,7 +232,7 @@ Transaction contract:
 7. Create the new task with this exact contract:
    - copy from old task: `scope_id`, `capability`, `title`, `body`, `payload_json`, `max_attempts`
    - apply explicit CLI overrides on `scope_id`, `capability`, `title`, and body
-   - reset operational fields to fresh-task values: `status='queued'`, `lease_owner_run_id=NULL`, `lease_until=NULL`, `fencing_token=0`, `attempts=0`, `result_json='{}'`, `completed_at=NULL`, fresh `created_at`/`updated_at`
+   - reset operational fields to fresh-task values: `status='queued'`, `fencing_token=0`, `attempts=0`, `result_json='{}'`, `completed_at=NULL`, fresh `created_at`/`updated_at`
    - set `created_by_run_id` to the actor run
 8. Copy all direct upstream dependency edges from old task to new task.
 9. Retarget each direct queued dependent from `depends_on old` to `depends_on new`.
@@ -241,7 +246,7 @@ The command returns JSON:
 ```json
 {
   "ok": true,
-  "task": { "id": "task_d", "status": "queued", "scope_id": "repo:be", "capability": "build" },
+  "task": { "id": "task_d", "status": "queued", "scope_id": "repo:be", "capability": "execute" },
   "supersession": {
     "old_task_id": "task_b",
     "new_task_id": "task_d",
@@ -250,7 +255,7 @@ The command returns JSON:
 }
 ```
 
-### `pithos inspect task <id>`
+### `pithos task inspect <id>`
 
 Success response shape:
 
@@ -260,7 +265,7 @@ Success response shape:
   "task": {
     "id": "task_c",
     "scope_id": "repo:fe",
-    "capability": "build",
+    "capability": "execute",
     "status": "queued",
     "claimable": false,
     "unresolved_dependency_ids": ["task_d"]
@@ -280,7 +285,7 @@ Requirements:
 - relationship arrays must be deterministic and sorted by `created_at`, then `id`
 - dependency/dependent summaries must always include `scope_id`
 - `claimable` and `unresolved_dependency_ids` are computed, never stored
-### `pithos inspect graph`
+### `pithos graph inspect`
 
 Selectors are mutually exclusive:
 
@@ -288,7 +293,24 @@ Selectors are mutually exclusive:
 | -------- | ------ |
 | `--task <id>` | Transitive closure around that task following dependency and supersession edges both directions |
 | `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency and supersession edges in both directions recursively until the response is closed |
-| `--current` | All non-cancelled tasks and all current graph edges, plus any referenced dependency or supersession neighbors needed to keep the response closed |
+| `--all` | All non-cancelled tasks and all current graph edges, plus any referenced dependency or supersession neighbors needed to keep the response closed (deprecated alias: `--current`) |
+
+Output flags:
+
+| Flag | Effect |
+| ---- | ------ |
+| `--flat` | Render a plain-text supersession-chain tree (opt-in text mode; hides completed chains by default) |
+| `--dump` | Show all chains including completed ones; only meaningful with `--flat`, no-op in JSON mode |
+
+#### `--flat` filtering behavior
+
+When `--flat` is used without `--dump`, the output is filtered to show only active work:
+
+- **Fully-terminal chains** are hidden: a supersession chain where every node has status `done` or `cancelled` is removed from the flat output entirely.
+- **Standalone terminal nodes** are hidden: nodes with no supersession links and status `done` or `cancelled` are removed.
+- Chains with at least one active node (status other than `done`/`cancelled`) are shown in full — including their cancelled predecessors — so the user can see the full history of an active chain.
+- `--dump` overrides this and shows everything.
+- Filtering does not affect JSON output (only applies to `--flat` text-tree mode).
 
 Graph closure requirement:
 
@@ -306,7 +328,7 @@ Success response shape:
       {
         "id": "task_a",
         "scope_id": "repo:design",
-        "capability": "spec",
+        "capability": "design",
         "status": "done",
         "title": "Finalize API sketch",
         "claimable": false,
@@ -317,7 +339,7 @@ Success response shape:
       {
         "id": "task_b",
         "scope_id": "repo:be",
-        "capability": "build",
+        "capability": "execute",
         "status": "cancelled",
         "title": "Original API task",
         "claimable": false,
@@ -328,7 +350,7 @@ Success response shape:
       {
         "id": "task_d",
         "scope_id": "repo:be",
-        "capability": "build",
+        "capability": "execute",
         "status": "queued",
         "title": "Fix API",
         "claimable": true,
@@ -339,7 +361,7 @@ Success response shape:
       {
         "id": "task_c",
         "scope_id": "repo:fe",
-        "capability": "build",
+        "capability": "execute",
         "status": "queued",
         "title": "Update FE client",
         "claimable": false,
@@ -386,6 +408,8 @@ LIMIT 1
 This is the core “next available task” rule.
 
 ### Events
+
+`control-plane-supervision.md` contains the consolidated event vocabulary for the rewrite. The graph-specific payload semantics below remain the graph contract for dependency and supersession history.
 
 New/changed event contracts:
 

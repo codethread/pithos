@@ -24,6 +24,8 @@ Default command is spawn. Output is JSON.
 
 `--preview` renders the prompt and prints the harness command/env/cwd JSON without registering a run or starting the harness. It uses stable placeholder IDs (`run_PREVIEW`, `session_PREVIEW`) unless overridden with `PANDORA_SPAWN_FAKE_RUN_ID` / `PANDORA_SPAWN_FAKE_SESSION_ID`.
 
+If `--message` is omitted, `pandora-spawn` appends a fallback kickoff message of `begin` for every agent.
+
 Real spawned sessions need a per-harness liveness/session-end adapter installed once — see [Harness hooks](#harness-hooks).
 
 ## templates/ API
@@ -36,6 +38,7 @@ templates/
   _common.md        # shared include text
   pandora.md.tmpl   # system prompt template for pandora
   envy.md.tmpl      # system prompt template for envy
+  greed.md.tmpl     # system prompt template for greed
   toil.md.tmpl      # system prompt template for toil
   worker.md.tmpl    # system prompt template for worker
 ```
@@ -82,6 +85,7 @@ Rules:
 - For mutating `implement` tasks, Envy is the coordinator only; a separate worker sub-session should perform repo/worktree mutations.
 - Worker-backed `implement` results should be attached with `pithos artifact add --kind worker-completion` before task completion.
 - `agent` is the CLI name: `pandora-spawn --agent envy`.
+- `pandora-spawn` appends a fallback kickoff message of `begin` when `--message` is omitted.
 - `system_prompt` must be `<agent>.md.tmpl`.
 - `harness` is a single discriminated config keyed by `kind`. Define only the harness this agent should use.
   - `kind: "claude"` validates Claude Code tool names (`Bash`, `Read`, `Edit`, `Write`, `Grep`, `Glob`, `LS`) and renders Claude flags.

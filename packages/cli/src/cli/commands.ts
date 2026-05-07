@@ -621,27 +621,42 @@ const inspectGraph = Command.make(
       Options.optional,
       Options.withDescription("Seed scope ID; starts from all non-cancelled tasks in that scope"),
     ),
+    all: Options.boolean("all").pipe(
+      Options.withDescription("Inspect all non-cancelled tasks across all scopes"),
+    ),
     current: Options.boolean("current").pipe(
-      Options.withDescription("Inspect the closed graph for all non-cancelled tasks"),
+      Options.withDescription("Deprecated alias for --all"),
+    ),
+    flat: Options.boolean("flat").pipe(
+      Options.withDescription("Render a plain-text tree (opt-in text mode; hides completed chains by default)"),
+    ),
+    dump: Options.boolean("dump").pipe(
+      Options.withDescription("Show all chains including completed ones (only meaningful with --flat)"),
     ),
   },
-  ({ task, scope, current }) =>
-    decodeInspectGraphSelector({ taskId: opt(task), scopeId: opt(scope), current }).pipe(
-      Effect.flatMap(inspectGraphCommand),
+  ({ task, scope, all, current, flat, dump }) =>
+    decodeInspectGraphSelector({ taskId: opt(task), scopeId: opt(scope), all, current }).pipe(
+      Effect.flatMap((selector) => inspectGraphCommand(selector, flat, dump)),
     ),
 ).pipe(
   Command.withDescription(
     HelpDoc.blocks([
       HelpDoc.p("pithos inspect graph - Inspect a closed transitive dependency/supersession graph"),
-      HelpDoc.p("Choose exactly one selector: --task <id>, --scope <scope-id>, or --current."),
-      HelpDoc.p("Output (JSON):"),
+      HelpDoc.p("Choose exactly one selector: --task <id>, --scope <scope-id>, or --all."),
+      HelpDoc.p("Output (default JSON, machine-readable):"),
       HelpDoc.p(
         '  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "current" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }',
       ),
+      HelpDoc.p("Output with --flat (plain-text supersession-chain tree, human/agent-readable prose):"),
+      HelpDoc.p("  [status] task title"),
+      HelpDoc.p("    [status] replacement task title"),
+      HelpDoc.p("      [status] next replacement ..."),
       HelpDoc.p("Examples:"),
       HelpDoc.p("  pithos inspect graph --task task_abc123"),
       HelpDoc.p("  pithos inspect graph --scope repo:work/perkbox-services/protobuf"),
-      HelpDoc.p("  pithos inspect graph --current"),
+      HelpDoc.p("  pithos inspect graph --all"),
+      HelpDoc.p("  pithos inspect graph --all --flat"),
+      HelpDoc.p("  pithos inspect graph --all --flat --dump"),
       HelpDoc.p("Exit codes: 0 success | 2 validation error | 3 not found"),
     ]),
   ),
@@ -659,7 +674,7 @@ const inspect = Command.make("inspect").pipe(
       HelpDoc.p("  pithos inspect task task_abc"),
       HelpDoc.p("  pithos inspect graph --task task_abc"),
       HelpDoc.p("  pithos inspect graph --scope repo:work/repo"),
-      HelpDoc.p("  pithos inspect graph --current"),
+      HelpDoc.p("  pithos inspect graph --all"),
       HelpDoc.p("Exit codes: 0 success | 2 validation error | 3 not found"),
     ]),
   ),

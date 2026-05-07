@@ -37,7 +37,6 @@
       },
       "cwd": "~/.pandora",
       "capability": "orchestrate",
-      "type": "hitl",
       "includes": [
         "_common.md"
       ],
@@ -48,21 +47,15 @@
     {
       "agent": "envy",
       "harness": {
-        "kind": "claude",
-        "model": "sonnet",
+        "kind": "pi",
+        "model": "deepseek-v4-pro",
         "tools": [
-          "Bash",
-          "Read",
-          "Edit",
-          "Write",
-          "Grep",
-          "Glob",
-          "LS"
+          "bash",
+          "read"
         ],
         "system_prompt_mode": "replace"
       },
       "capability": "implement",
-      "type": "afk",
       "includes": [
         "_common.md"
       ],
@@ -73,21 +66,20 @@
     {
       "agent": "toil",
       "harness": {
-        "kind": "claude",
-        "model": "sonnet",
+        "kind": "pi",
+        "model": "deepseek-v4-pro",
         "tools": [
-          "Bash",
-          "Read",
-          "Edit",
-          "Write",
-          "Grep",
-          "Glob",
-          "LS"
+          "bash",
+          "read",
+          "edit",
+          "write",
+          "grep",
+          "find",
+          "ls"
         ],
-        "system_prompt_mode": "replace"
+        "system_prompt_mode": "append"
       },
       "capability": "triage",
-      "type": "afk",
       "includes": [
         "_common.md"
       ],
@@ -96,22 +88,45 @@
       "inject_meta": false
     },
     {
+      "agent": "greed",
+      "harness": {
+        "kind": "pi",
+        "model": "deepseek-v4-pro",
+        "tools": [
+          "bash",
+          "read",
+          "edit",
+          "write",
+          "grep",
+          "find",
+          "ls"
+        ],
+        "system_prompt_mode": "replace"
+      },
+      "capability": "design",
+      "includes": [
+        "_common.md"
+      ],
+      "system_prompt": "greed.md.tmpl",
+      "launcher": "local_agent_tmux",
+      "inject_meta": false
+    },
+    {
       "agent": "worker",
       "harness": {
-        "kind": "claude",
-        "model": "sonnet",
+        "kind": "pi",
+        "model": "deepseek-v4-pro",
         "tools": [
-          "Bash",
-          "Read",
-          "Edit",
-          "Write",
-          "Grep",
-          "Glob",
-          "LS"
+          "bash",
+          "read",
+          "edit",
+          "write",
+          "grep",
+          "find",
+          "ls"
         ],
         "system_prompt_mode": "append"
       },
-      "type": "afk",
       "system_prompt": "worker.md.tmpl",
       "launcher": "local_agent_tmux",
       "inject_meta": false

@@ -50,4 +50,25 @@ test("preview pi harness renders pi argv + extension wiring", () => {
   expect(isAbsolute(parsed.session_file!)).toBe(true)
   expect(parsed.argv).toContain(parsed.session_file!)
   expect(parsed.argv.some((arg) => arg.endsWith("packages/spawner/pi-extension"))).toBe(true)
+  expect(parsed.argv.at(-1)).toBe("begin")
+}, 30_000)
+
+test("preview greed renders design prompt + default kickoff", () => {
+  execFileSync("pnpm", ["run", "build"], { stdio: "ignore" })
+  const env = { ...process.env, PANDORA_SPAWN_FAKE_PITHOS_HELP: "pithos help" }
+  const out = execFileSync("pandora-spawn", [
+    "--agent",
+    "greed",
+    "--scope",
+    "repo:work/example",
+    "--cwd",
+    "/tmp/example",
+    "--preview",
+  ], { env }).toString()
+  const parsed = JSON.parse(out) as { harness: string; argv: string[] }
+  expect(parsed.harness).toBe("pi")
+  expect(parsed.argv.at(-1)).toBe("begin")
+  expect(parsed.argv).toContain("--system-prompt")
+  expect(parsed.argv.some((arg) => arg.includes("Claim one Pithos task with capability `design`"))).toBe(true)
+  expect(parsed.argv.some((arg) => arg.includes("Interview me relentlessly about every aspect of this plan"))).toBe(true)
 }, 30_000)

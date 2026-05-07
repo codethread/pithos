@@ -66,8 +66,7 @@ const program = cli(process.argv).pipe(
       LoggerLive,
       // Provides FileSystem, Path, Terminal required by @effect/cli internals.
       NodeContext.layer,
-      // Keep built-ins visible (--help/-h, --version) in OPTIONS section.
-      CliConfig.layer({ showBuiltIns: true }),
+      CliConfig.layer({ showBuiltIns: false }),
     ),
   ),
 )

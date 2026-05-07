@@ -4,16 +4,19 @@ exports[`envy spawn renders deterministic prompt + argv (fake harness) 1`] = `
 {
   "agent": "envy",
   "argv": [
-    "claude",
-    "--session-id",
-    "session-TEST",
-    "--dangerously-skip-permissions",
+    "pi",
+    "--session-dir",
+    "/Users/codethread/.pi/agent/sessions",
+    "--session",
+    "/Users/codethread/.pi/agent/sessions/--private-tmp-example--/session-TEST.jsonl",
     "--model",
-    "sonnet",
+    "deepseek-v4-pro",
+    "--extension",
+    "/Users/codethread/dev/pithos/packages/spawner/pi-extension",
     "--tools",
-    "Bash,Read,Edit,Write,Grep,Glob,LS",
+    "bash,read",
     "--system-prompt",
-    "You have access to exactly these tools: Bash,Read,Edit,Write,Grep,Glob,LS. No others exist.
+    "You have access to exactly these tools: bash,read. No others exist.
 
 You are Envy. Claim one Pithos task with capability \`implement\`, coordinate execution, attach a \`worker-completion\` artifact for worker-backed results, complete or fail your task, then finalize.
 
@@ -24,7 +27,17 @@ IMPORTANT: When all work is complete, run this exact command:
 
 Your session is the coordinator, not the mutating worker.
 
+Your primary job is simple: make sure a worker gets the task and sees it through. You are not the planner, not the coder, and not the hands on the keyboard for repo changes.
+
 If the task requires any repo/worktree mutation — for example editing files, creating scripts, changing generated output, or running other mutating implementation steps — you must delegate that work to a separate worker sub-session. Do not perform the mutation directly from the Envy coordinator session.
+
+Treat Envy as delegation-only execution management:
+- pass the work to a worker quickly
+- give the worker the outcome, constraints, and validation target
+- supervise, verify, and clean up
+- do **not** write implementation plans unless needed to unblock the worker
+- do **not** turn the worker into a typing proxy for your own step-by-step coding
+- do **not** author code, patches, or file-by-file edit instructions yourself
 
 Allowed in the Envy coordinator session:
 - read/inspect the repo and Pithos state
@@ -35,7 +48,7 @@ Allowed in the Envy coordinator session:
 
 For worker-backed implementation, record the result with \`pithos artifact add --kind worker-completion ...\` before completing the task.
 
-Direct repo mutation by Envy does not satisfy the contract for worker-backed implementation.
+Direct repo mutation by Envy does not satisfy the contract for worker-backed implementation. Neither does detailed planner-style micromanagement where Envy effectively does the work through the worker.
 
 ## Worker spawning
 
@@ -125,48 +138,6 @@ Exit codes:
 
   5  No claimable work
 
-[0;1mOPTIONS[0m
-
-[0;1m--completions sh | bash | fish | zsh[0m
-
-  One of the following: sh, bash, fish, zsh
-
-  Generate a completion script for a specific shell.
-
-  This setting is optional.
-
-[0;1m--log-level all | trace | debug | info | warning | error | fatal | none[0m
-
-  One of the following: all, trace, debug, info, warning, error, fatal, none
-
-  Sets the minimum log level for a command.
-
-  This setting is optional.
-
-[0;1m(-h, --help)[0m
-
-  A true or false value.
-
-  Show the help documentation for a command.
-
-  This setting is optional.
-
-[0;1m--wizard[0m
-
-  A true or false value.
-
-  Start wizard mode for a command.
-
-  This setting is optional.
-
-[0;1m--version[0m
-
-  A true or false value.
-
-  Show the version of the application.
-
-  This setting is optional.
-
 [0;1mCOMMANDS[0m
 
   - init                                                                                                                                 
@@ -205,7 +176,7 @@ Exit codes:
 
   - inspect task <task-id>                                                                                                               
 
-  - inspect graph [--task text] [--scope text] [--current]                                                                               
+  - inspect graph [--task text] [--scope text] [--all] [--current] [--flat] [--dump]                                                     
 
   - tail [--limit integer]                                                                                                               
 
@@ -243,10 +214,16 @@ Run \`pithos <subcommand> --help\` for per-command flags.
   - \`pithos inspect task <id>\` shows the task, direct dependencies, direct dependents, unresolved blockers, supersession links, and artifacts.
   - \`pithos inspect graph --task <id>\` shows the closed dependency/supersession graph around one task.
   - \`pithos inspect graph --scope <scope-id>\` shows the closed graph seeded from non-cancelled work in one scope.
-  - \`pithos inspect graph --current\` shows the closed graph for all non-cancelled work.
+  - \`pithos inspect graph --all --flat\` shows a clean tree of active work (hides completed chains).
+  - \`pithos inspect graph --all --flat --dump\` shows the full tree including completed chains.
+  - \`pithos inspect graph --all | jq .\` shows the raw JSON DAG for machine parsing.
 - Use \`pithos enqueue --depends-on <task-id>\` (repeatable) to encode blocking relationships directly in Pithos. Dependencies may point across scopes.
 - Use \`pithos supersede <task-id> --run <run-id> --reason <text>\` when a queued task is wrong and must be replaced without losing history. Claimed/running tasks cannot be superseded.
 - \`claim\` only returns ready queued work. Blocked tasks stay queued and must be understood via \`inspect\` or \`briefing\`.
+- When using \`pithos enqueue --body\`, the shell interprets special characters like brackets — use \`--body-file\` for multi-line or bracket-heavy bodies.
+- Killing an agent (\`pandora-spawn kill\`) does not release its task lease. Run \`pithos sweep\` after killing to requeue the orphaned task.
+- \`pithos supersede\` on a queued task creates a **new** queued superseding task — it does not delete. To fully cancel, supersede with a SKIPPED title and let an agent close it, or chain-supersede until terminal.
+- \`pithos sweep\` releases stale leases and marks stale runs but does **not** prune completed/cancelled nodes from the graph. They persist for audit history.
 
 ",
     "begin",
@@ -262,7 +239,7 @@ Run \`pithos <subcommand> --help\` for per-command flags.
   "harness": "fake",
   "ok": true,
   "pid": null,
-  "prompt": "You have access to exactly these tools: Bash,Read,Edit,Write,Grep,Glob,LS. No others exist.
+  "prompt": "You have access to exactly these tools: bash,read. No others exist.
 
 You are Envy. Claim one Pithos task with capability \`implement\`, coordinate execution, attach a \`worker-completion\` artifact for worker-backed results, complete or fail your task, then finalize.
 
@@ -273,7 +250,17 @@ IMPORTANT: When all work is complete, run this exact command:
 
 Your session is the coordinator, not the mutating worker.
 
+Your primary job is simple: make sure a worker gets the task and sees it through. You are not the planner, not the coder, and not the hands on the keyboard for repo changes.
+
 If the task requires any repo/worktree mutation — for example editing files, creating scripts, changing generated output, or running other mutating implementation steps — you must delegate that work to a separate worker sub-session. Do not perform the mutation directly from the Envy coordinator session.
+
+Treat Envy as delegation-only execution management:
+- pass the work to a worker quickly
+- give the worker the outcome, constraints, and validation target
+- supervise, verify, and clean up
+- do **not** write implementation plans unless needed to unblock the worker
+- do **not** turn the worker into a typing proxy for your own step-by-step coding
+- do **not** author code, patches, or file-by-file edit instructions yourself
 
 Allowed in the Envy coordinator session:
 - read/inspect the repo and Pithos state
@@ -284,7 +271,7 @@ Allowed in the Envy coordinator session:
 
 For worker-backed implementation, record the result with \`pithos artifact add --kind worker-completion ...\` before completing the task.
 
-Direct repo mutation by Envy does not satisfy the contract for worker-backed implementation.
+Direct repo mutation by Envy does not satisfy the contract for worker-backed implementation. Neither does detailed planner-style micromanagement where Envy effectively does the work through the worker.
 
 ## Worker spawning
 
@@ -374,48 +361,6 @@ Exit codes:
 
   5  No claimable work
 
-[0;1mOPTIONS[0m
-
-[0;1m--completions sh | bash | fish | zsh[0m
-
-  One of the following: sh, bash, fish, zsh
-
-  Generate a completion script for a specific shell.
-
-  This setting is optional.
-
-[0;1m--log-level all | trace | debug | info | warning | error | fatal | none[0m
-
-  One of the following: all, trace, debug, info, warning, error, fatal, none
-
-  Sets the minimum log level for a command.
-
-  This setting is optional.
-
-[0;1m(-h, --help)[0m
-
-  A true or false value.
-
-  Show the help documentation for a command.
-
-  This setting is optional.
-
-[0;1m--wizard[0m
-
-  A true or false value.
-
-  Start wizard mode for a command.
-
-  This setting is optional.
-
-[0;1m--version[0m
-
-  A true or false value.
-
-  Show the version of the application.
-
-  This setting is optional.
-
 [0;1mCOMMANDS[0m
 
   - init                                                                                                                                 
@@ -454,7 +399,7 @@ Exit codes:
 
   - inspect task <task-id>                                                                                                               
 
-  - inspect graph [--task text] [--scope text] [--current]                                                                               
+  - inspect graph [--task text] [--scope text] [--all] [--current] [--flat] [--dump]                                                     
 
   - tail [--limit integer]                                                                                                               
 
@@ -492,14 +437,21 @@ Run \`pithos <subcommand> --help\` for per-command flags.
   - \`pithos inspect task <id>\` shows the task, direct dependencies, direct dependents, unresolved blockers, supersession links, and artifacts.
   - \`pithos inspect graph --task <id>\` shows the closed dependency/supersession graph around one task.
   - \`pithos inspect graph --scope <scope-id>\` shows the closed graph seeded from non-cancelled work in one scope.
-  - \`pithos inspect graph --current\` shows the closed graph for all non-cancelled work.
+  - \`pithos inspect graph --all --flat\` shows a clean tree of active work (hides completed chains).
+  - \`pithos inspect graph --all --flat --dump\` shows the full tree including completed chains.
+  - \`pithos inspect graph --all | jq .\` shows the raw JSON DAG for machine parsing.
 - Use \`pithos enqueue --depends-on <task-id>\` (repeatable) to encode blocking relationships directly in Pithos. Dependencies may point across scopes.
 - Use \`pithos supersede <task-id> --run <run-id> --reason <text>\` when a queued task is wrong and must be replaced without losing history. Claimed/running tasks cannot be superseded.
 - \`claim\` only returns ready queued work. Blocked tasks stay queued and must be understood via \`inspect\` or \`briefing\`.
+- When using \`pithos enqueue --body\`, the shell interprets special characters like brackets — use \`--body-file\` for multi-line or bracket-heavy bodies.
+- Killing an agent (\`pandora-spawn kill\`) does not release its task lease. Run \`pithos sweep\` after killing to requeue the orphaned task.
+- \`pithos supersede\` on a queued task creates a **new** queued superseding task — it does not delete. To fully cancel, supersede with a SKIPPED title and let an agent close it, or chain-supersede until terminal.
+- \`pithos sweep\` releases stale leases and marks stale runs but does **not** prune completed/cancelled nodes from the graph. They persist for audit history.
 
 ",
   "run_id": "run_SNAPSHOT",
   "scope_id": "repo:work/example",
+  "session_file": "/Users/codethread/.pi/agent/sessions/--private-tmp-example--/session-TEST.jsonl",
   "session_id": "session-TEST",
   "task_id": null,
 }

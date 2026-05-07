@@ -3,7 +3,6 @@ import { basename, join } from "node:path"
 import { Either, ParseResult, Schema } from "effect"
 import { SpawnerError } from "./errors.ts"
 
-const AgentTypeSchema = Schema.Literal("afk", "hitl")
 const SystemPromptModeSchema = Schema.Literal("replace", "append")
 const ClaudeToolSchema = Schema.Literal("Bash", "Read", "Edit", "Write", "Grep", "Glob", "LS")
 const PiToolSchema = Schema.Literal("bash", "read", "edit", "write", "grep", "find", "ls")
@@ -45,7 +44,6 @@ const AgentManifestSchema = Schema.Struct({
   agent: Schema.NonEmptyString,
   harness: HarnessConfigSchema,
   capability: Schema.optionalWith(Schema.String, { default: () => "" }),
-  type: AgentTypeSchema,
   cwd: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
   includes: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
   system_prompt: Schema.NonEmptyString,
@@ -62,7 +60,6 @@ const AgentsFileSchema = Schema.Struct({
 })
 
 export type LauncherManifest = Schema.Schema.Type<typeof LauncherManifestSchema>
-export type AgentType = Schema.Schema.Type<typeof AgentTypeSchema>
 export type AgentManifest = Schema.Schema.Type<typeof AgentManifestSchema>
 export type HarnessConfig = Schema.Schema.Type<typeof HarnessConfigSchema>
 export type SystemPromptMode = Schema.Schema.Type<typeof SystemPromptModeSchema>

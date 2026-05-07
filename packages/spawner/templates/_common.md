@@ -14,7 +14,13 @@
   - `pithos inspect task <id>` shows the task, direct dependencies, direct dependents, unresolved blockers, supersession links, and artifacts.
   - `pithos inspect graph --task <id>` shows the closed dependency/supersession graph around one task.
   - `pithos inspect graph --scope <scope-id>` shows the closed graph seeded from non-cancelled work in one scope.
-  - `pithos inspect graph --current` shows the closed graph for all non-cancelled work.
+  - `pithos inspect graph --all --flat` shows a clean tree of active work (hides completed chains).
+  - `pithos inspect graph --all --flat --dump` shows the full tree including completed chains.
+  - `pithos inspect graph --all | jq .` shows the raw JSON DAG for machine parsing.
 - Use `pithos enqueue --depends-on <task-id>` (repeatable) to encode blocking relationships directly in Pithos. Dependencies may point across scopes.
 - Use `pithos supersede <task-id> --run <run-id> --reason <text>` when a queued task is wrong and must be replaced without losing history. Claimed/running tasks cannot be superseded.
 - `claim` only returns ready queued work. Blocked tasks stay queued and must be understood via `inspect` or `briefing`.
+- When using `pithos enqueue --body`, the shell interprets special characters like brackets — use `--body-file` for multi-line or bracket-heavy bodies.
+- Killing an agent (`pandora-spawn kill`) does not release its task lease. Run `pithos sweep` after killing to requeue the orphaned task.
+- `pithos supersede` on a queued task creates a **new** queued superseding task — it does not delete. To fully cancel, supersede with a SKIPPED title and let an agent close it, or chain-supersede until terminal.
+- `pithos sweep` releases stale leases and marks stale runs but does **not** prune completed/cancelled nodes from the graph. They persist for audit history.

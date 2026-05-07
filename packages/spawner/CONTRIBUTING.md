@@ -33,7 +33,7 @@ When the snapshot updates because of a real shape change (new flag, new template
 
 ## Adding a template / agent
 
-1. Add a `templates/<agent>.md.tmpl` file. The frontmatter `agent` must equal the file stem.
+1. Add a `templates/<agent>.md.tmpl` file.
 2. Add an entry under `agents` in `templates/agents.json`. All required fields populated; `harness` present. Use `kind: "claude"` with Claude tool names or `kind: "pi"` with Pi tool names.
 3. If the template uses a new include filename, list it in `includes` and reference it as `{{filename.md}}` in the body.
 4. Update the snapshot test if you've added a new agent it should cover (one per harness shape is enough).
@@ -49,4 +49,4 @@ If you change argv building, prompt position, env injection, or hook wiring:
 2. Update `src/main.ts` envelope shape if you add output fields.
 3. Update `README.md` plus the harness-specific README (`claude-plugin/` or `pi-extension/`) when the shared contract changes.
 4. Refresh tests/snapshots.
-5. Manual real-spawn smoke (HITL) — confirm the agent actually starts working, not idle at `❯`.
+5. Manual real-spawn smoke — confirm the agent actually starts working, not idle at `❯`.

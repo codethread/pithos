@@ -402,6 +402,11 @@ describe("pithos inspect --help", () => {
     expect(stdout).toContain("supersedes")
   })
 
+  it("inspect graph help documents --flat flag", async () => {
+    const { stdout } = await help(["inspect", "graph", "--help"])
+    expect(stdout).toContain("--flat")
+  })
+
   it("contains required sections", async () => {
     const { stdout } = await help(["inspect", "--help"])
     assertRequiredSections(stdout, "inspect --help")
@@ -472,36 +477,6 @@ describe("pithos briefing --help", () => {
 // ---------------------------------------------------------------------------
 
 describe("agent-usability invariants", () => {
-  it("every command help mentions --help/-h option", async () => {
-    const commands = [
-      ["init", "--help"],
-      // Namespace help pages
-      ["scope", "--help"],
-      ["run", "--help"],
-      ["artifact", "--help"],
-      // Leaf subcommand help pages
-      ["scope", "upsert", "--help"],
-      ["run", "register", "--help"],
-      ["run", "end", "--help"],
-      ["enqueue", "--help"],
-      ["claim", "--help"],
-      ["heartbeat", "--help"],
-      ["complete", "--help"],
-      ["fail", "--help"],
-      ["artifact", "add", "--help"],
-      ["inspect", "--help"],
-      ["inspect", "graph", "--help"],
-      ["tail", "--help"],
-      ["sweep", "--help"],
-      ["briefing", "--help"],
-    ]
-
-    for (const args of commands) {
-      const { stdout } = await help(args)
-      expect(stdout, `${args.join(" ")}: must self-document --help/-h`).toMatch(/--help.*-h|-h.*--help/i)
-    }
-  })
-
   it("-h is equivalent to --help for all top-level commands", async () => {
     const commands = [
       { long: ["init", "--help"], short: ["init", "-h"] },

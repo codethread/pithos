@@ -10,6 +10,8 @@ import {
   loadSupersedesSummary,
   loadTaskGraph,
   loadUnresolvedDependencies,
+  type GraphNode,
+  type TaskGraph,
 } from "../domain/task-graph.ts"
 import { DbService } from "../services/db.ts"
 import { OutputService } from "../services/output.ts"
@@ -155,6 +157,7 @@ export type InspectGraphSelector =
 export interface InspectGraphSelectorArgs {
   readonly taskId: string | undefined
   readonly scopeId: string | undefined
+  readonly all: boolean
   readonly current: boolean
 }
 
@@ -162,15 +165,18 @@ export const decodeInspectGraphSelector = (
   args: InspectGraphSelectorArgs,
 ): Effect.Effect<InspectGraphSelector, PithosError> =>
   Effect.gen(function* () {
-    const selectedCount = [args.taskId !== undefined, args.scopeId !== undefined, args.current].filter(
-      Boolean,
-    ).length
+    const allEffective = args.all || args.current
+    const selectedCount = [
+      args.taskId !== undefined,
+      args.scopeId !== undefined,
+      allEffective,
+    ].filter(Boolean).length
 
     if (selectedCount !== 1) {
       yield* Effect.fail(
         new PithosError({
           code: "VALIDATION_ERROR",
-          message: "inspect graph requires exactly one selector: choose one of --task, --scope, or --current",
+          message: "inspect graph requires exactly one selector: choose one of --task, --scope, or --all",
         }),
       )
       return yield* Effect.never
@@ -186,12 +192,140 @@ export const decodeInspectGraphSelector = (
   })
 
 /**
+ * Filter out fully-terminal chains and standalone terminal nodes from a task graph.
+ * Pure function, no services.
+ *
+ * A "fully-terminal chain" is a supersession chain where every node has status
+ * "done" or "cancelled". A "standalone terminal" node has no supersession links
+ * and status "done" or "cancelled". Both are removed from the returned graph.
+ */
+export const filterTerminalChains = (graph: TaskGraph): TaskGraph => {
+  if (graph.nodes.length === 0) return graph
+
+  // supersededByLookup: old_task_id → the newer node that superseded it
+  const supersededByLookup = new Map<string, GraphNode>()
+  for (const node of graph.nodes) {
+    if (node.supersedes_task_id !== null) {
+      supersededByLookup.set(node.supersedes_task_id, node)
+    }
+  }
+
+  // Nodes that participate in any supersession relationship
+  const supersessionParticipantIds = new Set<string>()
+  for (const node of graph.nodes) {
+    if (node.supersedes_task_id !== null || node.superseded_by_task_id !== null || supersededByLookup.has(node.id)) {
+      supersessionParticipantIds.add(node.id)
+    }
+  }
+
+  const terminalStatuses = new Set(["done", "cancelled"])
+  const terminalNodeIds = new Set<string>()
+
+  // Chain roots: nodes that start a supersession chain (not superseded but have a replacement)
+  // Uses same logic as renderGraphFlat: supersedes_task_id === null AND part of a supersession chain
+  const chainRoots = graph.nodes.filter(
+    (n) =>
+      n.supersedes_task_id === null &&
+      (n.superseded_by_task_id !== null || supersededByLookup.has(n.id)),
+  )
+
+  for (const root of chainRoots) {
+    // Walk the chain from root to leaf
+    const chainNodes: GraphNode[] = [root]
+    let current: GraphNode | undefined = supersededByLookup.get(root.id)
+    while (current !== undefined) {
+      chainNodes.push(current)
+      current = supersededByLookup.get(current.id)
+    }
+
+    // If every node in the chain is terminal, mark the whole chain for removal
+    if (chainNodes.every((n) => terminalStatuses.has(n.status))) {
+      for (const node of chainNodes) {
+        terminalNodeIds.add(node.id)
+      }
+    }
+  }
+
+  // Standalone nodes (no supersession involvement) with terminal status
+  for (const node of graph.nodes) {
+    if (!supersessionParticipantIds.has(node.id) && terminalStatuses.has(node.status)) {
+      terminalNodeIds.add(node.id)
+    }
+  }
+
+  if (terminalNodeIds.size === 0) return graph
+
+  return {
+    nodes: graph.nodes.filter((n) => !terminalNodeIds.has(n.id)),
+    edges: graph.edges.filter(
+      (e) => !terminalNodeIds.has(e.from_task_id) && !terminalNodeIds.has(e.to_task_id),
+    ),
+  }
+}
+
+/**
+ * Renders supersession chains and standalone tasks as plain text. Pure function, no services.
+ *
+ * Tasks in a supersession relationship are rendered as indented chains. Standalone
+ * tasks (no supersession links at all) appear as single-line entries at depth 0.
+ * Dependency-only nodes that have no supersession involvement are omitted.
+ * Multiple entries are separated by blank lines.
+ */
+export const renderGraphFlat = (graph: TaskGraph): string => {
+  if (graph.nodes.length === 0) return ""
+
+  // supersededByLookup: old_task_id → the newer node that superseded it
+  const supersededByLookup = new Map<string, GraphNode>()
+  for (const node of graph.nodes) {
+    if (node.supersedes_task_id !== null) {
+      supersededByLookup.set(node.supersedes_task_id, node)
+    }
+  }
+
+  // Chain roots: nodes that start a supersession chain (not a replacement themselves)
+  const supersessionRoots = graph.nodes.filter(
+    (n) =>
+      n.supersedes_task_id === null &&
+      (n.superseded_by_task_id !== null || supersededByLookup.has(n.id)),
+  )
+
+  // Standalone nodes: no supersession relationship in either direction
+  const standaloneNodes = graph.nodes.filter(
+    (n) =>
+      n.supersedes_task_id === null &&
+      n.superseded_by_task_id === null &&
+      !supersededByLookup.has(n.id),
+  )
+
+  if (supersessionRoots.length === 0 && standaloneNodes.length === 0) return ""
+
+  const renderChain = (root: GraphNode): string => {
+    const lines: string[] = []
+    let current: GraphNode | undefined = root
+    let depth = 0
+    while (current !== undefined) {
+      lines.push(`${"  ".repeat(depth)}[${current.status}] ${current.title}`)
+      current = supersededByLookup.get(current.id)
+      depth++
+    }
+    return lines.join("\n")
+  }
+
+  const chainBlocks = supersessionRoots.map(renderChain)
+  const standaloneBlocks = standaloneNodes.map((n) => `[${n.status}] ${n.title}`)
+
+  return [...chainBlocks, ...standaloneBlocks].join("\n\n")
+}
+
+/**
  * `pithos inspect graph --task <id> | --scope <scope-id> | --current`
  *
  * Returns a closed transitive dependency/supersession graph for the selected seed set.
  */
 export const inspectGraphCommand = (
   selector: InspectGraphSelector,
+  flat: boolean,
+  dump: boolean,
 ): Effect.Effect<void, PithosError, DbService | OutputService> =>
   Effect.gen(function* () {
     const output = yield* OutputService
@@ -202,16 +336,21 @@ export const inspectGraphCommand = (
           ? yield* loadScopeTaskGraph(selector.value)
           : yield* loadCurrentTaskGraph()
 
-    yield* output.print(
-      JSON.stringify({
-        ok: true,
-        graph: {
-          selector,
-          nodes: graph.nodes,
-          edges: graph.edges,
-        },
-      }),
-    )
+    if (flat) {
+      const displayGraph = !dump ? filterTerminalChains(graph) : graph
+      yield* output.print(renderGraphFlat(displayGraph))
+    } else {
+      yield* output.print(
+        JSON.stringify({
+          ok: true,
+          graph: {
+            selector,
+            nodes: graph.nodes,
+            edges: graph.edges,
+          },
+        }),
+      )
+    }
   }).pipe(
     Effect.withLogSpan("pithos.inspect.graph"),
     withCommandObservability("inspect.graph"),
@@ -253,7 +392,7 @@ Usage:
   pithos inspect task <id>
   pithos inspect graph --task <id>
   pithos inspect graph --scope <scope-id>
-  pithos inspect graph --current
+  pithos inspect graph --all
 
 Options:
   --help, -h    Show this help
@@ -264,7 +403,9 @@ Subcommands:
   task <id>              Show a task by ID with direct dependencies, dependents, blockers, supersession links, and artifacts
   graph --task <id>      Show a closed transitive dependency/supersession graph around one task
   graph --scope <id>     Show a closed transitive dependency/supersession graph around a scope's non-cancelled tasks
-  graph --current        Show the closed transitive dependency/supersession graph for all non-cancelled tasks
+  graph --all            Show the closed transitive dependency/supersession graph for all non-cancelled tasks
+  graph --flat           Render a plain-text tree (opt-in text mode; hides completed chains by default)
+  graph --dump           Show all chains including completed ones (only meaningful with --flat)
 
 Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
@@ -279,7 +420,9 @@ Examples:
   pithos inspect task task_abc123
   pithos inspect graph --task task_abc123
   pithos inspect graph --scope repo:work/perkbox-services/protobuf
-  pithos inspect graph --current
+  pithos inspect graph --all
+  pithos inspect graph --all --flat
+  pithos inspect graph --all --flat --dump
 
 Exit codes: 0 success | 2 validation error | 3 not found
 `

@@ -86,6 +86,15 @@ Spawner error codes: `VALIDATION_ERROR`, `TEMPLATE_ERROR`, `HARNESS_ERROR`, `LAU
 
 Defer: full template-text golden snapshots (template wording is iterated through demos); harness invocation integration (covered by pdx slices 6+).
 
+## Implementation primitives
+
+- **`renderAgent` is pure:** read manifest + template via `FileSystem`, validate via `Schema.decodeUnknown(ManifestSchema)`, render. No DB, no `Command.start`, no Pithos calls. Tests run it without SQL DI.
+- **`launchAgent` AFK path:** `Command.start(Command.make(harnessKind, ...args).pipe(Command.workingDirectory(cwd), Command.env(env)))` returns `Process { pid, exitCode: Effect, kill }`. Slice returns `{ pid, processStartTime }` immediately; pdx (slice 6) owns the death observer.
+- **`launchAgent` HITL path:** delegates to the `Tmux` service from task-005 (`newSession({ target, command, cwd })`). Spawner does not touch `child_process` directly — project rule.
+- **PITHOS_BIN seam:** single read of `process.env.PITHOS_BIN ?? "pithos"` at module boundary, parsed into a typed config. No string-concat throughout. Used only for `claim_command` rendering.
+- **Manifest validation against seed data:** at load, fetch seeded `agent_claims` / `agent_enqueues` via `SqlSchema.findAll` and assert manifest matches. Mismatch → `VALIDATION_ERROR`.
+- **Error codes:** `VALIDATION_ERROR | TEMPLATE_ERROR | HARNESS_ERROR | LAUNCH_ERROR` as a `Schema.Literal` union; tagged `PithosError`.
+
 ## Acceptance criteria
 
 - [ ] Spawner CLI surface reduced to `preview` only

@@ -53,6 +53,15 @@ Events emitted with minimum payload per spec §11: `task.reclaimed`, `task.dead_
 
 Defer: exhaustive payload field coverage; performance under contention.
 
+## Implementation primitives
+
+SQL transaction + fenced-UPDATE patterns are canonical in task-001 §Implementation primitives. Highlights specific to this slice:
+
+- Each transition is one `sql.withTransaction(...)` block. The fenced UPDATE on the active task captures `runs.task_id`, task `status`, and `fencing_token` in its WHERE. Zero rows affected → `STALE_TOKEN_RACE`, transaction rolls back.
+- `run interrupt --task <id>` resolves the owning run via `SELECT id FROM runs WHERE task_id = ? AND status NOT IN ('ended','failed','cancelled','timed_out')`. Zero rows → `Effect.fail` (do **not** consult pdx Registry — DB is source of truth).
+- Event emission is one INSERT per branch inside the same transaction so events are durable iff the state transition committed.
+- Branches (terminal / no-task / active-held / terminal-held) modelled as a tagged union over a captured snapshot of run+task state, not if-chains. Prevents missed branches.
+
 ## Acceptance criteria
 
 - [ ] All three commands implement spec §7 transition tables

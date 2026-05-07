@@ -51,6 +51,17 @@ Mock the harness via the existing DI seam so tests do not require Anthropic cred
 
 Defer: spawn-policy fairness across many scopes; cap configurability under load; pidfile race-with-restart edges (slice 10 covers stale pidfiles on startup).
 
+## Implementation primitives
+
+Builds on task-006 §Implementation primitives (registry, reconcile, Schedule).
+
+- **Per-(agent, scope) caps:** lazily created `` Map<`${agentKind}:${scopeId}`, Semaphore> ``; each `Semaphore(1)`. Spawn block runs under `withPermits(1)`. Permit released only when the registry entry is removed (post-kill or natural death). Pandora and pdx system run excluded by checking `agentKind` before consulting the cap map.
+- **Global `--max-afk` cap:** `Semaphore(maxAfk)` permit held only for AFK entries. Released on registry-entry removal.
+- **Spawn order per tick:** iterate seeded order `["toil", "greed", "war"]`; first eligible kind whose cap allows wins. At most one spawn per tick. Seeded order is a config constant, not a DB query.
+- **No-claim 30s timeout:** registry entry carries `launchedAt: Date` and `everClaimed: boolean`. Each reconcile tick, for each entry where `agentKind ∉ {pandora, pdx}` and `everClaimed === false` and `now - launchedAt >= 30_000ms`: kill the resource (Tmux/Process), confirm gone, then `pithos.run.timeout({ run: runId, reason: "no_claim_timeout" })`. Once `everClaimed` flips true (observed when `runs.task_id` first becomes non-null at any tick), it stays true permanently — later idle/null `task_id` periods are not no-claim sessions per spec §4.
+- **AFK pidfile lifecycle:** at launch, atomic write via tmp+rename — `FileSystem.writeFileString("<home>/runs/<run-id>.pid.tmp", String(pid))` then `FileSystem.rename(tmp, final)`. Survives crash by design (orphan discovery in task-010 reaps stale ones). On `pithos.run.cleanup`, remove the pidfile. **Do not** auto-cleanup on process exit — that defeats orphan detection.
+- **cwd derivation:** function over scope kind. `repo` / `worktree` → `scope.canonical_path` (must be non-null per task-001 capability scope rules); `global` → `<pdx home>` (Pandora and pdx system run only).
+
 ## Acceptance criteria
 
 - [ ] Reconcile spawns `toil`, `greed`, `war` when claimable + cap allows

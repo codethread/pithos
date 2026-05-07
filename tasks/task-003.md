@@ -40,6 +40,14 @@ Demo must not use raw SQL.
 
 Defer: graph-rendering output formatting beyond JSON shape minimums; exhaustive payload field tests.
 
+## Implementation primitives
+
+Reuses task-001 §Implementation primitives for SQL/transactions. New only:
+
+- Capability-scope validation runs on both `task enqueue` and `task supersede` (after override resolution). Centralise in one `validateCapabilityScope(scope, capability)` Effect both call sites invoke.
+- Supersede rewires queued direct dependents in one UPDATE; cross-scope rejection is a precondition check before any mutation.
+- Demo script is a shell-runnable `.md`-with-fenced-bash; uses only the public CLI surface, not raw SQL.
+
 ## Acceptance criteria
 
 - [ ] Capability scope rules enforced for enqueue and supersede

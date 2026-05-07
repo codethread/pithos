@@ -53,6 +53,30 @@ Effect.ts service shapes follow patterns from existing packages: DI for clock, I
 
 Defer: tmux mock fidelity beyond happy path; supervisor log content assertions beyond the schema.
 
+## Implementation primitives
+
+Canonical daemon-shape primitives — referenced by tasks 006/007/009/010.
+
+- **Daemon entry:** `Layer.scoped(...)` defines the daemon's resources, exposed via `Layer.launch(daemonLayer)` which yields `Effect<never>` and runs the daemon for its scope's lifetime.
+- **Finalizer ordering for `pdx close`:** Effect Scope finalizers are LIFO. The pdx-system-run cleanup must run **last** (per spec §4), so it must be added **first**: `yield* Scope.addFinalizer(() => pithos.run.cleanup({ run: pdxSystemRunId, reason: "pdx_close" }))` is the first effect inside the scoped layer. SQLite, log file, registry, reconcile fiber, agent layers acquired after — they finalize before the system-run cleanup.
+- **No `forkDaemon` for child fibers.** Use `forkScoped` so `pdx close` interrupts deterministically. `forkDaemon` would orphan reconcile/observers.
+- **`<home>/runs/` directory:** `FileSystem.makeDirectory(path, { recursive: true })` once during `pdx open`.
+- **JSONL supervisor log:** `@effect/platform/Ndjson.packString()` for serialisation, piped into `fs.sink(logPath, { append: true })`. Every line carries `ts`, `level`, `span`, `msg` via `Effect.log*` + `Effect.annotateLogs` + `Effect.withSpan` (project rule 4). No bare `console.log`.
+- **`--since` parsing:**
+  - Durations (`10m`, `1h`, `2d`, `1w`) → `parse-duration` (npm dep, active).
+  - `today` / `yesterday` → `chrono-node` against local-time boundaries.
+  - ISO timestamps → native `Date.parse`.
+  - Anything else → `Effect.fail(VALIDATION_ERROR)`. Parse at the CLI boundary into a `Date`.
+- **`Tmux` service Layer (canonical, referenced by 6/7/9/10):** all tmux interaction goes through this service. Internally each method wraps `Command.exitCode(Command.make("tmux", ...))` from `@effect/platform`. Exec-form arrays only — no shell, no escaping. Methods:
+  - `hasSession(target): Effect<boolean>` — `tmux has-session -t <target>`; exit 0 → true, non-zero → false (no `Effect.fail`).
+  - `lsSessions(): Effect<readonly string[]>` — `tmux ls -F '#S'`, parse stdout into lines.
+  - `newSession({ target, command, cwd }): Effect<void>` — `tmux new-session -d -s <target> -c <cwd> <command>`.
+  - `killSession(target): Effect<void>` — `tmux kill-session -t <target>`.
+  - `sendLiteralLine(target, text): Effect<void>` — two-call sequence: `tmux send-keys -t <target> -l <text>` then `tmux send-keys -t <target> Enter`. `-l` disables tmux key-name interpretation; `Enter` must be a separate invocation because `-l` applies to all args.
+  - `pasteBuffer(target, content): Effect<void>` — `tmux load-buffer -` with content piped to stdin via `Command.feed`, then `tmux paste-buffer -t <target>`. For multi-line / unpredictable content; foundational for any future richer wakeups.
+- **CLI ↔ daemon IPC seam:** `@effect/platform/SocketServer` with `UnixAddress { path: "<home>/pdx.sock" }`. Daemon binds during `pdx open`; `pdx kill` (slice 7) and any future operator commands are clients. Wire format: one JSON object per request, parsed via `Schema.decodeUnknown(RequestSchema)`. Same IO-boundary rule as DB rows.
+- **Service tags:** `Tmux`, `PithosClient`, `Registry`, `SpawnerLib`, `FileSystem`, `Clock`, `Ids`, `Process` — all wired as Layers per the existing `packages/cli/src` DI pattern.
+
 ## Acceptance criteria
 
 - [ ] `packages/pdx/` builds and tests green

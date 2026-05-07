@@ -31,6 +31,21 @@ This is the only path that adopts pre-existing resources. Steady-state reconcile
 
 Defer: race conditions between probe and kill (MVP); operator-created tmux sessions named `pdx--*` outside pdx's lifecycle (treated as orphans by design).
 
+## Implementation primitives
+
+Builds on task-005 §Implementation primitives (Tmux service, FileSystem) and task-002 §Implementation primitives (`pithos run cleanup`).
+
+- **Order:** orphan discovery runs **before** any new resource is created in `pdx open` — before the new daemon, system run, or Pandora.
+- **HITL orphans:** `Tmux.lsSessions()` returns all session names; filter by `^pdx--`. For each match: `Tmux.killSession(name)`.
+- **AFK orphans:** `FileSystem.readDirectory("<home>/runs/")` for `*.pid` entries. For each:
+  - Parse `runId` from filename (`<run-id>.pid`).
+  - Read pid via `FileSystem.readFileString` and parse as integer; malformed → fail loud with `VALIDATION_ERROR`.
+  - Probe alive: `Effect.try({ try: () => process.kill(pid, 0), catch: () => false })`. ESRCH → dead.
+  - Alive: `process.kill(pid, "SIGTERM")` then short wait, retry `SIGKILL` if needed; then `pithos.run.cleanup({ run: runId, reason: "daemon_start" })`; remove pidfile.
+  - Dead (stale pidfile): only `pithos.run.cleanup({ run: runId, reason: "daemon_start" })`; remove pidfile. No kill attempt.
+- **Pidfile persistence is intentional:** crashed-pdx leaves pidfiles in place so the next `pdx open` finds and reaps them. No "auto-cleanup on process exit" library — that would defeat this path.
+- **Idempotency:** running orphan discovery twice in a row is safe. After the first pass clears everything, the second is a no-op.
+
 ## Acceptance criteria
 
 - [ ] Startup settlement runs before any new resources are created on `pdx open`

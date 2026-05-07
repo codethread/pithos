@@ -54,6 +54,18 @@ Contracts that schema cannot express:
 
 Defer: exhaustive CLI argument-parsing snapshots, full event-payload field assertions beyond required minimums.
 
+## Implementation primitives
+
+Canonical SQL/CLI patterns — referenced by tasks 002/003.
+
+- **Transactions:** wrap multi-statement mutation in `sql.withTransaction(Effect.gen(...))`. Throwing inside the closure rolls back.
+- **Fenced UPDATE:** capture preconditions, run `` sql`UPDATE ... WHERE token = ?`.raw `` to get `{ changes }`. If `changes === 0` → `Effect.fail(new PithosError({ code: "STALE_TOKEN_RACE", ... }))` to roll back the whole transaction. Project rule 2 (DB integrity) — never best-effort.
+- **One-held-task atomic claim:** inside `withTransaction`, UPDATE `runs SET task_id = ? WHERE id = ? AND task_id IS NULL`. Zero changes → fail loud with a dedicated validation error. The partial unique index on `runs(task_id) WHERE task_id IS NOT NULL` is the second-line defence.
+- **Partial unique index:** Effect SQL has no DDL builder for partial indexes — use `` sql.unsafe(`CREATE UNIQUE INDEX idx_runs_task_id ON runs(task_id) WHERE task_id IS NOT NULL`) `` in the migration.
+- **Row decoding at IO boundary:** `SqlSchema.findAll | findOne | single` with a `Schema.Struct(...)`. Anything crossing IO is parsed before downstream code touches it (CLAUDE.md rule 3).
+- **CLI argument parsing:** `@effect/cli` is in the workspace and supports nested subcommands via `Command.withSubcommands(...)`. `PITHOS_RUN_ID` env-var resolution happens at the command-arg layer; conflict between env and `--run` flag fails with `VALIDATION_ERROR`.
+- **Discriminated unions for parsed args:** parsed CLI args are tagged variants, never wide optional bags (CLAUDE.md rule 3).
+
 ## Acceptance criteria
 
 - [ ] New `packages/pithos/` workspace builds; tests green

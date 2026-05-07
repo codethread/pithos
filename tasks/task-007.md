@@ -31,6 +31,20 @@ Sequence:
 
 Defer: kill-failure observability beyond log emission; kill of a fresh same-name tmux session that was created post-kill (out of scope for MVP).
 
+## Implementation primitives
+
+Builds on task-005 §Implementation primitives (Tmux service, Unix socket IPC) and task-006 §Implementation primitives (registry, FiberMap).
+
+- **`pdx kill` CLI ↔ daemon:** the CLI is a separate process. It connects to the daemon's Unix socket (task-005), sends a JSON request `{ kind: "kill", run?: string, task?: string, reason: string }` parsed via `Schema.decodeUnknown(KillRequestSchema)` on the daemon side. Response is a JSON result; CLI prints it and exits.
+- **Daemon-side sequence (one supervisor span per request):**
+  1. `pithos.run.interrupt(...)` first — durable state mutation before any process action.
+  2. If the interrupt returned a held task: enqueue a global `escalate` task as the **pdx system run** via the existing `PithosClient` (no special path; same auth path other agents use).
+  3. `SynchronizedRef.modifyEffect(registry, ...)` to mark the entry `terminating`. Caps still count it; reconcile will not respawn while this state is set.
+  4. Kill the resource: HITL → `Tmux.killSession(target)`; AFK → `Process.kill(pid, "SIGTERM")` first attempt.
+  5. Reconcile retries one kill per tick until gone. **Signal escalation:** first attempt `SIGTERM`, subsequent retries `SIGKILL`. Each failed attempt emits a structured supervisor log entry (`level: warn`, `span: pdx.kill.retry`).
+  6. Once gone: `FiberMap.get(observers, runId)` → `Fiber.interrupt`; remove registry entry inside another `modifyEffect`.
+- **`--task <id>` non-held rejection:** before step 1, query Pithos DB for the owning run; zero rows → `Effect.fail(new PithosError({ code: "VALIDATION_ERROR", message: "Task <id> is not held by any active run; use 'pithos task cancel' for non-held abandonment." }))`. Do **not** consult pdx Registry — DB is source of truth.
+
 ## Acceptance criteria
 
 - [ ] `pdx kill` implements full sequence per spec §8

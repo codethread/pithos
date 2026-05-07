@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "pnpm -r --if-present build && cd packages/cli && npm link && cd ../spawner && npm link",
+    "build": "pnpm -r --if-present build && cd packages/cli && npm link && cd ../pithos && npm link && cd ../spawner && npm link",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm run build",
     "prepare": "husky"
   },

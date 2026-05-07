@@ -68,14 +68,14 @@ Canonical SQL/CLI patterns — referenced by tasks 002/003.
 
 ## Acceptance criteria
 
-- [ ] New `packages/pithos/` workspace builds; tests green
-- [ ] `pithos-next init --fresh` creates schema and seeds, idempotent on re-run without `--fresh`
-- [ ] All commands in spec §7 present; reject invalid input loudly via `PithosError` with machine-readable codes
-- [ ] Command outputs (`run inspect`, `task inspect`, `graph inspect`, `briefing`) match spec §7 minimum-key contracts
-- [ ] Authorization, one-held-task, scope-match, capability-scope rules enforced and tested
-- [ ] Heartbeat shape matches spec; atomic `--task`/`--token` enforced
-- [ ] `PITHOS_RUN_ID` resolution and conflict detection tested
-- [ ] Old `packages/cli/` and existing `pithos` bin unchanged and still functional against old DB
+- [x] New `packages/pithos/` workspace builds; tests green
+- [x] `pithos-next init --fresh` creates schema and seeds, idempotent on re-run without `--fresh`
+- [x] All commands in spec §7 present; reject invalid input loudly via `PithosError` with machine-readable codes
+- [x] Command outputs (`run inspect`, `task inspect`, `graph inspect`, `briefing`) match spec §7 minimum-key contracts
+- [x] Authorization, one-held-task, scope-match, capability-scope rules enforced and tested
+- [x] Heartbeat shape matches spec; atomic `--task`/`--token` enforced
+- [x] `PITHOS_RUN_ID` resolution and conflict detection tested
+- [x] Old `packages/cli/` and existing `pithos` bin unchanged and still functional against old DB
 
 ## Blocked by
 

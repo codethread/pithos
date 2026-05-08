@@ -382,15 +382,12 @@ const taskFail = Command.make(
       Options.withDescription("Owning run id; defaults from PITHOS_RUN_ID"),
     ),
     token: Options.integer("token").pipe(Options.withDescription("Fencing token")),
-    reason: Options.text("reason").pipe(
-      Options.optional,
-      Options.withDescription("Failure reason"),
-    ),
+    reason: Options.text("reason").pipe(Options.withDescription("Failure reason")),
   },
   ({ taskId, run, token, reason }) =>
     resolveMutatingTaskRunId(opt(run)).pipe(
       Effect.flatMap((resolvedRun) =>
-        failCommand({ taskId, run: resolvedRun, token, reason: opt(reason) }),
+        failCommand({ taskId, run: resolvedRun, token, reason }),
       ),
     ),
 ).pipe(

@@ -9,7 +9,7 @@ export interface FailOptions {
   readonly taskId: string | undefined
   readonly run: string | undefined
   readonly token: number | undefined
-  readonly reason?: string | undefined
+  readonly reason: string | undefined
 }
 
 export const failCommand = (
@@ -37,12 +37,17 @@ export const failCommand = (
       ),
     )
 
+    const rawReason = opts.reason
+    if (rawReason === undefined || rawReason.trim().length === 0) {
+      yield* Effect.fail(new PithosError({ code: "VALIDATION_ERROR", message: "--reason is required" }))
+    }
+
     const taskId = opts.taskId
     const runId = opts.run
     const token = opts.token
-    const reason = opts.reason ?? ""
-    const resultJson = JSON.stringify({ reason })
-
+    const reason = rawReason!
+    const trimmedReason = reason.trim()
+    const resultJson = JSON.stringify({ reason: trimmedReason })
     const db = yield* DbService
     const output = yield* OutputService
 
@@ -78,7 +83,7 @@ export const failCommand = (
             task.id,
             runId,
             runId,
-            JSON.stringify({ run_id: runId, fencing_token: token, reason }),
+            JSON.stringify({ run_id: runId, fencing_token: token, reason: trimmedReason }),
           ],
         )
 

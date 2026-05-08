@@ -1,12 +1,16 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { execFile } from "node:child_process"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { promisify } from "node:util"
 import { buildCli } from "./_helpers/build.ts"
 import { runCli } from "./_helpers/exec.ts"
 
 const PKG_DIR = join(import.meta.dirname, "..")
+const REPO_ROOT = join(PKG_DIR, "..", "..")
 const BIN = join(PKG_DIR, "bin", "pithos-next")
+const execFileP = promisify(execFile)
 const AGENTS = ["pdx", "pandora", "toil", "greed", "war"] as const
 const CAPABILITIES = ["triage", "design", "execute", "escalate"] as const
 
@@ -602,6 +606,323 @@ describe("pithos-next task flow contracts", () => {
     ])
   })
 
+  it("enforces supersede scope and lifecycle preconditions and emits minimum supersede events", async () => {
+    const tempDir = makeTempDir()
+    tempDirs.push(tempDir)
+    const env = makeEnv(tempDir)
+    await initFresh(env)
+    const repoScopeA = await upsertRepoScope(env, tempDir, "repo-a")
+    const repoScopeB = await upsertRepoScope(env, tempDir, "repo-b")
+    const { globalRuns } = await setupRuns(env, tempDir, repoScopeA)
+
+    const claimedTarget = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "claimed target",
+      body: "body",
+    })
+    const claimedRun = await upsertRun(env, {
+      agent: "toil",
+      scope: "global",
+      cwd: tempDir,
+      runId: "toil_claimed_target",
+    })
+    await runOkJson<TaskJson>(
+      ["task", "claim", "--run", claimedRun.id, "--scope", "global", "--capability", "triage"],
+      env,
+    )
+
+    const claimedSupersede = await runCli(
+      BIN,
+      ["task", "supersede", claimedTarget.id, "--run", globalRuns.toil!, "--reason", "bad claim"],
+      env,
+    )
+    expect(claimedSupersede.exitCode).toBe(1)
+    expect(claimedSupersede.stderr).toContain(`Cannot supersede task ${claimedTarget.id} while it is claimed`)
+
+    const runningTarget = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "running target",
+      body: "body",
+    })
+    const runningRun = await upsertRun(env, {
+      agent: "toil",
+      scope: "global",
+      cwd: tempDir,
+      runId: "toil_running_target",
+    })
+    const runningClaim = await runOkJson<TaskJson>(
+      ["task", "claim", "--run", runningRun.id, "--scope", "global", "--capability", "triage"],
+      env,
+    )
+    await runOkJson(
+      [
+        "task",
+        "heartbeat",
+        "--run",
+        runningRun.id,
+        "--task",
+        runningTarget.id,
+        "--token",
+        String(runningClaim.task.fencing_token),
+      ],
+      env,
+    )
+
+    const runningSupersede = await runCli(
+      BIN,
+      ["task", "supersede", runningTarget.id, "--run", globalRuns.toil!, "--reason", "bad running"],
+      env,
+    )
+    expect(runningSupersede.exitCode).toBe(1)
+    expect(runningSupersede.stderr).toContain(`Cannot supersede task ${runningTarget.id} while it is running`)
+
+    const scopedTarget = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: repoScopeA,
+      capability: "execute",
+      title: "scoped target",
+      body: "body",
+    })
+    const dependent = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "cross scope dependent",
+      body: "body",
+      dependsOn: [scopedTarget.id],
+    })
+
+    const crossScopeReject = await runCli(
+      BIN,
+      [
+        "task",
+        "supersede",
+        scopedTarget.id,
+        "--run",
+        globalRuns.toil!,
+        "--reason",
+        "move repos",
+        "--scope",
+        repoScopeB,
+      ],
+      env,
+    )
+    expect(crossScopeReject.exitCode).toBe(1)
+    expect(crossScopeReject.stderr).toContain("queued direct dependents would be retargeted across scopes")
+
+    const isolatedTarget = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: repoScopeA,
+      capability: "execute",
+      title: "isolated target",
+      body: "body",
+    })
+    const isolatedSupersede = await runOkJson<{
+      ok: true
+      task: { id: string; scope_id: string; capability: string; status: string }
+      supersession: { old_task_id: string; new_task_id: string; retargeted_dependent_task_ids: string[] }
+    }>(
+      [
+        "task",
+        "supersede",
+        isolatedTarget.id,
+        "--run",
+        globalRuns.toil!,
+        "--reason",
+        "move without dependents",
+        "--scope",
+        repoScopeB,
+      ],
+      env,
+    )
+    expect(isolatedSupersede.task).toMatchObject({
+      scope_id: repoScopeB,
+      capability: "execute",
+      status: "queued",
+    })
+    expect(isolatedSupersede.supersession).toMatchObject({
+      old_task_id: isolatedTarget.id,
+      retargeted_dependent_task_ids: [],
+    })
+
+    const eventTail = await runOkJson<{
+      ok: true
+      events: { task_id: string | null; type: string; payload_json: string }[]
+    }>(["events", "tail", "--limit", "20"], env)
+    const createdEvent = eventTail.events.find(
+      (event) => event.type === "task.created" && event.task_id === isolatedSupersede.task.id,
+    )
+    expect(createdEvent).toBeDefined()
+    expect(JSON.parse(createdEvent!.payload_json)).toMatchObject({
+      scope_id: repoScopeB,
+      capability: "execute",
+      title: "isolated target",
+      depends_on_task_ids: [],
+      supersedes_task_id: isolatedTarget.id,
+    })
+
+    const supersededEvent = eventTail.events.find(
+      (event) => event.type === "task.superseded" && event.task_id === isolatedTarget.id,
+    )
+    expect(supersededEvent).toBeDefined()
+    expect(JSON.parse(supersededEvent!.payload_json)).toMatchObject({
+      new_task_id: isolatedSupersede.task.id,
+      reason: "move without dependents",
+      retargeted_dependent_task_ids: [],
+    })
+
+    const duplicateSupersede = await runCli(
+      BIN,
+      [
+        "task",
+        "supersede",
+        isolatedTarget.id,
+        "--run",
+        globalRuns.toil!,
+        "--reason",
+        "second replacement should fail",
+      ],
+      env,
+    )
+    expect(duplicateSupersede.exitCode).toBe(1)
+    expect(duplicateSupersede.stderr).toContain("has already been superseded by")
+
+    const dependentInspect = await runOkJson<{
+      ok: true
+      task: { unresolved_dependency_ids: string[] }
+    }>(["task", "inspect", dependent.id], env)
+    expect(dependentInspect.task.unresolved_dependency_ids).toEqual([scopedTarget.id])
+  })
+
+  it("requires a non-empty reason for task failure", async () => {
+    const tempDir = makeTempDir()
+    tempDirs.push(tempDir)
+    const env = makeEnv(tempDir)
+    await initFresh(env)
+    const repoScope = await upsertRepoScope(env, tempDir)
+    const { globalRuns } = await setupRuns(env, tempDir, repoScope)
+
+    const task = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "reason required",
+      body: "body",
+    })
+    const claim = await runOkJson<TaskJson>(
+      ["task", "claim", "--run", globalRuns.toil!, "--scope", "global", "--capability", "triage"],
+      env,
+    )
+
+    const missingReason = await runCli(
+      BIN,
+      [
+        "task",
+        "fail",
+        task.id,
+        "--run",
+        globalRuns.toil!,
+        "--token",
+        String(claim.task.fencing_token),
+      ],
+      env,
+    )
+    expect(missingReason.exitCode).toBe(2)
+    expect(missingReason.stderr).toContain(`Expected to find option: '--reason'`)
+
+    const blankReason = await runCli(
+      BIN,
+      [
+        "task",
+        "fail",
+        task.id,
+        "--run",
+        globalRuns.toil!,
+        "--token",
+        String(claim.task.fencing_token),
+        "--reason",
+        "   ",
+      ],
+      env,
+    )
+    expect(blankReason.exitCode).toBe(2)
+    expect(blankReason.stderr).toContain("--reason is required")
+  })
+
+  it("emits minimum failure and cancellation event payloads", async () => {
+    const tempDir = makeTempDir()
+    tempDirs.push(tempDir)
+    const env = makeEnv(tempDir)
+    await initFresh(env)
+    const repoScope = await upsertRepoScope(env, tempDir)
+    const { globalRuns } = await setupRuns(env, tempDir, repoScope)
+
+    const failedTask = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "failure target",
+      body: "body",
+    })
+    const claim = await runOkJson<TaskJson>(
+      ["task", "claim", "--run", globalRuns.toil!, "--scope", "global", "--capability", "triage"],
+      env,
+    )
+    await runOkJson(
+      [
+        "task",
+        "fail",
+        failedTask.id,
+        "--run",
+        globalRuns.toil!,
+        "--token",
+        String(claim.task.fencing_token),
+        "--reason",
+        "boom",
+      ],
+      env,
+    )
+
+    const cancelledTask = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "cancel target",
+      body: "body",
+    })
+    await runOkJson(
+      ["task", "cancel", cancelledTask.id, "--run", globalRuns.toil!, "--reason", "not needed"],
+      env,
+    )
+
+    const eventTail = await runOkJson<{
+      ok: true
+      events: { task_id: string | null; type: string; payload_json: string }[]
+    }>(["events", "tail", "--limit", "20"], env)
+
+    const failedEvent = eventTail.events.find(
+      (event) => event.type === "task.failed" && event.task_id === failedTask.id,
+    )
+    expect(failedEvent).toBeDefined()
+    expect(JSON.parse(failedEvent!.payload_json)).toMatchObject({
+      run_id: globalRuns.toil!,
+      fencing_token: claim.task.fencing_token,
+      reason: "boom",
+    })
+
+    const cancelledEvent = eventTail.events.find(
+      (event) => event.type === "task.cancelled" && event.task_id === cancelledTask.id,
+    )
+    expect(cancelledEvent).toBeDefined()
+    expect(JSON.parse(cancelledEvent!.payload_json)).toMatchObject({
+      reason: "not needed",
+    })
+  })
+
   it("advances claimed work to running idempotently on heartbeat", async () => {
     const tempDir = makeTempDir()
     tempDirs.push(tempDir)
@@ -985,6 +1306,29 @@ describe("pithos-next task flow contracts", () => {
       previous_status: "starting",
       status: "timed_out",
     })
+  })
+
+  it("runs the documented pithos backbone demo end-to-end", async () => {
+    const doc = readFileSync(join(REPO_ROOT, "docs", "demos", "pithos-backbone.md"), "utf-8")
+    const match = /```bash\n([\s\S]*?)\n```/.exec(doc)
+    expect(match).not.toBeNull()
+
+    const scriptDir = makeTempDir()
+    tempDirs.push(scriptDir)
+    const scriptPath = join(scriptDir, "pithos-backbone-demo.sh")
+    writeFileSync(scriptPath, `${match![1]!}\n`)
+
+    const { stdout, stderr } = await execFileP("bash", [scriptPath], {
+      cwd: REPO_ROOT,
+      env: { ...process.env },
+      encoding: "utf-8",
+    })
+
+    const combinedOutput = `${stdout}\n${stderr}`
+    expect(combinedOutput).toContain("== init + scope upserts ==")
+    expect(combinedOutput).toContain("== enqueue triage / design / execute / escalate ==")
+    expect(combinedOutput).toContain("== supersede failed design; queued direct dependents retarget ==")
+    expect(combinedOutput).toContain("demo db:")
   })
 
   it("supports enqueue → claim → heartbeat → artifact → complete round-trip and output contracts", async () => {

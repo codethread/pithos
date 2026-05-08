@@ -44,7 +44,7 @@ Tasks with no unblocked dependencies — pick any.
 
 ## Ready after slice 2
 
-- [ ] **[3 — Task graph tightening + DEMO GATE 1](task-003.md):** supersede preconditions, consolidated events, demo walkthrough
+- [x] **[3 — Task graph tightening + DEMO GATE 1](task-003.md):** supersede preconditions, consolidated events, demo walkthrough
 - [ ] **[5 — pdx skeleton](task-005.md):** open / close / status / logs + system run
 
 ---

@@ -107,7 +107,7 @@ while true; do sleep 1; done
 describe("pdx pandora singleton", () => {
   const homes: string[] = []
 
-  const run = (args: readonly string[], home: string) => {
+  const run = (args: readonly string[], home: string, envOverrides?: Record<string, string>) => {
     const fakeBin = makeFakePiBin(home)
     return spawnSync(pdxBin, args, {
       cwd: repoRoot,
@@ -117,8 +117,34 @@ describe("pdx pandora singleton", () => {
         PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
         PITHOS_BIN: pithosBin,
         PITHOS_DB: join(home, "pithos-next.sqlite"),
+        PDX_OPEN_LOCK_PATH: join(home, "pdx-open.lock"),
+        ...envOverrides,
       },
     })
+  }
+
+  const makeFailingPithosBin = (root: string): string => {
+    const binDir = join(root, "fake-pithos-bin")
+    mkdirSync(binDir, { recursive: true })
+    const scriptPath = join(binDir, "pithos-next")
+    writeFileSync(
+      scriptPath,
+      `#!/usr/bin/env bash
+set -euo pipefail
+real=${JSON.stringify(pithosBin)}
+if [[ "$1" == "init" ]]; then
+  exec "$real" "$@"
+fi
+if [[ "$1" == "run" && "$2" == "upsert" ]]; then
+  echo 'UPSERT_FAIL_TOKEN' >&2
+  exit 1
+fi
+exec "$real" "$@"
+`,
+      "utf8",
+    )
+    chmodSync(scriptPath, 0o755)
+    return scriptPath
   }
 
   const readStatus = async (home: string): Promise<StatusOutput> => {
@@ -131,7 +157,7 @@ describe("pdx pandora singleton", () => {
     return parseJson<StatusOutput>(last.stdout)
   }
 
-  const openWithRetry = async (home: string, attempts = 5): Promise<{ readonly status: number; readonly stdout: string }> => {
+  const openWithRetry = async (home: string, attempts = 5): Promise<{ readonly status: number; readonly stdout: string; readonly stderr: string }> => {
     let last = run(["open", "--home", home, "--interval-seconds", "1"], home)
 
     for (let index = 0; index < attempts; index += 1) {
@@ -146,11 +172,7 @@ describe("pdx pandora singleton", () => {
       }
 
       if (last.status === 0 && statusUp) {
-        return { status: 0, stdout: last.stdout }
-      }
-
-      if (last.status !== 0 && statusUp) {
-        return { status: 0, stdout: "tmux attach -t pdx--pandora\n" }
+        return { status: 0, stdout: last.stdout, stderr: last.stderr }
       }
 
       if (index < attempts - 1) {
@@ -160,7 +182,7 @@ describe("pdx pandora singleton", () => {
       }
     }
 
-    return { status: last.status ?? 1, stdout: last.stdout }
+    return { status: last.status ?? 1, stdout: last.stdout, stderr: last.stderr }
   }
 
   const tryReadStatus = (home: string): StatusOutput | null => {
@@ -209,6 +231,70 @@ describe("pdx pandora singleton", () => {
     killPdxSessions()
   })
 
+  it("surfaces daemon startup failures before readiness and leaves no stale tmux daemon", () => {
+    const home = mkdtempSync(join(tmpdir(), "pdx-home-"))
+    homes.push(home)
+
+    const failingPithos = makeFailingPithosBin(home)
+    const open = run(["open", "--home", home], home, { PITHOS_BIN: failingPithos })
+
+    expect(open.status).toBe(1)
+    const parsed = parseJson<{ readonly ok: false; readonly error: { readonly code: string; readonly message: string } }>(open.stderr)
+    expect(parsed.error.code).toBe("USER_ERROR")
+    expect(parsed.error.message).toContain("pdx daemon exited before readiness")
+    expect(parsed.error.message).toContain("UPSERT_FAIL_TOKEN")
+    expect(tmuxHasSession("pdx--daemon")).toBe(false)
+
+    const activeBuiltIns = spawnSync(
+      pithosBin,
+      ["run", "active-builtins"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PITHOS_DB: join(home, "pithos-next.sqlite"),
+        },
+      },
+    )
+    expect(activeBuiltIns.status).toBe(0)
+    expect(parseJson<{ readonly runs: readonly unknown[] }>(activeBuiltIns.stdout).runs).toEqual([])
+  })
+
+  it("reopens the pdx system run across close/open cycles", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pdx-home-"))
+    homes.push(home)
+
+    const inspectSystemRun = () =>
+      spawnSync(
+        pithosBin,
+        ["run", "inspect", "run_pdx_system"],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PITHOS_DB: join(home, "pithos-next.sqlite"),
+          },
+        },
+      )
+
+    const firstOpen = await openWithRetry(home)
+    expect(firstOpen.status).toBe(0)
+    expect(parseJson<{ readonly run: { readonly status: string } }>(inspectSystemRun().stdout).run.status).toBe("starting")
+
+    const firstClose = run(["close", "--home", home], home)
+    expect(firstClose.status).toBe(0)
+    expect(parseJson<{ readonly run: { readonly status: string } }>(inspectSystemRun().stdout).run.status).toBe("ended")
+
+    const secondOpen = await openWithRetry(home)
+    expect(secondOpen.status).toBe(0)
+    expect(parseJson<{ readonly run: { readonly status: string } }>(inspectSystemRun().stdout).run.status).toBe("starting")
+
+    const secondClose = run(["close", "--home", home], home)
+    expect(secondClose.status).toBe(0)
+  }, 60_000)
+
   it("open launches pandora, status reflects registry and queue, death respawns with a fresh run id, and close tears down", async () => {
     spawnSync("tmux", ["kill-session", "-t", "pdx--pandora"], { encoding: "utf8" })
     spawnSync("tmux", ["kill-session", "-t", "pdx--daemon"], { encoding: "utf8" })
@@ -217,8 +303,8 @@ describe("pdx pandora singleton", () => {
     homes.push(home)
 
     const open = await openWithRetry(home)
-    expect(open.status === 0 || tryReadStatus(home)?.daemon.running === true).toBe(true)
-    expect(["", "tmux attach -t pdx--pandora"]).toContain(open.stdout.trim())
+    expect(open.status).toBe(0)
+    expect(open.stdout.trim()).toBe("tmux attach -t pdx--pandora")
 
     await waitFor(() => tmuxHasSession("pdx--pandora"), 5_000)
 

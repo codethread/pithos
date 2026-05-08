@@ -68,6 +68,11 @@ const GraphEnvelopeSchema = Schema.Struct({
   }),
 })
 
+const RunsEnvelopeSchema = Schema.Struct({
+  ok: Schema.Literal(true),
+  runs: Schema.Array(RunOutputSchema),
+})
+
 const pithosBin = (): string => process.env.PITHOS_BIN ?? "pithos-next"
 
 const decodeRunEnvelope = (stdout: string): Effect.Effect<RunOutput, PdxError> =>
@@ -99,6 +104,23 @@ const decodeGraphEnvelope = (stdout: string): Effect.Effect<readonly GraphNodeSu
         Effect.map((decoded) => decoded.graph.nodes),
         Effect.mapError(
           () => new PdxError({ code: "USER_ERROR", message: `Invalid Pithos graph output: ${stdout}` }),
+        ),
+      ),
+    ),
+  )
+
+const decodeRunsEnvelope = (stdout: string): Effect.Effect<readonly RunOutput[], PdxError> =>
+  Effect.try({
+    try: () => JSON.parse(stdout) as unknown,
+    catch: () => {
+      throw new PdxError({ code: "USER_ERROR", message: `Invalid Pithos JSON: ${stdout}` })
+    },
+  }).pipe(
+    Effect.flatMap((raw) =>
+      Schema.decodeUnknown(RunsEnvelopeSchema)(raw).pipe(
+        Effect.map((decoded) => decoded.runs),
+        Effect.mapError(
+          () => new PdxError({ code: "USER_ERROR", message: `Invalid Pithos runs output: ${stdout}` }),
         ),
       ),
     ),
@@ -141,6 +163,22 @@ export const PithosClientLive: Layer.Layer<PithosClient, never, ProcessService> 
         return yield* decodeGraphEnvelope(result.stdout)
       })
 
+    const runsJsonCommand = (args: readonly string[]): Effect.Effect<readonly RunOutput[], PdxError> =>
+      Effect.gen(function* () {
+        const result = yield* process.exec(pithosBin(), args)
+
+        if (result.exitCode !== 0) {
+          return yield* Effect.fail(
+            new PdxError({
+              code: "USER_ERROR",
+              message: result.stderr.trim() || `Pithos command failed: ${pithosBin()} ${args.join(" ")}`,
+            }),
+          )
+        }
+
+        return yield* decodeRunsEnvelope(result.stdout)
+      })
+
     return {
       init: () =>
         Effect.gen(function* () {
@@ -172,6 +210,7 @@ export const PithosClientLive: Layer.Layer<PithosClient, never, ProcessService> 
         runJsonCommand(["run", "cleanup", "--run", runId, "--reason", reason]),
       heartbeatRun: ({ runId }) => runJsonCommand(["task", "heartbeat", "--run", runId]),
       inspectGraphAll: () => graphJsonCommand(["graph", "inspect", "--all"]),
+      listActiveBuiltInRuns: () => runsJsonCommand(["run", "active-builtins"]),
     }
   }),
 )

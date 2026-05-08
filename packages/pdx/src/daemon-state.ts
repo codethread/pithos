@@ -21,6 +21,8 @@ export interface DaemonState {
     readonly socketPath: string
     readonly systemRunId: string
     readonly intervalSeconds: number
+    readonly startupToken: string
+    readonly phase: "starting" | "ready"
   }
   readonly registry: readonly RegistryEntry[]
   readonly queue: {

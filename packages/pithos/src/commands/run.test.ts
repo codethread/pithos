@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { Effect, Either, Layer } from "effect"
-import { runCleanupCommand, runInterruptCommand } from "./run.ts"
+import { runCleanupCommand, runInterruptCommand, runUpsertCommand } from "./run.ts"
 import { DbService } from "../services/db.ts"
+import { IdService } from "../services/ids.ts"
 import type { DbRow } from "../services/db.ts"
 import { makeOutputServiceTest } from "../layers/output.ts"
 
@@ -18,7 +19,91 @@ const makeDbLayer = (db: FakeDb) =>
     withTransaction: db.withTransaction,
   })
 
+const idsLayer = Layer.succeed(IdService, {
+  generate: () => Effect.succeed("run_generated"),
+})
+
 describe("run lifecycle commands", () => {
+  it("reopens the terminal pdx system run with a refreshed cwd", async () => {
+    const output = makeOutputServiceTest()
+    let reopenParams: readonly unknown[] | undefined
+
+    const db = makeDbLayer({
+      query: (sql, params) => {
+        if (sql === `SELECT * FROM scopes WHERE id = ?`) {
+          return Effect.succeed([{ id: "global", kind: "global", name: "global", canonical_path: null, metadata_json: "{}", created_at: "2026-05-08T00:00:00Z", updated_at: "2026-05-08T00:00:00Z" }])
+        }
+
+        if (sql === `SELECT * FROM runs WHERE id = ?`) {
+          return Effect.succeed([
+            {
+              id: "run_pdx_system",
+              agent_kind: "pdx",
+              mode: "afk",
+              scope_id: "global",
+              task_id: null,
+              harness: "claude-code",
+              session_id: "session_pdx_daemon",
+              tmux_target: null,
+              cwd: "/tmp/old-home",
+              status: "ended",
+              last_heartbeat_at: null,
+              metadata_json: "{}",
+              created_at: "2026-05-08T00:00:00Z",
+              updated_at: "2026-05-08T00:00:00Z",
+              ended_at: "2026-05-08T00:01:00Z",
+            },
+          ])
+        }
+
+        if (sql.includes("UPDATE runs") && sql.includes("cwd = ?") && sql.includes("session_id = ?")) {
+          reopenParams = params
+          return Effect.succeed([
+            {
+              id: "run_pdx_system",
+              agent_kind: "pdx",
+              mode: "afk",
+              scope_id: "global",
+              task_id: null,
+              harness: "claude-code",
+              session_id: "session_pdx_daemon",
+              tmux_target: null,
+              cwd: "/tmp/new-home",
+              status: "starting",
+              last_heartbeat_at: null,
+              metadata_json: "{}",
+              created_at: "2026-05-08T00:00:00Z",
+              updated_at: "2026-05-08T00:02:00Z",
+              ended_at: null,
+            },
+          ])
+        }
+
+        throw new Error(`unexpected query: ${sql}`)
+      },
+      run: () => Effect.void,
+      withTransaction: (effect) => effect,
+    })
+
+    await Effect.runPromise(
+      runUpsertCommand({
+        agent: "pdx",
+        mode: "afk",
+        scope: "global",
+        cwd: "/tmp/new-home",
+        sessionId: "session_pdx_daemon",
+        run: "run_pdx_system",
+      }).pipe(
+        Effect.provide(Layer.mergeAll(output.layer, db, idsLayer)),
+      ),
+    )
+
+    expect(reopenParams).toEqual(["/tmp/new-home", "session_pdx_daemon", "run_pdx_system"])
+    expect(JSON.parse(output.lines()[0]!)).toMatchObject({
+      ok: true,
+      run: { id: "run_pdx_system", status: "starting", scope_id: "global" },
+    })
+  })
   it("fails loudly with STALE_TOKEN_RACE when cleanup loses the fenced task update", async () => {
     const output = makeOutputServiceTest()
     const db = makeDbLayer({

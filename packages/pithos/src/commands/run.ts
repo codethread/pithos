@@ -9,6 +9,7 @@ import {
 } from "../db/helpers.ts"
 import type { RunRow, TaskRow } from "../db/rows.ts"
 import { decodeAgentKind, decodeRunMode } from "../domain/auth.ts"
+import { AGENT_KINDS } from "../domain/control-plane.ts"
 import { TERMINAL_RUN_STATUSES, toRunOutput } from "../domain/run.ts"
 import { PithosError } from "../errors/errors.ts"
 import { withCommandObservability } from "../layers/metrics.ts"
@@ -415,7 +416,14 @@ export const runUpsertCommand = (
             ["session-id", existing.session_id, sessionId],
           ].filter(([, actual, expected]) => actual !== expected)
 
-          if (mismatches.length > 0) {
+          const canReopenPdxSystemRun =
+            existing.agent_kind === "pdx" &&
+            agent === "pdx" &&
+            existing.mode === mode &&
+            existing.scope_id === scopeId &&
+            TERMINAL_RUN_STATUSES.has(existing.status)
+
+          if (mismatches.length > 0 && !canReopenPdxSystemRun) {
             yield* Effect.fail(
               new PithosError({
                 code: "VALIDATION_ERROR",
@@ -426,6 +434,33 @@ export const runUpsertCommand = (
                     .join(", "),
               }),
             )
+          }
+
+          if (canReopenPdxSystemRun) {
+            const reopenedRows = yield* db.query(
+              `UPDATE runs
+               SET
+                 status = 'starting',
+                 task_id = NULL,
+                 cwd = ?,
+                 session_id = ?,
+                 updated_at = CURRENT_TIMESTAMP,
+                 ended_at = NULL
+               WHERE id = ?
+               RETURNING *`,
+              [cwd, sessionId, runId],
+            )
+
+            if (reopenedRows.length === 0) {
+              yield* Effect.fail(
+                new PithosError({
+                  code: "INTERNAL_ERROR",
+                  message: `run upsert returned no reopened row for ${runId}`,
+                }),
+              )
+            }
+
+            return yield* decodeRunRow(reopenedRows[0]!)
           }
 
           return existing
@@ -456,6 +491,24 @@ export const runUpsertCommand = (
     )
     yield* output.print(JSON.stringify({ ok: true, run: toRunOutput(run) }))
   }).pipe(Effect.withLogSpan("pithos.run.upsert"), withCommandObservability("run.upsert"))
+
+export const listActiveBuiltInRunsCommand = (): Effect.Effect<void, PithosError, DbService | OutputService> =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const output = yield* OutputService
+
+    const rows = yield* db.query(
+      `SELECT *
+       FROM runs
+       WHERE agent_kind IN (${AGENT_KINDS.map(() => "?").join(", ")})
+         AND status NOT IN (${[...TERMINAL_RUN_STATUSES].map(() => "?").join(", ")})
+       ORDER BY id ASC`,
+      [...AGENT_KINDS, ...TERMINAL_RUN_STATUSES],
+    )
+
+    const runs = yield* Effect.forEach(rows, (row) => decodeRunRow(row))
+    yield* output.print(JSON.stringify({ ok: true, runs: runs.map((run) => toRunOutput(run)) }))
+  }).pipe(Effect.withLogSpan("pithos.run.active-builtins"), withCommandObservability("run.active-builtins"))
 
 export const runCleanupCommand = (
   opts: RunCleanupOptions,

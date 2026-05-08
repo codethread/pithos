@@ -41,5 +41,6 @@ export class PithosClient extends Context.Tag("@pithos/pdx/PithosClient")<
       readonly runId: string
     }) => Effect.Effect<RunOutput, PdxError>
     readonly inspectGraphAll: () => Effect.Effect<readonly GraphNodeSummary[], PdxError>
+    readonly listActiveBuiltInRuns: () => Effect.Effect<readonly RunOutput[], PdxError>
   }
 >() {}

@@ -16,6 +16,7 @@ import {
   inspectTaskCommand,
 } from "../commands/inspect.ts"
 import {
+  listActiveBuiltInRunsCommand,
   runCleanupCommand,
   runInterruptCommand,
   runTimeoutCommand,
@@ -149,6 +150,21 @@ const runInspect = Command.make(
   ),
 )
 
+const runActiveBuiltIns = Command.make(
+  "active-builtins",
+  {},
+  () => listActiveBuiltInRunsCommand(),
+).pipe(
+  Command.withDescription(
+    desc(
+      "List all nonterminal built-in runs",
+      "pithos-next run active-builtins",
+      ["pithos-next run active-builtins"],
+      "0 success",
+    ),
+  ),
+)
+
 const runCleanup = Command.make(
   "cleanup",
   {
@@ -216,7 +232,7 @@ const runTimeout = Command.make(
 
 const run = Command.make("run").pipe(
   Command.withDescription("Manage runs"),
-  Command.withSubcommands([runUpsert, runCleanup, runInterrupt, runTimeout, runInspect]),
+  Command.withSubcommands([runUpsert, runActiveBuiltIns, runCleanup, runInterrupt, runTimeout, runInspect]),
 )
 
 const taskEnqueue = Command.make(

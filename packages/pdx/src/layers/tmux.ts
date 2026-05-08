@@ -37,9 +37,13 @@ export const TmuxLive: Layer.Layer<Tmux, never, ProcessService> = Layer.effect(
                 : Effect.fail(tmuxError(`tmux ls failed: ${result.stderr.trim() || "unknown tmux error"}`)),
           ),
         ),
-      newSession: ({ target, cwd, argv, env }) => {
+      newSession: ({ target, cwd, argv, env, remainOnExit }) => {
         const envArgs = Object.entries(env ?? {}).map(([key, value]) => `${key}=${value}`)
-        return runTmux(["new-session", "-d", "-s", target, "-c", cwd, "env", ...envArgs, ...argv]).pipe(
+        const args = ["new-session", "-d", "-s", target, "-c", cwd, "env", ...envArgs, ...argv]
+        const fullArgs = remainOnExit === true
+          ? [...args, ";", "set-option", "-t", target, "remain-on-exit", "on"]
+          : args
+        return runTmux(fullArgs).pipe(
           Effect.flatMap((result) =>
             result.exitCode === 0
               ? Effect.void
@@ -53,6 +57,37 @@ export const TmuxLive: Layer.Layer<Tmux, never, ProcessService> = Layer.effect(
             result.exitCode === 0
               ? Effect.void
               : Effect.fail(tmuxError(`tmux kill-session failed for ${target}: ${result.stderr.trim() || "unknown tmux error"}`)),
+          ),
+        ),
+      paneDead: (target) =>
+        runTmux(["list-panes", "-t", target, "-F", "#{pane_dead}"]).pipe(
+          Effect.flatMap((result) => {
+            if (result.exitCode !== 0) {
+              return Effect.fail(tmuxError(`tmux list-panes failed for ${target}: ${result.stderr.trim() || "unknown tmux error"}`))
+            }
+
+            const values = result.stdout
+              .split("\n")
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0)
+
+            return Effect.succeed(values.some((value) => value === "1"))
+          }),
+        ),
+      capturePane: (target) =>
+        runTmux(["capture-pane", "-t", target, "-p", "-S", "-", "-E", "-"]).pipe(
+          Effect.flatMap((result) =>
+            result.exitCode === 0
+              ? Effect.succeed(result.stdout)
+              : Effect.fail(tmuxError(`tmux capture-pane failed for ${target}: ${result.stderr.trim() || "unknown tmux error"}`)),
+          ),
+        ),
+      setRemainOnExit: (target, enabled) =>
+        runTmux(["set-option", "-t", target, "remain-on-exit", enabled ? "on" : "off"]).pipe(
+          Effect.flatMap((result) =>
+            result.exitCode === 0
+              ? Effect.void
+              : Effect.fail(tmuxError(`tmux set-option failed for ${target}: ${result.stderr.trim() || "unknown tmux error"}`)),
           ),
         ),
       sendLiteralLine: (target, text) =>

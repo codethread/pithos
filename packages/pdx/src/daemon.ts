@@ -51,7 +51,7 @@ interface RenderedPandora {
 const writeStateFile = (path: string, state: DaemonState): Promise<void> =>
   writeFile(path, JSON.stringify(state, null, 2) + "\n", "utf8")
 
-const makeState = (home: string, maxAfk: number, intervalSeconds: number): DaemonState => ({
+const makeState = (home: string, maxAfk: number, intervalSeconds: number, startupToken: string): DaemonState => ({
   daemon: {
     running: true,
     home,
@@ -61,6 +61,8 @@ const makeState = (home: string, maxAfk: number, intervalSeconds: number): Daemo
     socketPath: socketPath(home),
     systemRunId: SYSTEM_RUN_ID,
     intervalSeconds,
+    startupToken,
+    phase: "starting",
   },
   registry: [],
   queue: {
@@ -105,15 +107,6 @@ const decodePreview = (stdout: string): Effect.Effect<RenderedPandora, PdxError>
     ),
   )
 
-export const probePidLive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
 const aggregateClaimable = (
   nodes: readonly {
     readonly scope_id: string
@@ -154,14 +147,25 @@ export const runDaemon = (input: {
     const socket = socketPath(home)
     const stateFile = statePath(home)
     const logFile = logPath(home)
-    let state = makeState(home, input.maxAfk, input.intervalSeconds)
+    const startupToken = process.env.PDX_STARTUP_TOKEN ?? crypto.randomUUID()
+    let state = makeState(home, input.maxAfk, input.intervalSeconds, startupToken)
     let shuttingDown = false
     let reconcileRunning = false
     let reconcileTimer: NodeJS.Timeout | null = null
     let server: net.Server | null = null
+    let systemRunUpserted = false
 
     const persistState = async (): Promise<void> => {
       await writeStateFile(stateFile, state)
+    }
+
+    const emitStartupLog = async (level: "info" | "warn" | "error", msg: string): Promise<void> => {
+      await appendSupervisorLog(logFile, {
+        ts: new Date().toISOString(),
+        level,
+        span: "pdx.daemon",
+        msg,
+      })
     }
 
     const log = async (level: "info" | "warn" | "error", span: string, msg: string): Promise<void> => {
@@ -333,8 +337,11 @@ export const runDaemon = (input: {
             continue
           }
 
-          if (entry.mode === "afk" && entry.pid !== undefined && !probePidLive(entry.pid)) {
-            await cleanupRegistryEntry(entry, "natural_death")
+          if (entry.mode === "afk" && entry.pid !== undefined) {
+            const alive = await processService.probePid(entry.pid).pipe(Effect.runPromise)
+            if (!alive) {
+              await cleanupRegistryEntry(entry, "natural_death")
+            }
           }
         }
 
@@ -379,37 +386,77 @@ export const runDaemon = (input: {
         await mkdir(home, { recursive: true })
         await mkdir(runsDir(home), { recursive: true })
         await rm(socket, { force: true })
+        await emitStartupLog("info", "daemon starting")
       },
       catch: (error) =>
         new PdxError({ code: "USER_ERROR", message: `Failed to prepare pdx home: ${String(error)}` }),
     })
 
-    yield* pithos.upsertRun({
-      agent: "pdx",
-      mode: "afk",
-      scopeId: GLOBAL_SCOPE_ID,
-      cwd: home,
-      runId: SYSTEM_RUN_ID,
-      sessionId: SYSTEM_SESSION_ID,
-    })
-
-    yield* Effect.tryPromise({
-      try: async () => {
-        await log("info", "pdx.daemon", "daemon started")
-        await spawnPandora()
-        await refreshQueue()
-      },
-      catch: (error) => new PdxError({ code: "USER_ERROR", message: `Failed to initialize daemon state: ${String(error)}` }),
-    }).pipe(
-      Effect.catchTag("PdxError", (error) =>
-        pithos.cleanupRun({ runId: SYSTEM_RUN_ID, reason: "daemon_start_failed" }).pipe(
-          Effect.catchAll(() => Effect.void),
-          Effect.zipRight(Effect.fail(error)),
-        ),
-      ),
-    )
-
     yield* Effect.async<void, PdxError>((resume) => {
+      let resumed = false
+      const resumeOnce = (effect: Effect.Effect<void, PdxError>) => {
+        if (!resumed) {
+          resumed = true
+          resume(effect)
+        }
+      }
+
+      const failStartup = (error: PdxError) =>
+        Effect.tryPromise({
+          try: async () => {
+            await emitStartupLog("error", `daemon startup failed: ${error.message}`)
+            if (systemRunUpserted) {
+              await pithos.cleanupRun({ runId: SYSTEM_RUN_ID, reason: "daemon_start_failed" }).pipe(Effect.runPromise)
+            }
+            await new Promise<void>((resolve) => {
+              if (server === null) {
+                resolve()
+                return
+              }
+
+              server.close(() => resolve())
+            })
+            await rm(socket, { force: true })
+          },
+          catch: () => error,
+        }).pipe(
+          Effect.catchTag("PdxError", () => Effect.void),
+          Effect.zipRight(Effect.fail(error)),
+        )
+
+      const initializeStartup = async (): Promise<void> => {
+        try {
+          await pithos.upsertRun({
+            agent: "pdx",
+            mode: "afk",
+            scopeId: GLOBAL_SCOPE_ID,
+            cwd: home,
+            runId: SYSTEM_RUN_ID,
+            sessionId: SYSTEM_SESSION_ID,
+          }).pipe(Effect.runPromise)
+          systemRunUpserted = true
+
+          await log("info", "pdx.daemon", "daemon started")
+          await reconcile()
+
+          if (state.registry.some((entry) => entry.agent === PANDORA_AGENT && (entry.state === "launching" || entry.state === "live"))) {
+            state = {
+              ...state,
+              daemon: {
+                ...state.daemon,
+                phase: "ready",
+              },
+            }
+            await persistState()
+          }
+        } catch (error) {
+          const startupError = error instanceof PdxError
+            ? error
+            : new PdxError({ code: "USER_ERROR", message: `Failed to initialize daemon state: ${String(error)}` })
+          resumeOnce(failStartup(startupError))
+        }
+      }
+
       server = net.createServer((connection) => {
         let body = ""
         let handled = false
@@ -446,7 +493,7 @@ export const runDaemon = (input: {
             respond({ ok: true })
             setTimeout(() => {
               server?.close(() => {
-                void rm(socket, { force: true }).finally(() => resume(Effect.void))
+                void rm(socket, { force: true }).finally(() => resumeOnce(Effect.void))
               })
             }, 50)
           }).catch((error) => {
@@ -461,7 +508,7 @@ export const runDaemon = (input: {
       })
 
       server.on("error", (error) => {
-        resume(
+        resumeOnce(
           Effect.fail(
             new PdxError({ code: "USER_ERROR", message: `Daemon socket server failed: ${String(error)}` }),
           ),
@@ -469,7 +516,7 @@ export const runDaemon = (input: {
       })
 
       server.listen(socket, () => {
-        void reconcile()
+        void initializeStartup()
       })
 
       return Effect.sync(() => {

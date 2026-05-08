@@ -60,6 +60,20 @@ const makeHome = (): string => {
   return home
 }
 
+const withLockPath = async <A>(home: string, run: () => Promise<A>): Promise<A> => {
+  const previous = process.env.PDX_OPEN_LOCK_PATH
+  process.env.PDX_OPEN_LOCK_PATH = join(home, "pdx-open.lock")
+  try {
+    return await run()
+  } finally {
+    if (previous === undefined) {
+      delete process.env.PDX_OPEN_LOCK_PATH
+    } else {
+      process.env.PDX_OPEN_LOCK_PATH = previous
+    }
+  }
+}
+
 const withServices = <A>(
   effect: Effect.Effect<A, unknown, FileSystem | OutputService | PithosClient | ProcessService | Tmux>,
   services: {
@@ -81,19 +95,23 @@ const withServices = <A>(
       readonly cleanupRun: (input: { readonly runId: string; readonly reason: string }) => Effect.Effect<RunOutput>
       readonly heartbeatRun: (input: { readonly runId: string }) => Effect.Effect<RunOutput>
       readonly inspectGraphAll: () => Effect.Effect<readonly GraphNodeSummary[]>
+      readonly listActiveBuiltInRuns: () => Effect.Effect<readonly RunOutput[]>
     }
     readonly process: {
-      readonly exec: (command: string, args: readonly string[], options?: { readonly env?: Record<string, string>; readonly cwd?: string; readonly stdin?: string }) => Effect.Effect<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }>
-      readonly probePid: (pid: number) => Effect.Effect<boolean>
-      readonly signalPid: (pid: number, signal: NodeJS.Signals) => Effect.Effect<void>
+      readonly exec: (command: string, args: readonly string[], options?: { readonly env?: Record<string, string>; readonly cwd?: string; readonly stdin?: string }) => Effect.Effect<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }, PdxError>
+      readonly probePid: (pid: number) => Effect.Effect<boolean, PdxError>
+      readonly signalPid: (pid: number, signal: NodeJS.Signals) => Effect.Effect<void, PdxError>
     }
     readonly tmux: {
-      readonly hasSession: (target: string) => Effect.Effect<boolean>
-      readonly lsSessions: () => Effect.Effect<readonly string[]>
-      readonly newSession: (input: { readonly target: string; readonly cwd: string; readonly argv: readonly string[]; readonly env?: Readonly<Record<string, string>> }) => Effect.Effect<void>
-      readonly killSession: (target: string) => Effect.Effect<void>
-      readonly sendLiteralLine: (target: string, text: string) => Effect.Effect<void>
-      readonly pasteBuffer: (target: string, content: string) => Effect.Effect<void>
+      readonly hasSession: (target: string) => Effect.Effect<boolean, PdxError>
+      readonly lsSessions: () => Effect.Effect<readonly string[], PdxError>
+      readonly newSession: (input: { readonly target: string; readonly cwd: string; readonly argv: readonly string[]; readonly env?: Readonly<Record<string, string>>; readonly remainOnExit?: boolean }) => Effect.Effect<void, PdxError>
+      readonly killSession: (target: string) => Effect.Effect<void, PdxError>
+      readonly paneDead: (target: string) => Effect.Effect<boolean, PdxError>
+      readonly capturePane: (target: string) => Effect.Effect<string, PdxError>
+      readonly setRemainOnExit: (target: string, enabled: boolean) => Effect.Effect<void, PdxError>
+      readonly sendLiteralLine: (target: string, text: string) => Effect.Effect<void, PdxError>
+      readonly pasteBuffer: (target: string, content: string) => Effect.Effect<void, PdxError>
     }
   },
 ) =>
@@ -143,6 +161,10 @@ describe("settleStartupOrphans", () => {
         },
         heartbeatRun: () => Effect.succeed(runOutput()),
         inspectGraphAll: () => Effect.succeed([]),
+        listActiveBuiltInRuns: () => Effect.succeed([
+          { ...runOutput(), id: "run_pdx_system" },
+          { ...runOutput(), id: "run_pandora", agent: "pandora", mode: "hitl" },
+        ]),
       },
       process: {
         exec: () => Effect.die("unused"),
@@ -164,6 +186,9 @@ describe("settleStartupOrphans", () => {
           killedSessions.push(target)
           return Effect.void
         },
+        paneDead: () => Effect.succeed(false),
+        capturePane: () => Effect.succeed(""),
+        setRemainOnExit: () => Effect.void,
         sendLiteralLine: () => Effect.void,
         pasteBuffer: () => Effect.void,
       },
@@ -176,6 +201,8 @@ describe("settleStartupOrphans", () => {
     expect(cleanupCalls).toEqual([
       { runId: "run_live", reason: "daemon_start" },
       { runId: "run_stale", reason: "daemon_start" },
+      { runId: "run_pdx_system", reason: "daemon_start" },
+      { runId: "run_pandora", reason: "daemon_start" },
     ])
     await expect(fs.access(join(runsDir(home), "run_live.pid"))).rejects.toThrow()
     await expect(fs.access(join(runsDir(home), "run_stale.pid"))).rejects.toThrow()
@@ -189,24 +216,205 @@ describe("settleStartupOrphans", () => {
 
     expect(killedSessions).toEqual([])
     expect(signals).toEqual([])
-    expect(cleanupCalls).toEqual([])
+    expect(cleanupCalls).toEqual([
+      { runId: "run_pdx_system", reason: "daemon_start" },
+      { runId: "run_pandora", reason: "daemon_start" },
+    ])
   })
 })
 
 describe("openCommand", () => {
+  it("fails fast with daemon pane diagnostics when startup exits before readiness", async () => {
+    const home = makeHome()
+    const events: string[] = []
+    let hasSessionCalls = 0
+
+    const services = {
+      fileSystem: realFileSystem,
+      output: {
+        print: () => Effect.void,
+        printError: () => Effect.void,
+      },
+      pithos: {
+        init: () => Effect.void,
+        upsertRun: () => Effect.succeed(runOutput()),
+        cleanupRun: () => Effect.succeed(runOutput()),
+        heartbeatRun: () => Effect.succeed(runOutput()),
+        inspectGraphAll: () => Effect.succeed([]),
+        listActiveBuiltInRuns: () => Effect.succeed([]),
+      },
+      process: {
+        exec: () => Effect.die("unused"),
+        probePid: () => Effect.succeed(false),
+        signalPid: () => Effect.die("unused"),
+      },
+      tmux: {
+        hasSession: () => {
+          hasSessionCalls += 1
+          return Effect.succeed(hasSessionCalls > 1)
+        },
+        lsSessions: () => Effect.succeed([]),
+        newSession: ({ target, remainOnExit }: { readonly target: string; readonly remainOnExit?: boolean }) => {
+          events.push(`tmux.new:${target}:${remainOnExit === true ? "remain" : "plain"}`)
+          return Effect.void
+        },
+        killSession: (target: string) => {
+          events.push(`tmux.kill:${target}`)
+          return Effect.void
+        },
+        paneDead: () => Effect.succeed(true),
+        capturePane: () => Effect.succeed("synthetic daemon-side upsert failure\n"),
+        setRemainOnExit: () => Effect.void,
+        sendLiteralLine: () => Effect.void,
+        pasteBuffer: () => Effect.void,
+      },
+    }
+
+    let failure: unknown
+    await withLockPath(home, async () => {
+      try {
+        await Effect.runPromise(withServices(openCommand({ home }), services))
+      } catch (error) {
+        failure = error
+      }
+    })
+
+    expect(String(failure)).toContain("pdx daemon exited before readiness")
+    expect(String(failure)).toContain("synthetic daemon-side upsert failure")
+    expect(events).toContain("tmux.new:pdx--daemon:remain")
+  })
+
+  it("settles a stale daemon session instead of failing reopen", async () => {
+    const home = makeHome()
+    const events: string[] = []
+    let lsCalls = 0
+    let hasSessionCalls = 0
+    let paneDeadCalls = 0
+    let startupToken: string | undefined
+    let server: net.Server | undefined
+
+    const services = {
+      fileSystem: {
+        ...realFileSystem,
+        makeDirectory: () => Effect.void,
+      },
+      output: {
+        print: (line: string) => {
+          events.push(`print:${line}`)
+          return Effect.void
+        },
+        printError: () => Effect.void,
+      },
+      pithos: {
+        init: () => Effect.void,
+        upsertRun: () => Effect.succeed(runOutput()),
+        cleanupRun: ({ runId, reason }: { readonly runId: string; readonly reason: string }) => {
+          events.push(`pithos.cleanup:${runId}:${reason}`)
+          return Effect.succeed(runOutput())
+        },
+        heartbeatRun: () => Effect.succeed(runOutput()),
+        inspectGraphAll: () => Effect.succeed([]),
+        listActiveBuiltInRuns: () => Effect.succeed([]),
+      },
+      process: {
+        exec: () => Effect.die("unused"),
+        probePid: () => Effect.succeed(false),
+        signalPid: () => Effect.die("unused"),
+      },
+      tmux: {
+        hasSession: () => {
+          hasSessionCalls += 1
+          return Effect.succeed(hasSessionCalls >= 1)
+        },
+        lsSessions: () => {
+          lsCalls += 1
+          return Effect.succeed(lsCalls === 1 ? ["pdx--daemon"] : [])
+        },
+        newSession: ({ target, remainOnExit, env }: { readonly target: string; readonly remainOnExit?: boolean; readonly env?: Readonly<Record<string, string>> }) =>
+          Effect.tryPromise({
+            try: async () => {
+              startupToken = env?.PDX_STARTUP_TOKEN
+              events.push(`tmux.new:${target}:${remainOnExit === true ? "remain" : "plain"}`)
+              server = net.createServer((socket) => {
+                socket.on("data", () => {
+                  socket.end(
+                    JSON.stringify({
+                      ok: true,
+                      state: {
+                        daemon: { running: true, home, pid: 1, tmuxTarget: "pdx--daemon", startedAt: "2026-05-08T00:00:00.000Z", socketPath: socketPath(home), systemRunId: "run_pdx_system", intervalSeconds: 5, startupToken: startupToken ?? "missing", phase: "ready" },
+                        registry: [
+                          {
+                            runId: "run_pandora",
+                            agent: "pandora",
+                            scopeId: "global",
+                            mode: "hitl",
+                            logicalName: "pdx--pandora",
+                            tmuxTarget: "pdx--pandora",
+                            state: "live",
+                          },
+                        ],
+                        queue: { claimable: [] },
+                        caps: { maxAfk: 4, afkInUse: 0 },
+                        recent: [],
+                      },
+                    }),
+                  )
+                })
+              })
+              await new Promise<void>((resolve, reject) => {
+                server?.once("error", reject)
+                server?.listen(socketPath(home), () => {
+                  server?.off("error", reject)
+                  resolve()
+                })
+              })
+            },
+            catch: toPdxError,
+          }),
+        killSession: (target: string) => {
+          events.push(`tmux.kill:${target}`)
+          return Effect.void
+        },
+        paneDead: () => {
+          paneDeadCalls += 1
+          return Effect.succeed(paneDeadCalls === 1)
+        },
+        capturePane: () => Effect.succeed(""),
+        setRemainOnExit: (target: string, enabled: boolean) => {
+          events.push(`tmux.remain:${target}:${enabled ? "on" : "off"}`)
+          return Effect.void
+        },
+        sendLiteralLine: () => Effect.void,
+        pasteBuffer: () => Effect.void,
+      },
+    }
+
+    try {
+      await withLockPath(home, () => Effect.runPromise(withServices(openCommand({ home }), services)))
+    } finally {
+      await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve())
+    }
+
+    expect(events).toContain("tmux.kill:pdx--daemon")
+    expect(events).toContain("tmux.new:pdx--daemon:remain")
+    expect(events).toContain("tmux.remain:pdx--daemon:off")
+    expect(events.indexOf("tmux.kill:pdx--daemon")).toBeLessThan(events.indexOf("tmux.new:pdx--daemon:remain"))
+  })
+
   it("settles startup orphans before init and daemon startup", async () => {
     const home = makeHome()
     mkdirSync(runsDir(home), { recursive: true })
     writeFileSync(join(runsDir(home), "run_orphan.pid"), "333\n")
 
     const events: string[] = []
+    let startupToken: string | undefined
     const server = net.createServer((socket) => {
       socket.on("data", () => {
         socket.end(
           JSON.stringify({
             ok: true,
             state: {
-              daemon: { running: true, home, pid: 1, tmuxTarget: "pdx--daemon", startedAt: "2026-05-08T00:00:00.000Z", socketPath: socketPath(home), systemRunId: "run_pdx_system", intervalSeconds: 5 },
+              daemon: { running: true, home, pid: 1, tmuxTarget: "pdx--daemon", startedAt: "2026-05-08T00:00:00.000Z", socketPath: socketPath(home), systemRunId: "run_pdx_system", intervalSeconds: 5, startupToken: startupToken ?? "missing", phase: "ready" },
               registry: [
                 {
                   runId: "run_pandora",
@@ -237,6 +445,7 @@ describe("openCommand", () => {
     })
 
     let tmuxPass = 0
+    let hasSessionCalls = 0
 
     const services = {
       fileSystem: {
@@ -265,6 +474,7 @@ describe("openCommand", () => {
         },
         heartbeatRun: () => Effect.succeed(runOutput()),
         inspectGraphAll: () => Effect.succeed([]),
+        listActiveBuiltInRuns: () => Effect.succeed([]),
       },
       process: {
         exec: () => Effect.die("unused"),
@@ -272,17 +482,31 @@ describe("openCommand", () => {
         signalPid: () => Effect.die("unused"),
       },
       tmux: {
-        hasSession: () => Effect.succeed(false),
+        hasSession: (target: string) => {
+          if (target !== "pdx--daemon") {
+            return Effect.succeed(false)
+          }
+
+          hasSessionCalls += 1
+          return Effect.succeed(hasSessionCalls > 1)
+        },
         lsSessions: () => {
           tmuxPass += 1
           return Effect.succeed(tmuxPass === 1 ? ["pdx--old", "keep-me"] : ["keep-me"])
         },
-        newSession: ({ target }: { readonly target: string }) => {
-          events.push(`tmux.new:${target}`)
+        newSession: ({ target, remainOnExit, env }: { readonly target: string; readonly remainOnExit?: boolean; readonly env?: Readonly<Record<string, string>> }) => {
+          startupToken = env?.PDX_STARTUP_TOKEN
+          events.push(`tmux.new:${target}:${remainOnExit === true ? "remain" : "plain"}`)
           return Effect.void
         },
         killSession: (target: string) => {
           events.push(`tmux.kill:${target}`)
+          return Effect.void
+        },
+        paneDead: () => Effect.succeed(false),
+        capturePane: () => Effect.succeed(""),
+        setRemainOnExit: (target: string, enabled: boolean) => {
+          events.push(`tmux.remain:${target}:${enabled ? "on" : "off"}`)
           return Effect.void
         },
         sendLiteralLine: () => Effect.void,
@@ -291,7 +515,7 @@ describe("openCommand", () => {
     }
 
     try {
-      await Effect.runPromise(withServices(openCommand({ home }), services))
+      await withLockPath(home, () => Effect.runPromise(withServices(openCommand({ home }), services)))
     } finally {
       server.close()
     }
@@ -299,10 +523,11 @@ describe("openCommand", () => {
     expect(events).toContain("tmux.kill:pdx--old")
     expect(events).toContain("pithos.cleanup:run_orphan:daemon_start")
     expect(events).toContain("pithos.init")
-    expect(events).toContain("tmux.new:pdx--daemon")
+    expect(events).toContain("tmux.new:pdx--daemon:remain")
     expect(events.indexOf("pithos.init")).toBeLessThan(events.indexOf("tmux.kill:pdx--old"))
     expect(events.indexOf("pithos.init")).toBeLessThan(events.indexOf("pithos.cleanup:run_orphan:daemon_start"))
-    expect(events.indexOf("tmux.kill:pdx--old")).toBeLessThan(events.indexOf("tmux.new:pdx--daemon"))
-    expect(events.indexOf("pithos.cleanup:run_orphan:daemon_start")).toBeLessThan(events.indexOf("tmux.new:pdx--daemon"))
+    expect(events).toContain("tmux.remain:pdx--daemon:off")
+    expect(events.indexOf("tmux.kill:pdx--old")).toBeLessThan(events.indexOf("tmux.new:pdx--daemon:remain"))
+    expect(events.indexOf("pithos.cleanup:run_orphan:daemon_start")).toBeLessThan(events.indexOf("tmux.new:pdx--daemon:remain"))
   })
 })

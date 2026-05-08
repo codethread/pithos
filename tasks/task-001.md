@@ -1,80 +1,53 @@
-# Slice 1 — Pithos foundation: schema, seeds, nested CLI, authorization
+# Slice 1 — Pithos foundation epic
 
-## What to build
+## Status
 
-Greenfield `packages/pithos/` workspace package. Old `packages/cli/` stays untouched and continues to ship the production `pithos` bin until cutover; the new package exposes a temporary bin (e.g. `pithos-next`) for development.
+This slice is **not implementable as one honest unit**. It is now a parent epic for the smaller `task-001*` slices below.
 
-Single fresh-DB migration covering the full target schema:
+## Why it was split
 
-- `scopes`, `runs` (with `mode TEXT NOT NULL CHECK (mode IN ('afk','hitl'))` and terminal status `timed_out`), `tasks` (no `lease_until`, no `lease_owner_run_id`)
-- `task_dependencies`, `task_supersessions` (graph)
-- `agent_kinds`, `capabilities`, `agent_claims`, `agent_enqueues` (authorization)
-- `events`, `artifacts`
-- Partial unique index on `runs(task_id)` where `task_id IS NOT NULL`
+The first attempt hit the expected blocker: the original slice combined too many architectural and behavioral contracts at once:
 
-Seed per spec §5: agent_kinds (`pdx`, `pandora`, `toil`, `greed`, `war`); capabilities (`triage`, `design`, `execute`, `escalate`); claim and enqueue rules. `pdx` has no claims and only enqueues `escalate`.
+- new package architecture and an importable Pithos core library for `pdx`
+- fresh schema, seed data, and typed DB row decoding
+- nested `@effect/cli` command surface
+- task/run authorization and capability-scope invariants
+- task write lifecycle and fencing
+- graph inspection, supersession, briefing, events, and artifacts
+- broad unit/integration test matrix
 
-Nested CLI surface per spec §7:
+The in-progress work also clarified a non-negotiable direction: `packages/pithos/` must expose reusable core functions/services, with the public CLI only a thin `@effect/cli` wrapper. Do not grow a monolithic argv parser or direct IO-heavy command file.
 
-- `pithos init [--fresh]`, `pithos scope upsert`, `pithos run upsert`
-- `pithos task enqueue|claim|heartbeat|complete|fail|supersede|cancel|inspect`, `pithos task artifact add`
-- `pithos graph inspect`, `pithos events tail`, `pithos briefing`
+## Replacement slices
 
-No flat aliases. No `sweep`, no `run end`, no `run finish`.
+Implement these in order:
 
-Authorization and invariants enforced at the Pithos boundary:
+1. [task-001a — Pithos core architecture, config, schema, seeds](./task-001a.md)
+2. [task-001b — Nested CLI shell + scope/run foundations](./task-001b.md)
+3. [task-001c — Task write lifecycle, authorization, fencing](./task-001c.md)
+4. [task-001d — Graph, supersession, read surfaces](./task-001d.md)
+5. [task-001e — Foundation contract hardening + acceptance](./task-001e.md)
 
-- claim/enqueue check `(agent_kind, capability)` against seeded rules
-- one-held-task-per-run: claim atomically requires `runs.task_id IS NULL`
-- claim `--scope` must equal `runs.scope_id`
-- capability scope rules: `escalate` must be `global`; `execute` requires `repo`/`worktree` with non-null `canonical_path`
-- `PITHOS_RUN_ID` env-var resolves `--run` for mutating task commands; conflict between env and explicit flag fails loud
+Downstream tasks that previously blocked on task 1 should block on `task-001e` unless they explicitly need only an earlier foundation milestone.
 
-Heartbeat surface per locked decision:
+## Original task contract retained by the split
 
-```text
-pithos task heartbeat \
-  --run <run-id> \
-  [--task <task-id> --token <n>]
-```
+The split still must deliver the original task 1 outcome:
 
-`--task` and `--token` are atomic — supplying one without the other fails loud. With both, advance held task `claimed → running` (idempotent if already `running`); without, pure liveness event. No `--hook`, no `--throttle-seconds`.
+- New `packages/pithos/` workspace package builds; old `packages/cli/` and current `pithos` bin remain untouched until cutover.
+- `pithos-next init --fresh` creates the fresh target schema and seeded built-ins.
+- Nested command surface exists, with no flat aliases and no removed lifecycle commands (`sweep`, `run end`, `run finish`).
+- Pithos enforces claim/enqueue authorization, one-held-task-per-run, run-scope claim matching, capability scope rules, heartbeat atomicity, and `PITHOS_RUN_ID` conflict detection.
+- Outputs for inspect/graph/briefing/events satisfy the spec minimum contracts.
+- Tests cover behavior that schema cannot express.
 
-## Test focus
+## Canonical implementation primitives
 
-Contracts that schema cannot express:
+These primitives apply to all child slices:
 
-- Authorization rejections for every `(agent_kind, capability)` mismatch on claim and enqueue
-- One-held-task rejection on second claim by same run
-- Run-scope vs claim-scope mismatch rejection
-- Capability scope rule rejections (escalate non-global; execute on global)
-- Heartbeat `--task`/`--token` atomic rejection; idempotent already-running advance
-- `PITHOS_RUN_ID` conflict detection
-- Happy-path enqueue → claim → heartbeat → complete round-trip
-
-Defer: exhaustive CLI argument-parsing snapshots, full event-payload field assertions beyond required minimums.
-
-## Implementation primitives
-
-Canonical SQL/CLI patterns — referenced by tasks 002/003.
-
-- **Transactions:** wrap multi-statement mutation in `sql.withTransaction(Effect.gen(...))`. Throwing inside the closure rolls back.
-- **Fenced UPDATE:** capture preconditions, run `` sql`UPDATE ... WHERE token = ?`.raw `` to get `{ changes }`. If `changes === 0` → `Effect.fail(new PithosError({ code: "STALE_TOKEN_RACE", ... }))` to roll back the whole transaction. Project rule 2 (DB integrity) — never best-effort.
-- **One-held-task atomic claim:** inside `withTransaction`, UPDATE `runs SET task_id = ? WHERE id = ? AND task_id IS NULL`. Zero changes → fail loud with a dedicated validation error. The partial unique index on `runs(task_id) WHERE task_id IS NOT NULL` is the second-line defence.
-- **Partial unique index:** Effect SQL has no DDL builder for partial indexes — use `` sql.unsafe(`CREATE UNIQUE INDEX idx_runs_task_id ON runs(task_id) WHERE task_id IS NOT NULL`) `` in the migration.
-- **Row decoding at IO boundary:** `SqlSchema.findAll | findOne | single` with a `Schema.Struct(...)`. Anything crossing IO is parsed before downstream code touches it (CLAUDE.md rule 3).
-- **CLI argument parsing:** `@effect/cli` is in the workspace and supports nested subcommands via `Command.withSubcommands(...)`. `PITHOS_RUN_ID` env-var resolution happens at the command-arg layer; conflict between env and `--run` flag fails with `VALIDATION_ERROR`.
-- **Discriminated unions for parsed args:** parsed CLI args are tagged variants, never wide optional bags (CLAUDE.md rule 3).
-
-**Blocked note:** This slice needs to be broken down smaller before continuing: it combines package architecture, schema/seeding, nested CLI, authorization invariants, graph/read surfaces, and a broad test matrix into one unit. The in-progress work established the required direction that Pithos must expose an importable core library for pdx with the public CLI as an @effect/cli wrapper, but the full slice contract remains too large to complete honestly as a single unit.
-
-## Acceptance criteria
-
-- [ ] New `packages/pithos/` workspace builds; tests green
-- [ ] `pithos-next init --fresh` creates schema and seeds, idempotent on re-run without `--fresh`
-- [ ] All commands in spec §7 present; reject invalid input loudly via `PithosError` with machine-readable codes
-- [ ] Command outputs (`run inspect`, `task inspect`, `graph inspect`, `briefing`) match spec §7 minimum-key contracts
-- [ ] Authorization, one-held-task, scope-match, capability-scope rules enforced and tested
-- [ ] Heartbeat shape matches spec; atomic `--task`/`--token` enforced
-- [ ] `PITHOS_RUN_ID` resolution and conflict detection tested
-- [ ] Old `packages/cli/` and existing `pithos` bin unchanged and still functional against old DB
+- **Transactions:** multi-statement mutations must be one transaction. Any detected race throws/fails to roll back; never best-effort.
+- **Fenced UPDATE:** capture preconditions, update with token/status/owner predicates, and treat zero affected rows as `STALE_TOKEN_RACE` or equivalent tagged failure.
+- **One-held-task atomic claim:** `UPDATE runs SET task_id = ? WHERE id = ? AND task_id IS NULL`; zero changes is a loud validation/user error. Partial unique index on `runs(task_id) WHERE task_id IS NOT NULL` remains the second-line defence.
+- **Row decoding at IO boundary:** DB rows, env, CLI args, file bodies, and subprocess output are parsed into typed structures before domain logic. No leaked `unknown`/`any`.
+- **Importable core first:** command handlers call core functions; `@effect/cli` parses and dispatches only.
+- **Discriminated unions:** parsed command inputs are tagged variants, not wide optional bags.

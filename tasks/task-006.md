@@ -47,7 +47,7 @@ Defer: tmux integration robustness beyond happy path; reconcile-tick scheduling 
 
 ## Implementation primitives
 
-`Tmux` service from task-005 §Implementation primitives. Reconcile/registry primitives are canonical here, referenced by 007/008/009.
+`Tmux` service from task-005a. Reconcile/registry primitives are canonical here, referenced by 007/008/009.
 
 - **Registry:** `SynchronizedRef<Registry>`. `SynchronizedRef.modifyEffect` snapshots state and returns decisions atomically; **side effects (spawn, kill, log) happen outside the lock**, after `modifyEffect` returns. Holding the ref across IO would serialise the daemon.
 - **Registry entry tag:** `state: "launching" | "live" | "terminating"` is a discriminator, not a string flag. Caps count all three.
@@ -55,7 +55,7 @@ Defer: tmux integration robustness beyond happy path; reconcile-tick scheduling 
 - **Per-agent observer fibers:** `FiberMap<runId>`. `FiberMap.run(observers, runId, observeAgent(runId), { onlyIfMissing: true })` prevents duplicate observers. `forkScoped` (FiberMap default) so `pdx close` interrupts deterministically.
 - **Pandora singleton invariant:** `Effect.makeSemaphore(1)` permit held for the duration of a Pandora registry slot. Reconcile tries `withPermits(1)` to spawn; if taken, no spawn.
 - **AFK liveness probe:** `Effect.try({ try: () => process.kill(pid, 0), catch: () => false })`. ESRCH → false. Wrap in the `Process` service so tests can inject.
-- **HITL liveness probe:** `Tmux.hasSession(target)` from task-005.
+- **HITL liveness probe:** `Tmux.hasSession(target)` from task-005a.
 - **Fresh runId per respawn:** `Ids` service generates new id; no row reuse, no same-run resurrection.
 - **`pdx open` waits for Pandora launch:** open handler suspends on a `Deferred<void>` that the first reconcile tick resolves once a Pandora entry hits `launching` or `live`.
 

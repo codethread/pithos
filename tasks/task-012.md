@@ -1,45 +1,32 @@
-# Slice 12 — Test tightening for v1
+# Slice 12 — Test tightening for v1 epic
 
-## What to build
+## Status
 
-Per the plan, earlier slices intentionally focused tests on contracts that schema cannot enforce: authorization, transition outcomes, atomic invariants, runtime preconditions. Now that the MVP is working end-to-end, broaden coverage so the system survives future change.
+This slice is a parent epic. It intentionally happens after MVP behavior lands, but it is too broad as one implementation unit.
 
-This slice adds tests only — no behavior changes. If a test reveals a behavioral gap, file a follow-up issue rather than fixing it inside this slice.
+## Replacement slices
 
-Areas to cover:
+Implement in order:
 
-- **MVP integration test** end-to-end:
-  - `pdx open`, observe Pandora alive
-  - `pithos task enqueue --capability triage` from a seeded scope
-  - reconcile spawns Toil, Toil claims and decomposes (enqueues `design` and `escalate`)
-  - reconcile spawns Greed, Greed claims and produces a design artifact
-  - new claimable escalate triggers wakeup; Pandora claims and completes
-  - `pdx kill --run <war-or-greed>` mid-flight; observe interrupt → escalate from pdx system run → Pandora picks it up
-  - `pdx close` tears everything down
-- **Snapshot tests** for stable surfaces:
-  - `pithos --help`, `pdx --help`, every `--help` subcommand
-  - `pdx status --json` shape (top-level keys + per-entry minimums)
-  - `pithos task inspect`, `pithos run inspect`, `pithos graph inspect` JSON shapes
-- **Event payload coverage**: every event emitted by the system has at least one assertion against its full required-payload schema (per spec §11)
-- **Edge cases**:
-  - concurrent claim attempts; only one wins; loser receives `NO_CLAIMABLE_WORK`
-  - fenced update race (`STALE_TOKEN_RACE` rolls back transaction, does not partially mutate)
-  - `task supersede` with mixed dependent states (queued + cancelled + done) → fails loud per spec §6
-  - `pdx kill` racing with natural death (run already terminal by the time interrupt runs)
-  - orphan discovery when both tmux orphans and pidfile orphans coexist
-- **Error-message wording assertions** for tagged `PithosError` codes most likely to drift (`STALE_TOKEN_RACE`, `VALIDATION_ERROR` variants, `NO_CLAIMABLE_WORK`)
-- **Performance smoke** (not load testing): `pithos graph inspect --all` against ~few-hundred tasks completes promptly
+1. [task-012a — MVP integration tests](./task-012a.md)
+2. [task-012b — Stable surface snapshots](./task-012b.md)
+3. [task-012c — Event payload schema coverage](./task-012c.md)
+4. [task-012d — Race and lifecycle edge tests](./task-012d.md)
+5. [task-012e — Error wording + graph performance smoke](./task-012e.md)
 
-## Test focus
+## Rules
 
-This entire slice is the test focus. Earlier slices' tests should not be retroactively expanded — instead, add coverage here so each slice stays scoped to behavior and contracts that block its acceptance.
+- This is primarily test work, but tests are allowed to expose broken v1 contracts.
+- If a test exposes a regression or missing behavior required by the specs, fix it in the owning area before marking the child slice complete.
+- If a test exposes genuinely new behavior outside the specs, record an explicit follow-up and keep this slice scoped.
+- Do not weaken, skip, or snapshot-around failing behavior to get green checks.
 
 ## Acceptance criteria
 
-- [ ] MVP integration test covers the full happy + kill paths described above
-- [ ] Snapshot tests stable for `--help` outputs and JSON-emitting commands
-- [ ] Every event kind has at least one full-payload assertion
-- [ ] Concurrency / race edge cases covered
-- [ ] Error-message wording locked for the most-grepped error codes
-- [ ] Performance smoke runs in CI without timing out
+- [ ] task-012a through task-012e complete
+- [ ] MVP happy path and kill path covered end-to-end
+- [ ] Stable public surfaces snapshotted
+- [ ] Every event kind has schema coverage
+- [ ] Race/lifecycle edge cases covered
+- [ ] Error wording and graph performance smoke covered
 - [ ] `pnpm verify` green

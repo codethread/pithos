@@ -2,39 +2,90 @@
 
 Central dependency map for implementation slices. Individual task files describe scope and acceptance only; blockers live here.
 
-- [ ] [task-001 — Slice 1: Pithos foundation: schema, seeds, nested CLI, authorization](./task-001.md)
-  - **Status:** in_progress
+- [ ] [task-001 — Slice 1: Pithos foundation epic](./task-001.md)
+  - **Status:** split_required
+  - **Blocked by:** [task-001a](./task-001a.md), [task-001b](./task-001b.md), [task-001c](./task-001c.md), [task-001d](./task-001d.md), [task-001e](./task-001e.md)
+- [ ] [task-001a — Slice 1a: Pithos core architecture, config, schema, seeds](./task-001a.md)
+  - **Status:** pending
   - **Blocked by:** none
+- [ ] [task-001b — Slice 1b: Nested CLI shell + scope/run foundations](./task-001b.md)
+  - **Status:** pending
+  - **Blocked by:** [task-001a](./task-001a.md)
+- [ ] [task-001c — Slice 1c: Task write lifecycle, authorization, fencing](./task-001c.md)
+  - **Status:** pending
+  - **Blocked by:** [task-001b](./task-001b.md)
+- [ ] [task-001d — Slice 1d: Graph, supersession, read surfaces](./task-001d.md)
+  - **Status:** pending
+  - **Blocked by:** [task-001c](./task-001c.md)
+- [ ] [task-001e — Slice 1e: Foundation contract hardening + acceptance](./task-001e.md)
+  - **Status:** pending
+  - **Blocked by:** [task-001a](./task-001a.md), [task-001b](./task-001b.md), [task-001c](./task-001c.md), [task-001d](./task-001d.md)
 - [ ] [task-002 — Slice 2: Run lifecycle transitions: cleanup, interrupt, timeout](./task-002.md)
   - **Status:** pending
-  - **Blocked by:** [task-001](./task-001.md)
-- [ ] [task-003 — Slice 3: Task graph tightening + DEMO GATE 1](./task-003.md)
+  - **Blocked by:** [task-001e](./task-001e.md)
+- [ ] [task-003 — Slice 3: Pithos backbone DEMO GATE 1](./task-003.md)
   - **Status:** pending
-  - **Blocked by:** [task-001](./task-001.md), [task-002](./task-002.md)
+  - **Blocked by:** [task-001e](./task-001e.md), [task-002](./task-002.md)
 - [ ] [task-004 — Slice 4: Spawner in-place refactor: launcher-only library + preview CLI](./task-004.md)
   - **Status:** pending
-  - **Blocked by:** [task-001](./task-001.md)
-- [ ] [task-005 — Slice 5: pdx skeleton: open / close / status / logs + system run](./task-005.md)
+  - **Blocked by:** [task-001e](./task-001e.md), [task-005a](./task-005a.md)
+- [ ] [task-005 — Slice 5: pdx skeleton epic](./task-005.md)
+  - **Status:** split_required
+  - **Blocked by:** [task-005a](./task-005a.md), [task-005b](./task-005b.md), [task-005c](./task-005c.md)
+- [ ] [task-005a — Slice 5a: pdx package + control-plane substrate](./task-005a.md)
   - **Status:** pending
-  - **Blocked by:** [task-001](./task-001.md), [task-002](./task-002.md)
+  - **Blocked by:** [task-001e](./task-001e.md)
+- [ ] [task-005b — Slice 5b: pdx open/close + pdx system run](./task-005b.md)
+  - **Status:** pending
+  - **Blocked by:** [task-005a](./task-005a.md), [task-002](./task-002.md)
+- [ ] [task-005c — Slice 5c: pdx status + logs show](./task-005c.md)
+  - **Status:** pending
+  - **Blocked by:** [task-005b](./task-005b.md)
 - [ ] [task-006 — Slice 6: Pandora singleton + death detection + DEMO GATE 2](./task-006.md)
   - **Status:** pending
-  - **Blocked by:** [task-002](./task-002.md), [task-004](./task-004.md), [task-005](./task-005.md)
+  - **Blocked by:** [task-002](./task-002.md), [task-004](./task-004.md), [task-005c](./task-005c.md)
 - [ ] [task-007 — Slice 7: pdx kill flow](./task-007.md)
   - **Status:** pending
   - **Blocked by:** [task-002](./task-002.md), [task-006](./task-006.md)
-- [ ] [task-008 — Slice 8: Agent spawning: caps, no-claim timeout, pidfiles](./task-008.md)
+- [ ] [task-008 — Slice 8: Agent spawning epic](./task-008.md)
+  - **Status:** split_required
+  - **Blocked by:** [task-008a](./task-008a.md), [task-008b](./task-008b.md), [task-008c](./task-008c.md), [task-008d](./task-008d.md)
+- [ ] [task-008a — Slice 8a: Spawn policy for Toil/Greed/War](./task-008a.md)
   - **Status:** pending
-  - **Blocked by:** [task-002](./task-002.md), [task-006](./task-006.md)
+  - **Blocked by:** [task-006](./task-006.md)
+- [ ] [task-008b — Slice 8b: Registry cap accounting](./task-008b.md)
+  - **Status:** pending
+  - **Blocked by:** [task-008a](./task-008a.md)
+- [ ] [task-008c — Slice 8c: AFK pidfile lifecycle](./task-008c.md)
+  - **Status:** pending
+  - **Blocked by:** [task-008a](./task-008a.md)
+- [ ] [task-008d — Slice 8d: No-claim timeout](./task-008d.md)
+  - **Status:** pending
+  - **Blocked by:** [task-008b](./task-008b.md), [task-008c](./task-008c.md)
 - [ ] [task-009 — Slice 9: Wakeup transport + Pandora marker recognition](./task-009.md)
   - **Status:** pending
   - **Blocked by:** [task-006](./task-006.md)
 - [ ] [task-010 — Slice 10: Orphan discovery on `pdx open`](./task-010.md)
   - **Status:** pending
-  - **Blocked by:** [task-002](./task-002.md), [task-005](./task-005.md)
+  - **Blocked by:** [task-002](./task-002.md), [task-005b](./task-005b.md)
 - [ ] [task-011 — Slice 11: Cutover: retire `packages/cli/`, point `pithos` bin at new package](./task-011.md)
   - **Status:** pending
-  - **Blocked by:** [task-001](./task-001.md), [task-002](./task-002.md), [task-003](./task-003.md), [task-004](./task-004.md), [task-005](./task-005.md), [task-006](./task-006.md), [task-007](./task-007.md), [task-008](./task-008.md), [task-009](./task-009.md), [task-010](./task-010.md)
-- [ ] [task-012 — Slice 12: Test tightening for v1](./task-012.md)
+  - **Blocked by:** [task-001e](./task-001e.md), [task-002](./task-002.md), [task-003](./task-003.md), [task-004](./task-004.md), [task-005c](./task-005c.md), [task-006](./task-006.md), [task-007](./task-007.md), [task-008d](./task-008d.md), [task-009](./task-009.md), [task-010](./task-010.md)
+- [ ] [task-012 — Slice 12: Test tightening for v1 epic](./task-012.md)
+  - **Status:** split_required
+  - **Blocked by:** [task-012a](./task-012a.md), [task-012b](./task-012b.md), [task-012c](./task-012c.md), [task-012d](./task-012d.md), [task-012e](./task-012e.md)
+- [ ] [task-012a — Slice 12a: MVP integration tests](./task-012a.md)
+  - **Status:** pending
+  - **Blocked by:** [task-011](./task-011.md)
+- [ ] [task-012b — Slice 12b: Stable surface snapshots](./task-012b.md)
+  - **Status:** pending
+  - **Blocked by:** [task-011](./task-011.md)
+- [ ] [task-012c — Slice 12c: Event payload schema coverage](./task-012c.md)
+  - **Status:** pending
+  - **Blocked by:** [task-011](./task-011.md)
+- [ ] [task-012d — Slice 12d: Race and lifecycle edge tests](./task-012d.md)
+  - **Status:** pending
+  - **Blocked by:** [task-011](./task-011.md)
+- [ ] [task-012e — Slice 12e: Error wording + graph performance smoke](./task-012e.md)
   - **Status:** pending
   - **Blocked by:** [task-011](./task-011.md)

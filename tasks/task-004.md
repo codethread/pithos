@@ -46,7 +46,7 @@ Manifest schema (per spec §9, locked):
 }
 ```
 
-Spawner validates manifest on load: `claims` and `enqueues` must equal the seeded `agent_claims` / `agent_enqueues` rows for that `agent`. Mismatch fails loud. MVP requires `claims.length === 1`.
+Spawner validates manifest on load: `claims` and `enqueues` must equal the shared seeded built-in claim/enqueue contract exported by `@pithos/pithos` for that `agent`. Mismatch fails loud. MVP requires `claims.length === 1`. Spawner must not query the live Pithos DB during render/preview.
 
 `claim_command` rendered into the prompt context:
 
@@ -54,7 +54,7 @@ Spawner validates manifest on load: `claims` and `enqueues` must equal the seede
 <pithos-bin> task claim --run <run-id> --scope <scope-id> --capability <claims[0]>
 ```
 
-Bin name resolved from a single config seam: `process.env.PITHOS_BIN ?? "pithos"`. During the rewrite, pdx sets `PITHOS_BIN=pithos-next` in the spawner-launched harness env so renderings point at the in-progress bin. Cutover (slice 11) drops the env override; the default `"pithos"` takes over. No other place in the codebase should hard-code the bin name.
+Bin name resolved from a typed Spawner config seam whose live layer reads `PITHOS_BIN` and defaults to `"pithos"`. During the rewrite, pdx sets `PITHOS_BIN=pithos-next` in the spawner-launched harness env so renderings point at the in-progress bin. Cutover (slice 11) drops the env override; the default `"pithos"` takes over. No other place in the codebase should hard-code the bin name.
 
 Templates rewritten:
 
@@ -77,7 +77,7 @@ Spawner error codes: `VALIDATION_ERROR`, `TEMPLATE_ERROR`, `HARNESS_ERROR`, `LAU
 
 ## Test focus
 
-- Manifest validation against seeded Pithos rows; `claims`/`enqueues` mismatch fails loud
+- Manifest validation against the shared seeded Pithos built-in contract; `claims`/`enqueues` mismatch fails loud
 - `claims.length === 1` enforced
 - `claim_command` correctness for each spawnable agent kind
 - Mode mismatch rejection
@@ -90,16 +90,16 @@ Defer: full template-text golden snapshots (template wording is iterated through
 
 - **`renderAgent` is pure:** read manifest + template via `FileSystem`, validate via `Schema.decodeUnknown(ManifestSchema)`, render. No DB, no `Command.start`, no Pithos calls. Tests run it without SQL DI.
 - **`launchAgent` AFK path:** `Command.start(Command.make(harnessKind, ...args).pipe(Command.workingDirectory(cwd), Command.env(env)))` returns `Process { pid, exitCode: Effect, kill }`. Slice returns `{ pid, processStartTime }` immediately; pdx (slice 6) owns the death observer.
-- **`launchAgent` HITL path:** delegates to the `Tmux` service from task-005 (`newSession({ target, command, cwd })`). Spawner does not touch `child_process` directly — project rule.
-- **PITHOS_BIN seam:** single read of `process.env.PITHOS_BIN ?? "pithos"` at module boundary, parsed into a typed config. No string-concat throughout. Used only for `claim_command` rendering.
-- **Manifest validation against seed data:** at load, fetch seeded `agent_claims` / `agent_enqueues` via `SqlSchema.findAll` and assert manifest matches. Mismatch → `VALIDATION_ERROR`.
+- **`launchAgent` HITL path:** delegates to the `Tmux` service from task-005a (`newSession({ target, command, cwd })`). Spawner does not touch `child_process` directly — project rule.
+- **PITHOS_BIN seam:** live config layer reads `PITHOS_BIN`, parses it into typed Spawner config, and defaults to `"pithos"`. No domain code reads `process.env`; no string-concat throughout. Used only for `claim_command` rendering.
+- **Manifest validation against seed data:** import the shared seeded built-in contract from `@pithos/pithos` and assert manifest claims/enqueues match. No live SQL/DB lookup in Spawner render paths. Mismatch → `VALIDATION_ERROR`.
 - **Error codes:** `VALIDATION_ERROR | TEMPLATE_ERROR | HARNESS_ERROR | LAUNCH_ERROR` as a `Schema.Literal` union; tagged `PithosError`.
 
 ## Acceptance criteria
 
 - [ ] Spawner CLI surface reduced to `preview` only
 - [ ] Library exposes `renderAgent` and `launchAgent` with documented input/output shapes
-- [ ] Manifest schema validated against seeded Pithos rows on load; mismatch fails loud
+- [ ] Manifest schema validated against shared seeded Pithos built-in contract on load; mismatch fails loud
 - [ ] All four spawnable agent templates render valid prompts (`pandora`, `toil`, `greed`, `war`)
 - [ ] `envy.md.tmpl` removed; no remaining references to envy/worker/implement/watch anywhere in `packages/spawner/` (templates and source)
 - [ ] Mode mismatch rejection tested

@@ -35,10 +35,10 @@ Defer: end-to-end "Pandora actually claims via marker" flow — covered by the M
 
 ## Implementation primitives
 
-Builds on task-005 §Implementation primitives (Tmux service) and task-006 §Implementation primitives (registry, reconcile).
+Builds on task-005a (Tmux service) and task-006 §Implementation primitives (registry, reconcile).
 
 - **Transition detection:** registry holds `lastEscalateClaimableCount: number`. Each reconcile tick, after lifecycle settlement, query Pithos for the current count of claimable global escalate tasks (queued, dependencies met). `0 → >0` transition fires the wakeup; `>0 → 0` resets the latched flag. No `Stream.changesWithEffect` needed since we already poll in the reconcile tick.
-- **Wakeup transport:** `Tmux.sendLiteralLine("pdx--pandora", "# wakeup: claimable escalate")` from task-005. Two `tmux send-keys` calls under the hood: `-l` text then `Enter`. No shell, no escaping, no key-name interpretation. Marker is content-free per spec.
+- **Wakeup transport:** `Tmux.sendLiteralLine("pdx--pandora", "# wakeup: claimable escalate")` from task-005a. Two `tmux send-keys` calls under the hood: `-l` text then `Enter`. No shell, no escaping, no key-name interpretation. Marker is content-free per spec.
 - **No spam guarantee:** `lastEscalateClaimableCount` is the only source of "should we send". Reconcile is idempotent on each tick — no extra timers.
 - **Pandora template change:** literal-string assertion in the test — the template must contain `# wakeup: claimable escalate` as instruction text. Pandora reads it from her prompt context, not from the marker itself.
 

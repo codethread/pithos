@@ -33,9 +33,9 @@ Defer: kill-failure observability beyond log emission; kill of a fresh same-name
 
 ## Implementation primitives
 
-Builds on task-005 §Implementation primitives (Tmux service, Unix socket IPC) and task-006 §Implementation primitives (registry, FiberMap).
+Builds on task-005a (Tmux service, Unix socket IPC) and task-006 §Implementation primitives (registry, FiberMap).
 
-- **`pdx kill` CLI ↔ daemon:** the CLI is a separate process. It connects to the daemon's Unix socket (task-005), sends a JSON request `{ kind: "kill", run?: string, task?: string, reason: string }` parsed via `Schema.decodeUnknown(KillRequestSchema)` on the daemon side. Response is a JSON result; CLI prints it and exits.
+- **`pdx kill` CLI ↔ daemon:** the CLI is a separate process. It connects to the daemon's Unix socket from task-005a, sends a JSON request `{ kind: "kill", run?: string, task?: string, reason: string }` parsed via `Schema.decodeUnknown(KillRequestSchema)` on the daemon side. Response is a JSON result; CLI prints it and exits.
 - **Daemon-side sequence (one supervisor span per request):**
   1. `pithos.run.interrupt(...)` first — durable state mutation before any process action.
   2. If the interrupt returned a held task: enqueue a global `escalate` task as the **pdx system run** via the existing `PithosClient` (no special path; same auth path other agents use).

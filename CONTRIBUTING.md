@@ -52,15 +52,15 @@ All four must be green before every commit. No "leftover issues", no "next commi
 
 ## Doc map
 
-| When you want to…                                          | Read…                                                    |
-| ---------------------------------------------------------- | -------------------------------------------------------- |
-| Understand the product, agent model, and architecture      | `README.md`                                              |
-| Understand engineering rules (fail loudly, etc.)           | `AGENTS.md`                                              |
-| Touch DB schema, CLI shape, or migrations                  | `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md` |
-| Touch templates, hooks, harness wiring, or session status  | `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md` |
-| Touch the Claude Code plugin manifest or hooks             | `packages/spawner/claude-plugin/README.md`               |
-| Touch the Pi extension                                     | `packages/spawner/pi-extension/README.md`                |
-| Look at prior art                                          | `references/` (read-only)                                |
+| When you want to…                                         | Read…                                                            |
+| --------------------------------------------------------- | ---------------------------------------------------------------- |
+| Understand the product, agent model, and architecture     | `README.md`                                                      |
+| Understand engineering rules (fail loudly, etc.)          | `AGENTS.md`                                                      |
+| Touch DB schema, CLI shape, or migrations                 | `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md`         |
+| Touch templates, hooks, harness wiring, or session status | `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md` |
+| Touch the Claude Code plugin manifest or hooks            | `packages/spawner/claude-plugin/README.md`                       |
+| Touch the Pi extension                                    | `packages/spawner/pi-extension/README.md`                        |
+| Look at prior art                                         | `references/` (read-only)                                        |
 
 Each package's `CONTRIBUTING.md` carries that package's quality bar and add-a-feature checklist:
 

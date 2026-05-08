@@ -1,4 +1,4 @@
 {
-  "name": "pithos",
-  "description": "Pithos hooks for Claude Code. Tracks runs/tasks/artifacts for spawner-launched sessions."
+	"name": "pithos",
+	"description": "Pithos hooks for Claude Code. Tracks runs/tasks/artifacts for spawner-launched sessions."
 }

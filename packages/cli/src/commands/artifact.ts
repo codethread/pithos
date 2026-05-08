@@ -1,21 +1,21 @@
-import { Effect } from "effect"
-import { DbService } from "../services/db.ts"
-import { FsService } from "../services/fs.ts"
-import { IdService } from "../services/ids.ts"
-import { OutputService } from "../services/output.ts"
-import { PithosError } from "../errors/errors.ts"
-import { withCommandObservability } from "../layers/metrics.ts"
+import { Effect } from "effect";
+import { DbService } from "../services/db.ts";
+import { FsService } from "../services/fs.ts";
+import { IdService } from "../services/ids.ts";
+import { OutputService } from "../services/output.ts";
+import { PithosError } from "../errors/errors.ts";
+import { withCommandObservability } from "../layers/metrics.ts";
 
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
 
 export interface ArtifactAddOptions {
-  readonly task: string | undefined
-  readonly run: string | undefined
-  readonly kind: string | undefined
-  readonly title: string | undefined
-  readonly bodyFile: string | undefined
+	readonly task: string | undefined;
+	readonly run: string | undefined;
+	readonly kind: string | undefined;
+	readonly title: string | undefined;
+	readonly bodyFile: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -29,90 +29,87 @@ export interface ArtifactAddOptions {
  * If `--body-file` is given, reads the file and stores its content in `body`.
  */
 export const artifactAddCommand = (
-  opts: ArtifactAddOptions,
+	opts: ArtifactAddOptions,
 ): Effect.Effect<void, PithosError, DbService | IdService | FsService | OutputService> =>
-  Effect.gen(function* () {
-    if (!opts.task) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--task is required" }),
-      )
-      return
-    }
-    if (!opts.run) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--run is required" }),
-      )
-      return
-    }
-    if (!opts.kind) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--kind is required" }),
-      )
-      return
-    }
-    if (!opts.title) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--title is required" }),
-      )
-      return
-    }
+	Effect.gen(function* () {
+		if (!opts.task) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--task is required" }),
+			);
+			return;
+		}
+		if (!opts.run) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--run is required" }),
+			);
+			return;
+		}
+		if (!opts.kind) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--kind is required" }),
+			);
+			return;
+		}
+		if (!opts.title) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--title is required" }),
+			);
+			return;
+		}
 
-    // Read body from file if provided.
-    const fs = yield* FsService
-    let body = ""
-    if (opts.bodyFile) {
-      body = yield* fs.readFile(opts.bodyFile)
-    }
+		// Read body from file if provided.
+		const fs = yield* FsService;
+		let body = "";
+		if (opts.bodyFile) {
+			body = yield* fs.readFile(opts.bodyFile);
+		}
 
-    // Validate task and run exist before insert.
-    const db = yield* DbService
+		// Validate task and run exist before insert.
+		const db = yield* DbService;
 
-    const taskCheck = yield* db.query("SELECT id FROM tasks WHERE id = ?", [opts.task])
-    if (taskCheck.length === 0) {
-      yield* Effect.fail(
-        new PithosError({ code: "NOT_FOUND", message: `Task not found: ${opts.task}` }),
-      )
-      return
-    }
-    const runCheck = yield* db.query("SELECT id FROM runs WHERE id = ?", [opts.run])
-    if (runCheck.length === 0) {
-      yield* Effect.fail(
-        new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
-      )
-      return
-    }
+		const taskCheck = yield* db.query("SELECT id FROM tasks WHERE id = ?", [opts.task]);
+		if (taskCheck.length === 0) {
+			yield* Effect.fail(
+				new PithosError({ code: "NOT_FOUND", message: `Task not found: ${opts.task}` }),
+			);
+			return;
+		}
+		const runCheck = yield* db.query("SELECT id FROM runs WHERE id = ?", [opts.run]);
+		if (runCheck.length === 0) {
+			yield* Effect.fail(
+				new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
+			);
+			return;
+		}
 
-    const ids = yield* IdService
-    const output = yield* OutputService
-    const artifactId = yield* ids.generate("artifact")
+		const ids = yield* IdService;
+		const output = yield* OutputService;
+		const artifactId = yield* ids.generate("artifact");
 
-    const artifactRows = yield* db.withTransaction(
-      Effect.gen(function* () {
-        return yield* db.query(
-          `INSERT INTO artifacts (id, task_id, run_id, kind, title, body)
+		const artifactRows = yield* db.withTransaction(
+			Effect.gen(function* () {
+				return yield* db.query(
+					`INSERT INTO artifacts (id, task_id, run_id, kind, title, body)
            VALUES (?, ?, ?, ?, ?, ?)
            RETURNING *`,
-          [artifactId, opts.task, opts.run, opts.kind, opts.title, body],
-        )
-      }),
-    )
+					[artifactId, opts.task, opts.run, opts.kind, opts.title, body],
+				);
+			}),
+		);
 
-    if (artifactRows.length === 0) {
-      // Should never happen — RETURNING * always returns the inserted row.
-      yield* Effect.fail(
-        new PithosError({
-          code: "INTERNAL_ERROR",
-          message: "artifact insert returned no rows",
-        }),
-      )
-      return
-    }
+		if (artifactRows.length === 0) {
+			// Should never happen — RETURNING * always returns the inserted row.
+			yield* Effect.fail(
+				new PithosError({
+					code: "INTERNAL_ERROR",
+					message: "artifact insert returned no rows",
+				}),
+			);
+			return;
+		}
 
-    yield* output.print(JSON.stringify({ ok: true, artifact: artifactRows[0] }))
-  }).pipe(
-    Effect.withLogSpan("pithos.artifact.add"),
-    withCommandObservability("artifact.add"),
-  )
+		yield* output.print(JSON.stringify({ ok: true, artifact: artifactRows[0] }));
+	}).pipe(Effect.withLogSpan("pithos.artifact.add"), withCommandObservability("artifact.add"));
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -139,4 +136,4 @@ Examples:
   pithos artifact add --task task_abc --run run_xyz --kind design-brief --title "Design notes"
 
 Exit codes: 0 success | 2 validation error | 3 not found
-`
+`;

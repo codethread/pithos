@@ -1,18 +1,18 @@
 {
-  "name": "pithos-marketplace",
-  "owner": {
-    "name": "codethread",
-    "email": "adamhalldesigns@gmail.com"
-  },
-  "metadata": {
-    "description": "Pithos Claude Code plugin marketplace"
-  },
-  "plugins": [
-    {
-      "name": "pithos",
-      "version": "0.1.0",
-      "source": "./packages/spawner/claude-plugin",
-      "category": "development-tools"
-    }
-  ]
+	"name": "pithos-marketplace",
+	"owner": {
+		"name": "codethread",
+		"email": "adamhalldesigns@gmail.com"
+	},
+	"metadata": {
+		"description": "Pithos Claude Code plugin marketplace"
+	},
+	"plugins": [
+		{
+			"name": "pithos",
+			"version": "0.1.0",
+			"source": "./packages/spawner/claude-plugin",
+			"category": "development-tools"
+		}
+	]
 }

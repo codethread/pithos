@@ -130,11 +130,11 @@ pdx kill --run|--task --reason
 
 Layer responsibilities:
 
-| Layer | Owns | Does not own |
-| ---- | ---- | ---- |
-| Pithos | DB schema, seeded agents/capabilities, task/runs state transitions, graph repair, artifacts/events | OS processes, tmux supervision, harness argv |
-| Spawner | templates, prompt rendering, harness argv/env, AFK launch, HITL tmux creation, launch metadata | registration, cleanup, status, kill, nudge, reclaim |
-| pdx | reconcile, in-memory registry, caps, process/tmux ownership, status, kill, wakeups, supervisor logs | DB invariants, prompt/task content injection |
+| Layer   | Owns                                                                                                | Does not own                                        |
+| ------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Pithos  | DB schema, seeded agents/capabilities, task/runs state transitions, graph repair, artifacts/events  | OS processes, tmux supervision, harness argv        |
+| Spawner | templates, prompt rendering, harness argv/env, AFK launch, HITL tmux creation, launch metadata      | registration, cleanup, status, kill, nudge, reclaim |
+| pdx     | reconcile, in-memory registry, caps, process/tmux ownership, status, kill, wakeups, supervisor logs | DB invariants, prompt/task content injection        |
 
 `pdx` has no persisted registry in MVP. On startup it does not adopt old sessions. It kills and confirms deterministic old tmux/process leftovers, cleans active built-in Pithos runs, and begins with a fresh in-memory registry. HITL leftovers are discovered with `tmux ls -F '#S'` filtered by `^pdx--`. AFK leftovers are discovered from pdx-owned pidfiles under `<home>/runs/<run-id>.pid`; pdx writes pidfiles at AFK launch and removes them during cleanup.
 
@@ -265,12 +265,12 @@ No new `blocked`/`escalated` status is added. Escalation is represented as a nor
 
 Capability-specific enqueue/supersede validation:
 
-| Capability | Required scope | Body | Notes |
-| ---------- | -------------- | ---- | ----- |
-| `triage` | any | non-empty | decomposition/routing work |
-| `design` | any | non-empty | design/research/alignment work |
-| `execute` | `repo` or `worktree` with non-null `canonical_path` | non-empty | mutating or repo-local execution work |
-| `escalate` | `global` | non-empty | Pandora/Adam attention checkpoint |
+| Capability | Required scope                                      | Body      | Notes                                 |
+| ---------- | --------------------------------------------------- | --------- | ------------------------------------- |
+| `triage`   | any                                                 | non-empty | decomposition/routing work            |
+| `design`   | any                                                 | non-empty | design/research/alignment work        |
+| `execute`  | `repo` or `worktree` with non-null `canonical_path` | non-empty | mutating or repo-local execution work |
+| `escalate` | `global`                                            | non-empty | Pandora/Adam attention checkpoint     |
 
 `pithos task supersede` applies the same validation to the replacement task after overrides. Because `escalate` is global-only, all Checkpoint and Interruption escalation tasks live in global scope and reference original task/run/scope details in body or metadata.
 
@@ -573,12 +573,12 @@ Input shape for both:
 
 ```ts
 {
-  agent: AgentKind
-  mode: "afk" | "hitl"
-  runId: string
-  sessionId: string
-  scopeId: string
-  cwd: string
+	agent: AgentKind;
+	mode: "afk" | "hitl";
+	runId: string;
+	sessionId: string;
+	scopeId: string;
+	cwd: string;
 }
 ```
 
@@ -643,12 +643,12 @@ Manifest entries repeat claim/enqueue metadata for rendering and consistency che
 
 ```json
 {
-  "agent": "war",
-  "mode": "afk",
-  "claims": ["execute"],
-  "enqueues": ["escalate"],
-  "harness": { "kind": "claude" },
-  "template": "war.md.tmpl"
+	"agent": "war",
+	"mode": "afk",
+	"claims": ["execute"],
+	"enqueues": ["escalate"],
+	"harness": { "kind": "claude" },
+	"template": "war.md.tmpl"
 }
 ```
 
@@ -716,35 +716,35 @@ Per-agent roles and enqueue authority:
 
 Pithos events are durable audit records. Payloads may grow, but these event names and minimum fields are part of the control-plane contract.
 
-| Event | Keys | Minimum payload |
-| ----- | ---- | --------------- |
-| `task.created` | `task_id`, optional `actor_run_id` | `scope_id`, `capability`, `title`, `depends_on_task_ids`, optional `supersedes_task_id` |
-| `task.claimed` | `task_id`, `actor_run_id` | `run_id`, `fencing_token` |
-| `task.heartbeat` | `task_id`, `actor_run_id` | `run_id`, `fencing_token`, `previous_status`, `status` |
-| `run.heartbeat` | `run_id` | `status` |
-| `task.completed` | `task_id`, `actor_run_id` | `run_id`, `fencing_token` |
-| `task.failed` | `task_id`, `actor_run_id` | `run_id`, `fencing_token`, `reason` |
-| `task.cancelled` | `task_id`, `actor_run_id` | `reason`, optional `superseded_by_task_id` |
-| `task.superseded` | old `task_id`, `actor_run_id` | `new_task_id`, `reason`, `retargeted_dependent_task_ids` |
-| `task.reclaimed` | `task_id`, `run_id` | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token` |
-| `task.dead_lettered` | `task_id`, `run_id` | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token` |
-| `task.interrupted` | `task_id`, `run_id` | `run_id`, `reason`, `previous_status`, `previous_fencing_token`, `new_fencing_token` |
-| `run.cleanup` | `run_id` | `reason`, `previous_status`, `status`, optional `task_id` |
-| `run.interrupted` | `run_id` | `reason`, `previous_status`, `status`, optional `task_id` |
-| `run.timed_out` | `run_id` | `reason`, `previous_status`, `status` |
+| Event                | Keys                               | Minimum payload                                                                                        |
+| -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `task.created`       | `task_id`, optional `actor_run_id` | `scope_id`, `capability`, `title`, `depends_on_task_ids`, optional `supersedes_task_id`                |
+| `task.claimed`       | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`                                                                              |
+| `task.heartbeat`     | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`, `previous_status`, `status`                                                 |
+| `run.heartbeat`      | `run_id`                           | `status`                                                                                               |
+| `task.completed`     | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`                                                                              |
+| `task.failed`        | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`, `reason`                                                                    |
+| `task.cancelled`     | `task_id`, `actor_run_id`          | `reason`, optional `superseded_by_task_id`                                                             |
+| `task.superseded`    | old `task_id`, `actor_run_id`      | `new_task_id`, `reason`, `retargeted_dependent_task_ids`                                               |
+| `task.reclaimed`     | `task_id`, `run_id`                | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token` |
+| `task.dead_lettered` | `task_id`, `run_id`                | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token` |
+| `task.interrupted`   | `task_id`, `run_id`                | `run_id`, `reason`, `previous_status`, `previous_fencing_token`, `new_fencing_token`                   |
+| `run.cleanup`        | `run_id`                           | `reason`, `previous_status`, `status`, optional `task_id`                                              |
+| `run.interrupted`    | `run_id`                           | `reason`, `previous_status`, `status`, optional `task_id`                                              |
+| `run.timed_out`      | `run_id`                           | `reason`, `previous_status`, `status`                                                                  |
 
 `specs/task-graph.md` defines graph semantics for dependency and supersession payloads; this table is the consolidated event vocabulary for the control-plane rewrite.
 
 ## 12. Implementation Locations
 
-| Area | Files |
-| ---- | ----- |
-| Pithos CLI nesting and command changes | `packages/cli/src/cli/commands.ts`, `packages/cli/src/commands/` |
-| Pithos schema/seed data | `packages/cli/src/db/migrate.ts`, `packages/cli/src/db/rows.ts` |
-| Graph repair/validation | `packages/cli/src/domain/task-graph.ts`, `packages/cli/src/commands/supersede.ts` |
-| Spawner launcher-only refactor | `packages/spawner/src/`, `packages/spawner/templates/` |
-| pdx package | `packages/pdx/` |
-| Docs | `README.md`, `packages/cli/README.md`, `packages/spawner/README.md`, `specs/README.md` |
+| Area                                   | Files                                                                                  |
+| -------------------------------------- | -------------------------------------------------------------------------------------- |
+| Pithos CLI nesting and command changes | `packages/cli/src/cli/commands.ts`, `packages/cli/src/commands/`                       |
+| Pithos schema/seed data                | `packages/cli/src/db/migrate.ts`, `packages/cli/src/db/rows.ts`                        |
+| Graph repair/validation                | `packages/cli/src/domain/task-graph.ts`, `packages/cli/src/commands/supersede.ts`      |
+| Spawner launcher-only refactor         | `packages/spawner/src/`, `packages/spawner/templates/`                                 |
+| pdx package                            | `packages/pdx/`                                                                        |
+| Docs                                   | `README.md`, `packages/cli/README.md`, `packages/spawner/README.md`, `specs/README.md` |
 
 ## 13. Open Questions
 

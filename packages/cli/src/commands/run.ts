@@ -1,33 +1,33 @@
-import { Effect, Schema } from "effect"
-import { DbService } from "../services/db.ts"
-import { IdService } from "../services/ids.ts"
-import { OutputService } from "../services/output.ts"
-import { PithosError } from "../errors/errors.ts"
-import { withCommandObservability } from "../layers/metrics.ts"
+import { Effect, Schema } from "effect";
+import { DbService } from "../services/db.ts";
+import { IdService } from "../services/ids.ts";
+import { OutputService } from "../services/output.ts";
+import { PithosError } from "../errors/errors.ts";
+import { withCommandObservability } from "../layers/metrics.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas
 // ---------------------------------------------------------------------------
 
-const RunEndStatusSchema = Schema.Literal("ended", "failed", "cancelled")
+const RunEndStatusSchema = Schema.Literal("ended", "failed", "cancelled");
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
 export interface RunRegisterOptions {
-  readonly agentKind: string | undefined
-  readonly scopeId?: string | undefined
-  readonly cwd?: string | undefined
-  readonly sessionId?: string | undefined
-  readonly parentRun?: string | undefined
-  /** Explicit run ID — returns the existing run if it already exists (idempotent). */
-  readonly run?: string | undefined
+	readonly agentKind: string | undefined;
+	readonly scopeId?: string | undefined;
+	readonly cwd?: string | undefined;
+	readonly sessionId?: string | undefined;
+	readonly parentRun?: string | undefined;
+	/** Explicit run ID — returns the existing run if it already exists (idempotent). */
+	readonly run?: string | undefined;
 }
 
 export interface RunEndOptions {
-  readonly run: string | undefined
-  readonly status: string | undefined
-  readonly summary?: string | undefined
+	readonly run: string | undefined;
+	readonly status: string | undefined;
+	readonly summary?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,62 +42,57 @@ export interface RunEndOptions {
  * exists, returns the existing row without creating a duplicate (idempotent).
  */
 export const runRegisterCommand = (
-  opts: RunRegisterOptions,
+	opts: RunRegisterOptions,
 ): Effect.Effect<void, PithosError, DbService | IdService | OutputService> =>
-  Effect.gen(function* () {
-    if (!opts.agentKind) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--agent-kind is required" }),
-      )
-      return
-    }
-    const agentKind = opts.agentKind
+	Effect.gen(function* () {
+		if (!opts.agentKind) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--agent-kind is required" }),
+			);
+			return;
+		}
+		const agentKind = opts.agentKind;
 
-    const db = yield* DbService
-    const ids = yield* IdService
-    const output = yield* OutputService
+		const db = yield* DbService;
+		const ids = yield* IdService;
+		const output = yield* OutputService;
 
-    const id = opts.run ?? (yield* ids.generate("run"))
+		const id = opts.run ?? (yield* ids.generate("run"));
 
-    // Use INSERT OR IGNORE ... RETURNING id so concurrent calls with the same
-    // explicit --run ID are race-safe: exactly one insertion wins; the loser
-    // gets an empty result. The lifecycle event is only appended for the
-    // winning insertion (rows.length > 0).
-    yield* db.withTransaction(
-      Effect.gen(function* () {
-        const insertedRows = yield* db.query(
-          `INSERT OR IGNORE INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
+		// Use INSERT OR IGNORE ... RETURNING id so concurrent calls with the same
+		// explicit --run ID are race-safe: exactly one insertion wins; the loser
+		// gets an empty result. The lifecycle event is only appended for the
+		// winning insertion (rows.length > 0).
+		yield* db.withTransaction(
+			Effect.gen(function* () {
+				const insertedRows = yield* db.query(
+					`INSERT OR IGNORE INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
            VALUES (?, ?, ?, ?, ?, ?, 'starting')
            RETURNING id`,
-          [
-            id,
-            agentKind,
-            opts.scopeId ?? null,
-            opts.cwd ?? null,
-            opts.sessionId ?? null,
-            opts.parentRun ?? null,
-          ],
-        )
-        if (insertedRows.length > 0) {
-          yield* db.run(
-            `INSERT INTO events (run_id, actor_run_id, type, payload_json)
+					[
+						id,
+						agentKind,
+						opts.scopeId ?? null,
+						opts.cwd ?? null,
+						opts.sessionId ?? null,
+						opts.parentRun ?? null,
+					],
+				);
+				if (insertedRows.length > 0) {
+					yield* db.run(
+						`INSERT INTO events (run_id, actor_run_id, type, payload_json)
              VALUES (?, ?, 'run.registered', '{}')`,
-            [id, id],
-          )
-        }
-      }),
-    )
+						[id, id],
+					);
+				}
+			}),
+		);
 
-    const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id])
+		const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id]);
 
-    yield* Effect.logDebug("run registered").pipe(
-      Effect.annotateLogs({ runId: id, agentKind }),
-    )
-    yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
-  }).pipe(
-    Effect.withLogSpan("pithos.run.register"),
-    withCommandObservability("run.register"),
-  )
+		yield* Effect.logDebug("run registered").pipe(Effect.annotateLogs({ runId: id, agentKind }));
+		yield* output.print(JSON.stringify({ ok: true, run: rows[0] }));
+	}).pipe(Effect.withLogSpan("pithos.run.register"), withCommandObservability("run.register"));
 
 // ---------------------------------------------------------------------------
 // pithos run end
@@ -111,42 +106,42 @@ export const runRegisterCommand = (
  * Exits with code 3 (NOT_FOUND) if the run does not exist.
  */
 export const runEndCommand = (
-  opts: RunEndOptions,
+	opts: RunEndOptions,
 ): Effect.Effect<void, PithosError, DbService | OutputService> =>
-  Effect.gen(function* () {
-    if (!opts.run) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--run is required" }),
-      )
-      return
-    }
-    const runId = opts.run
+	Effect.gen(function* () {
+		if (!opts.run) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--run is required" }),
+			);
+			return;
+		}
+		const runId = opts.run;
 
-    // Validate --status: if provided it must be a recognised terminal status.
-    const rawStatus = opts.status ?? "ended"
-    const status = yield* Schema.decodeUnknown(RunEndStatusSchema)(rawStatus).pipe(
-      Effect.mapError(
-        () =>
-          new PithosError({
-            code: "VALIDATION_ERROR",
-            message: `Invalid --status value: '${rawStatus}'. Valid values: ended, failed, cancelled`,
-          }),
-      ),
-    )
+		// Validate --status: if provided it must be a recognised terminal status.
+		const rawStatus = opts.status ?? "ended";
+		const status = yield* Schema.decodeUnknown(RunEndStatusSchema)(rawStatus).pipe(
+			Effect.mapError(
+				() =>
+					new PithosError({
+						code: "VALIDATION_ERROR",
+						message: `Invalid --status value: '${rawStatus}'. Valid values: ended, failed, cancelled`,
+					}),
+			),
+		);
 
-    const db = yield* DbService
-    const output = yield* OutputService
+		const db = yield* DbService;
+		const output = yield* OutputService;
 
-    // Atomically check existence, update status, and insert lifecycle event.
-    // Returns false when the run ID does not exist so we can emit NOT_FOUND
-    // without a racy follow-up SELECT.
-    const exists = yield* db.withTransaction(
-      Effect.gen(function* () {
-        const check = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId])
-        if (check.length === 0) return false
+		// Atomically check existence, update status, and insert lifecycle event.
+		// Returns false when the run ID does not exist so we can emit NOT_FOUND
+		// without a racy follow-up SELECT.
+		const exists = yield* db.withTransaction(
+			Effect.gen(function* () {
+				const check = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId]);
+				if (check.length === 0) return false;
 
-        const updatedRows = yield* db.query(
-          `UPDATE runs
+				const updatedRows = yield* db.query(
+					`UPDATE runs
            SET   status       = ?,
                  last_summary = ?,
                  ended_at     = datetime('now'),
@@ -154,40 +149,31 @@ export const runEndCommand = (
            WHERE id = ?
              AND status NOT IN ('ended', 'failed', 'cancelled')
            RETURNING id`,
-          [status, opts.summary ?? null, runId],
-        )
-        if (updatedRows.length > 0) {
-          yield* db.run(
-            `INSERT INTO events (run_id, actor_run_id, type, payload_json)
+					[status, opts.summary ?? null, runId],
+				);
+				if (updatedRows.length > 0) {
+					yield* db.run(
+						`INSERT INTO events (run_id, actor_run_id, type, payload_json)
              VALUES (?, ?, 'run.ended', ?)`,
-            [
-              runId,
-              runId,
-              JSON.stringify({ status, summary: opts.summary ?? null }),
-            ],
-          )
-        }
-        return true
-      }),
-    )
+						[runId, runId, JSON.stringify({ status, summary: opts.summary ?? null })],
+					);
+				}
+				return true;
+			}),
+		);
 
-    if (!exists) {
-      yield* Effect.fail(
-        new PithosError({ code: "NOT_FOUND", message: `Run not found: ${runId}` }),
-      )
-      return
-    }
+		if (!exists) {
+			yield* Effect.fail(
+				new PithosError({ code: "NOT_FOUND", message: `Run not found: ${runId}` }),
+			);
+			return;
+		}
 
-    const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [runId])
+		const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [runId]);
 
-    yield* Effect.logDebug("run ended").pipe(
-      Effect.annotateLogs({ runId, status }),
-    )
-    yield* output.print(JSON.stringify({ ok: true, run: rows[0] }))
-  }).pipe(
-    Effect.withLogSpan("pithos.run.end"),
-    withCommandObservability("run.end"),
-  )
+		yield* Effect.logDebug("run ended").pipe(Effect.annotateLogs({ runId, status }));
+		yield* output.print(JSON.stringify({ ok: true, run: rows[0] }));
+	}).pipe(Effect.withLogSpan("pithos.run.end"), withCommandObservability("run.end"));
 
 // ---------------------------------------------------------------------------
 // Help texts
@@ -215,7 +201,7 @@ Examples:
   pithos run register --agent-kind worker --parent-run run_abc --session-id abc123
 
 Exit codes: 0 success | 2 validation error
-`
+`;
 
 export const RUN_END_HELP = `pithos run end - Mark a run as ended/failed/cancelled
 
@@ -236,4 +222,4 @@ Examples:
   pithos run end --run run_abc --status failed --summary "worker disappeared"
 
 Exit codes: 0 success | 2 validation error | 3 not found
-`
+`;

@@ -50,6 +50,6 @@ Or add to your project `.claude/settings.json`:
 
 ```json
 {
-  "pluginDirs": ["./packages/spawner/claude-plugin"]
+	"pluginDirs": ["./packages/spawner/claude-plugin"]
 }
 ```

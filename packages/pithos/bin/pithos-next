@@ -76215,14 +76215,34 @@ CREATE INDEX IF NOT EXISTS idx_task_supersessions_new ON task_supersessions(new_
 };
 var seed = (db) => {
   db.prepare("INSERT OR IGNORE INTO scopes(id, kind) VALUES ('global','global')").run();
-  for (const agent2 of ["pdx", "pandora", "toil", "greed", "war"]) db.prepare("INSERT OR IGNORE INTO agent_kinds(agent_kind) VALUES (?)").run(agent2);
-  for (const cap of ["triage", "design", "execute", "escalate"]) db.prepare("INSERT OR IGNORE INTO capabilities(capability) VALUES (?)").run(cap);
-  for (const [a, c] of [["pandora", "escalate"], ["toil", "triage"], ["greed", "design"], ["war", "execute"]]) db.prepare("INSERT OR IGNORE INTO agent_claims(agent_kind, capability) VALUES (?,?)").run(a, c);
-  for (const [a, caps] of Object.entries({ pdx: ["escalate"], pandora: ["triage", "design", "escalate"], toil: ["triage", "design", "execute", "escalate"], greed: ["triage", "design", "escalate"], war: ["escalate"] })) for (const c of caps) db.prepare("INSERT OR IGNORE INTO agent_enqueues(agent_kind, capability) VALUES (?,?)").run(a, c);
+  for (const agent2 of ["pdx", "pandora", "toil", "greed", "war"])
+    db.prepare("INSERT OR IGNORE INTO agent_kinds(agent_kind) VALUES (?)").run(agent2);
+  for (const cap of ["triage", "design", "execute", "escalate"])
+    db.prepare("INSERT OR IGNORE INTO capabilities(capability) VALUES (?)").run(cap);
+  for (const [a, c] of [
+    ["pandora", "escalate"],
+    ["toil", "triage"],
+    ["greed", "design"],
+    ["war", "execute"]
+  ])
+    db.prepare("INSERT OR IGNORE INTO agent_claims(agent_kind, capability) VALUES (?,?)").run(a, c);
+  for (const [a, caps] of Object.entries({
+    pdx: ["escalate"],
+    pandora: ["triage", "design", "escalate"],
+    toil: ["triage", "design", "execute", "escalate"],
+    greed: ["triage", "design", "escalate"],
+    war: ["escalate"]
+  }))
+    for (const c of caps)
+      db.prepare("INSERT OR IGNORE INTO agent_enqueues(agent_kind, capability) VALUES (?,?)").run(
+        a,
+        c
+      );
 };
 var row = (value6, message) => {
   if (value6 === void 0) fail20("NOT_FOUND", message);
-  if (value6 === null || typeof value6 !== "object") fail20("INTERNAL_ERROR", `invalid database row: ${message}`);
+  if (value6 === null || typeof value6 !== "object")
+    fail20("INTERNAL_ERROR", `invalid database row: ${message}`);
   return value6;
 };
 
@@ -76242,13 +76262,15 @@ var req = (args2, name) => parseFlag(args2, name) ?? fail20("VALIDATION_ERROR", 
 var resolvedRun = (ctx, args2) => {
   const explicit = parseFlag(args2, "--run");
   const env2 = ctx.config.runId;
-  if (explicit !== void 0 && env2 !== void 0 && explicit !== env2) fail20("VALIDATION_ERROR", "--run conflicts with PITHOS_RUN_ID");
+  if (explicit !== void 0 && env2 !== void 0 && explicit !== env2)
+    fail20("VALIDATION_ERROR", "--run conflicts with PITHOS_RUN_ID");
   return explicit ?? env2 ?? fail20("VALIDATION_ERROR", "missing --run or PITHOS_RUN_ID");
 };
 var body = (ctx, args2) => {
   const inline = parseFlag(args2, "--body");
   const file6 = parseFlag(args2, "--body-file");
-  if (inline === void 0 === (file6 === void 0)) fail20("VALIDATION_ERROR", "supply exactly one of --body or --body-file");
+  if (inline === void 0 === (file6 === void 0))
+    fail20("VALIDATION_ERROR", "supply exactly one of --body or --body-file");
   const text11 = inline ?? ctx.services.fs.readText(file6);
   if (text11.trim() === "") fail20("VALIDATION_ERROR", "body must be non-empty");
   return text11;
@@ -76257,15 +76279,37 @@ var capability = (value6) => ["triage", "design", "execute", "escalate"].include
 var mode = (value6) => value6 === "afk" || value6 === "hitl" ? value6 : fail20("VALIDATION_ERROR", `invalid mode: ${value6}`);
 var agent = (value6) => ["pdx", "pandora", "toil", "greed", "war"].includes(value6) ? value6 : fail20("VALIDATION_ERROR", `invalid agent: ${value6}`);
 var event = (db, type2, payload) => {
-  db.prepare("INSERT INTO events(id,type,task_id,run_id,actor_run_id,payload_json) VALUES (?,?,?,?,?,?)").run(id2("event"), type2, payload.task_id ?? null, payload.run_id ?? null, payload.actor_run_id ?? null, JSON.stringify(payload.payload));
+  db.prepare(
+    "INSERT INTO events(id,type,task_id,run_id,actor_run_id,payload_json) VALUES (?,?,?,?,?,?)"
+  ).run(
+    id2("event"),
+    type2,
+    payload.task_id ?? null,
+    payload.run_id ?? null,
+    payload.actor_run_id ?? null,
+    JSON.stringify(payload.payload)
+  );
 };
 var enforceCapScope = (db, scopeId, cap) => {
-  const s = row(db.prepare("SELECT id,kind,canonical_path FROM scopes WHERE id=?").get(scopeId), `scope not found: ${scopeId}`);
-  if (cap === "escalate" && s.kind !== "global") fail20("VALIDATION_ERROR", `escalate requires global scope; got ${scopeId}`);
-  if (cap === "execute" && !((s.kind === "repo" || s.kind === "worktree") && s.canonical_path !== null)) fail20("VALIDATION_ERROR", `execute requires repo/worktree scope with canonical_path; got ${scopeId} kind=${s.kind}`);
+  const s = row(
+    db.prepare("SELECT id,kind,canonical_path FROM scopes WHERE id=?").get(scopeId),
+    `scope not found: ${scopeId}`
+  );
+  if (cap === "escalate" && s.kind !== "global")
+    fail20("VALIDATION_ERROR", `escalate requires global scope; got ${scopeId}`);
+  if (cap === "execute" && !((s.kind === "repo" || s.kind === "worktree") && s.canonical_path !== null))
+    fail20(
+      "VALIDATION_ERROR",
+      `execute requires repo/worktree scope with canonical_path; got ${scopeId} kind=${s.kind}`
+    );
 };
 var authorized = (db, table2, runId, cap) => {
-  const r = row(db.prepare("SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?").get(runId), `run not found: ${runId}`);
+  const r = row(
+    db.prepare(
+      "SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?"
+    ).get(runId),
+    `run not found: ${runId}`
+  );
   const ok = db.prepare(`SELECT 1 FROM ${table2} WHERE agent_kind=? AND capability=?`).get(r.agent_kind, cap);
   if (ok === void 0) fail20("VALIDATION_ERROR", `${r.agent_kind} is not authorized for ${cap}`);
   return r;
@@ -76284,11 +76328,14 @@ var runCli = (ctx, argv) => {
     migrate(db);
     if (a === "scope" && b === "upsert") {
       const kind = req(rest, "--kind");
-      if (!["global", "repo", "worktree"].includes(kind)) fail20("VALIDATION_ERROR", `invalid scope kind: ${kind}`);
+      if (!["global", "repo", "worktree"].includes(kind))
+        fail20("VALIDATION_ERROR", `invalid scope kind: ${kind}`);
       const rawPath = kind === "global" ? void 0 : req(rest, "--path");
       const canonical = rawPath === void 0 ? null : resolve3(rawPath);
       const sid = kind === "global" ? "global" : `${kind}:${canonical}`;
-      db.prepare("INSERT INTO scopes(id,kind,canonical_path) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, canonical_path=excluded.canonical_path, updated_at=CURRENT_TIMESTAMP").run(sid, kind, canonical);
+      db.prepare(
+        "INSERT INTO scopes(id,kind,canonical_path) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, canonical_path=excluded.canonical_path, updated_at=CURRENT_TIMESTAMP"
+      ).run(sid, kind, canonical);
       out({ ok: true, scope: { id: sid, kind, canonical_path: canonical } });
       return 0;
     }
@@ -76299,13 +76346,44 @@ var runCli = (ctx, argv) => {
       const scope5 = req(rest, "--scope");
       const cwd = req(rest, "--cwd");
       const sess = req(rest, "--session-id");
-      db.prepare("INSERT INTO runs(id,agent_kind,mode,scope_id,cwd,session_id) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET agent_kind=excluded.agent_kind, mode=excluded.mode, scope_id=excluded.scope_id, cwd=excluded.cwd, session_id=excluded.session_id, updated_at=CURRENT_TIMESTAMP").run(rid, ag, mo, scope5, cwd, sess);
-      out({ ok: true, run: { id: rid, agent: ag, mode: mo, scope_id: scope5, status: "live", task_id: null, session_id: sess } });
+      db.prepare(
+        "INSERT INTO runs(id,agent_kind,mode,scope_id,cwd,session_id) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET agent_kind=excluded.agent_kind, mode=excluded.mode, scope_id=excluded.scope_id, cwd=excluded.cwd, session_id=excluded.session_id, updated_at=CURRENT_TIMESTAMP"
+      ).run(rid, ag, mo, scope5, cwd, sess);
+      out({
+        ok: true,
+        run: {
+          id: rid,
+          agent: ag,
+          mode: mo,
+          scope_id: scope5,
+          status: "live",
+          task_id: null,
+          session_id: sess
+        }
+      });
       return 0;
     }
     if (a === "run" && b === "inspect") {
-      const r = row(db.prepare("SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?").get(c), `run not found: ${c}`);
-      out({ ok: true, run: { id: r.id, agent: r.agent_kind, mode: r.mode, scope_id: r.scope_id, status: r.status, task_id: r.task_id, session_id: r.session_id, created_at: r.created_at, updated_at: r.updated_at } });
+      const r = row(
+        db.prepare(
+          "SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?"
+        ).get(c),
+        `run not found: ${c}`
+      );
+      out({
+        ok: true,
+        run: {
+          id: r.id,
+          agent: r.agent_kind,
+          mode: r.mode,
+          scope_id: r.scope_id,
+          status: r.status,
+          task_id: r.task_id,
+          session_id: r.session_id,
+          created_at: r.created_at,
+          updated_at: r.updated_at
+        }
+      });
       return 0;
     }
     if (a === "task" && b === "enqueue") {
@@ -76314,18 +76392,34 @@ var runCli = (ctx, argv) => {
       const cap = capability(req(rest, "--capability"));
       const title = req(rest, "--title");
       const depends = allFlags(rest, "--depends-on");
-      if (new Set(depends).size !== depends.length) fail20("VALIDATION_ERROR", "duplicate --depends-on");
+      if (new Set(depends).size !== depends.length)
+        fail20("VALIDATION_ERROR", "duplicate --depends-on");
       enforceCapScope(db, scope5, cap);
       authorized(db, "agent_enqueues", runId, cap);
       const tid = id2("task");
       db.transaction(() => {
-        db.prepare("INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)").run(tid, scope5, cap, title, body(ctx, rest), runId);
+        db.prepare(
+          "INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)"
+        ).run(tid, scope5, cap, title, body(ctx, rest), runId);
         for (const dep of depends) {
-          row(db.prepare("SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?").get(dep), `dependency not found: ${dep}`);
-          if (db.prepare("SELECT new_task_id FROM task_supersessions WHERE old_task_id=?").get(dep) !== void 0) fail20("VALIDATION_ERROR", `dependency has been superseded: ${dep}`);
-          db.prepare("INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)").run(tid, dep);
+          row(
+            db.prepare(
+              "SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?"
+            ).get(dep),
+            `dependency not found: ${dep}`
+          );
+          if (db.prepare("SELECT new_task_id FROM task_supersessions WHERE old_task_id=?").get(dep) !== void 0)
+            fail20("VALIDATION_ERROR", `dependency has been superseded: ${dep}`);
+          db.prepare("INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)").run(
+            tid,
+            dep
+          );
         }
-        event(db, "task.created", { task_id: tid, actor_run_id: runId, payload: { scope_id: scope5, capability: cap, title, depends_on_task_ids: depends } });
+        event(db, "task.created", {
+          task_id: tid,
+          actor_run_id: runId,
+          payload: { scope_id: scope5, capability: cap, title, depends_on_task_ids: depends }
+        });
       })();
       out({ ok: true, task: { id: tid, status: "queued", scope_id: scope5, capability: cap } });
       return 0;
@@ -76335,13 +76429,27 @@ var runCli = (ctx, argv) => {
       const scope5 = req(rest, "--scope");
       const cap = capability(req(rest, "--capability"));
       const r = authorized(db, "agent_claims", runId, cap);
-      if (r.scope_id !== scope5) fail20("VALIDATION_ERROR", `claim scope ${scope5} does not match run scope ${r.scope_id}`);
-      const t = row(db.prepare("SELECT id FROM tasks t WHERE t.status='queued' AND t.scope_id=? AND t.capability=? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dep ON dep.id=td.depends_on_task_id WHERE td.task_id=t.id AND dep.status <> 'done') ORDER BY t.created_at ASC, t.id ASC LIMIT 1").get(scope5, cap), "no claimable work");
+      if (r.scope_id !== scope5)
+        fail20("VALIDATION_ERROR", `claim scope ${scope5} does not match run scope ${r.scope_id}`);
+      const t = row(
+        db.prepare(
+          "SELECT id FROM tasks t WHERE t.status='queued' AND t.scope_id=? AND t.capability=? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dep ON dep.id=td.depends_on_task_id WHERE td.task_id=t.id AND dep.status <> 'done') ORDER BY t.created_at ASC, t.id ASC LIMIT 1"
+        ).get(scope5, cap),
+        "no claimable work"
+      );
       db.transaction(() => {
-        const rr = db.prepare("UPDATE runs SET task_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id IS NULL").run(t.id, runId);
+        const rr = db.prepare(
+          "UPDATE runs SET task_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id IS NULL"
+        ).run(t.id, runId);
         if (rr.changes === 0) fail20("VALIDATION_ERROR", "run already holds a task");
-        db.prepare("UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'").run(t.id);
-        event(db, "task.claimed", { task_id: t.id, actor_run_id: runId, payload: { run_id: runId, fencing_token: 1 } });
+        db.prepare(
+          "UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'"
+        ).run(t.id);
+        event(db, "task.claimed", {
+          task_id: t.id,
+          actor_run_id: runId,
+          payload: { run_id: runId, fencing_token: 1 }
+        });
       })();
       out({ ok: true, task: { id: t.id, status: "claimed", token: 1 } });
       return 0;
@@ -76350,13 +76458,34 @@ var runCli = (ctx, argv) => {
       const runId = req(rest, "--run");
       const task = parseFlag(rest, "--task");
       const token = parseFlag(rest, "--token");
-      if (task === void 0 !== (token === void 0)) fail20("VALIDATION_ERROR", "--task and --token must be supplied together");
+      if (task === void 0 !== (token === void 0))
+        fail20("VALIDATION_ERROR", "--task and --token must be supplied together");
       if (task !== void 0) {
-        const tr = row(db.prepare("SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?").get(task), `task not found: ${task}`);
+        const tr = row(
+          db.prepare(
+            "SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?"
+          ).get(task),
+          `task not found: ${task}`
+        );
         if (tr.fencing_token !== Number(token)) fail20("STALE_TOKEN", "stale fencing token");
-        if (tr.status === "claimed") db.prepare("UPDATE tasks SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?").run(task);
-        event(db, "task.heartbeat", { task_id: task, actor_run_id: runId, payload: { run_id: runId, fencing_token: Number(token), previous_status: tr.status, status: tr.status === "claimed" ? "running" : tr.status } });
-        out({ ok: true, task: { id: task, status: tr.status === "claimed" ? "running" : tr.status } });
+        if (tr.status === "claimed")
+          db.prepare(
+            "UPDATE tasks SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?"
+          ).run(task);
+        event(db, "task.heartbeat", {
+          task_id: task,
+          actor_run_id: runId,
+          payload: {
+            run_id: runId,
+            fencing_token: Number(token),
+            previous_status: tr.status,
+            status: tr.status === "claimed" ? "running" : tr.status
+          }
+        });
+        out({
+          ok: true,
+          task: { id: task, status: tr.status === "claimed" ? "running" : tr.status }
+        });
         return 0;
       }
       event(db, "run.heartbeat", { run_id: runId, payload: { status: "live" } });
@@ -76370,30 +76499,77 @@ var runCli = (ctx, argv) => {
       const st = b === "complete" ? "done" : "failed";
       const res = b === "complete" ? parseFlag(rest, "--result-file") ? ctx.services.fs.readText(parseFlag(rest, "--result-file")) : "{}" : JSON.stringify({ reason: req(rest, "--reason") });
       const r = db.transaction(() => {
-        const changes2 = db.prepare("UPDATE tasks SET status=?, result_json=?, completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=? AND fencing_token=? AND status IN ('claimed','running')").run(st, res, taskId, token).changes;
+        const changes2 = db.prepare(
+          "UPDATE tasks SET status=?, result_json=?, completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=? AND fencing_token=? AND status IN ('claimed','running')"
+        ).run(st, res, taskId, token).changes;
         if (changes2 === 0) fail20("STALE_TOKEN_RACE", "stale token or task not active");
-        db.prepare("UPDATE runs SET task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id=?").run(runId, taskId);
-        event(db, b === "complete" ? "task.completed" : "task.failed", { task_id: taskId, actor_run_id: runId, payload: { run_id: runId, fencing_token: token } });
-        return row(db.prepare("SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?").get(taskId), `task not found: ${taskId}`);
+        db.prepare(
+          "UPDATE runs SET task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id=?"
+        ).run(runId, taskId);
+        event(db, b === "complete" ? "task.completed" : "task.failed", {
+          task_id: taskId,
+          actor_run_id: runId,
+          payload: { run_id: runId, fencing_token: token }
+        });
+        return row(
+          db.prepare(
+            "SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?"
+          ).get(taskId),
+          `task not found: ${taskId}`
+        );
       })();
       out({ ok: true, task: { id: taskId, status: r.status } });
       return 0;
     }
     if (a === "task" && b === "inspect") {
       const taskId = c ?? fail20("VALIDATION_ERROR", "missing task id");
-      const t = row(db.prepare("SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?").get(taskId), `task not found: ${taskId}`);
-      const deps = db.prepare("SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=? ORDER BY d.created_at,t.id").all(taskId);
+      const t = row(
+        db.prepare(
+          "SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?"
+        ).get(taskId),
+        `task not found: ${taskId}`
+      );
+      const deps = db.prepare(
+        "SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=? ORDER BY d.created_at,t.id"
+      ).all(taskId);
       const unresolved = deps.filter((d) => d.status !== "done").map((d) => d.id);
-      const dependents = db.prepare("SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.task_id WHERE d.depends_on_task_id=? ORDER BY d.created_at,t.id").all(taskId);
-      out({ ok: true, task: { id: t.id, scope_id: t.scope_id, capability: t.capability, status: t.status, claimable: t.status === "queued" && unresolved.length === 0, unresolved_dependency_ids: unresolved }, dependencies: deps, dependents, supersedes: null, superseded_by: null, artifacts: [] });
+      const dependents = db.prepare(
+        "SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.task_id WHERE d.depends_on_task_id=? ORDER BY d.created_at,t.id"
+      ).all(taskId);
+      out({
+        ok: true,
+        task: {
+          id: t.id,
+          scope_id: t.scope_id,
+          capability: t.capability,
+          status: t.status,
+          claimable: t.status === "queued" && unresolved.length === 0,
+          unresolved_dependency_ids: unresolved
+        },
+        dependencies: deps,
+        dependents,
+        supersedes: null,
+        superseded_by: null,
+        artifacts: []
+      });
       return 0;
     }
     if (a === "graph" && b === "inspect") {
-      out({ ok: true, graph: { selector: parseFlag(rest, "--all") !== void 0 || rest.includes("--all") ? { kind: "all" } : { kind: "task", value: parseFlag(rest, "--task") ?? parseFlag(rest, "--scope") }, nodes: [], edges: [] } });
+      out({
+        ok: true,
+        graph: {
+          selector: parseFlag(rest, "--all") !== void 0 || rest.includes("--all") ? { kind: "all" } : { kind: "task", value: parseFlag(rest, "--task") ?? parseFlag(rest, "--scope") },
+          nodes: [],
+          edges: []
+        }
+      });
       return 0;
     }
     if (a === "events" && b === "tail") {
-      out({ ok: true, events: db.prepare("SELECT * FROM events ORDER BY created_at DESC LIMIT ?").all(Number(parseFlag(rest, "--limit") ?? 100)) });
+      out({
+        ok: true,
+        events: db.prepare("SELECT * FROM events ORDER BY created_at DESC LIMIT ?").all(Number(parseFlag(rest, "--limit") ?? 100))
+      });
       return 0;
     }
     if (a === "briefing") {
@@ -76404,7 +76580,16 @@ var runCli = (ctx, argv) => {
       const task = req(rest, "--task");
       const runId = req(rest, "--run");
       const aid = id2("artifact");
-      db.prepare("INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)").run(aid, task, runId, req(rest, "--kind"), req(rest, "--title"), parseFlag(rest, "--body-file") ? ctx.services.fs.readText(parseFlag(rest, "--body-file")) : "");
+      db.prepare(
+        "INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)"
+      ).run(
+        aid,
+        task,
+        runId,
+        req(rest, "--kind"),
+        req(rest, "--title"),
+        parseFlag(rest, "--body-file") ? ctx.services.fs.readText(parseFlag(rest, "--body-file")) : ""
+      );
       out({ ok: true, artifact: { id: aid } });
       return 0;
     }
@@ -76416,7 +76601,9 @@ var runCli = (ctx, argv) => {
     return 1;
   } catch (error4) {
     if (error4 instanceof PithosError) {
-      ctx.services.output.writeError(json2({ ok: false, error: { code: error4.code, message: error4.message } }));
+      ctx.services.output.writeError(
+        json2({ ok: false, error: { code: error4.code, message: error4.message } })
+      );
       return error4.code === "NO_CLAIMABLE_WORK" ? 5 : 1;
     }
     throw error4;
@@ -76432,29 +76619,261 @@ var run9 = (ctx, argv) => Effect_exports.sync(() => {
   if (code2 !== 0) process.exitCode = code2;
 });
 var makePithosCommand = (ctx) => {
-  const init = Command_exports.make("init", { fresh: Options_exports.boolean("fresh") }, ({ fresh: fresh3 }) => run9(ctx, ["init", ...bool("fresh", fresh3)]));
-  const scopeUpsert = Command_exports.make("upsert", { kind: Options_exports.choice("kind", ["global", "repo", "worktree"]), path: Options_exports.text("path").pipe(Options_exports.optional) }, ({ kind, path: path4 }) => run9(ctx, ["scope", "upsert", "_", "--kind", kind, ...flag("path", opt(path4))]));
+  const init = Command_exports.make(
+    "init",
+    { fresh: Options_exports.boolean("fresh") },
+    ({ fresh: fresh3 }) => run9(ctx, ["init", ...bool("fresh", fresh3)])
+  );
+  const scopeUpsert = Command_exports.make(
+    "upsert",
+    {
+      kind: Options_exports.choice("kind", ["global", "repo", "worktree"]),
+      path: Options_exports.text("path").pipe(Options_exports.optional)
+    },
+    ({ kind, path: path4 }) => run9(ctx, ["scope", "upsert", "_", "--kind", kind, ...flag("path", opt(path4))])
+  );
   const scope5 = Command_exports.make("scope").pipe(Command_exports.withSubcommands([scopeUpsert]));
-  const runUpsert = Command_exports.make("upsert", { agent: Options_exports.choice("agent", ["pdx", "pandora", "toil", "greed", "war"]), mode: Options_exports.choice("mode", ["afk", "hitl"]), scope: Options_exports.text("scope"), cwd: Options_exports.text("cwd"), sessionId: Options_exports.text("session-id"), runId: Options_exports.text("run").pipe(Options_exports.optional) }, (o) => run9(ctx, ["run", "upsert", "_", "--agent", o.agent, "--mode", o.mode, "--scope", o.scope, "--cwd", o.cwd, "--session-id", o.sessionId, ...flag("run", opt(o.runId))]));
-  const runInspect = Command_exports.make("inspect", { id: Args_exports.text({ name: "run-id" }) }, ({ id: id3 }) => run9(ctx, ["run", "inspect", id3]));
+  const runUpsert = Command_exports.make(
+    "upsert",
+    {
+      agent: Options_exports.choice("agent", ["pdx", "pandora", "toil", "greed", "war"]),
+      mode: Options_exports.choice("mode", ["afk", "hitl"]),
+      scope: Options_exports.text("scope"),
+      cwd: Options_exports.text("cwd"),
+      sessionId: Options_exports.text("session-id"),
+      runId: Options_exports.text("run").pipe(Options_exports.optional)
+    },
+    (o) => run9(ctx, [
+      "run",
+      "upsert",
+      "_",
+      "--agent",
+      o.agent,
+      "--mode",
+      o.mode,
+      "--scope",
+      o.scope,
+      "--cwd",
+      o.cwd,
+      "--session-id",
+      o.sessionId,
+      ...flag("run", opt(o.runId))
+    ])
+  );
+  const runInspect = Command_exports.make(
+    "inspect",
+    { id: Args_exports.text({ name: "run-id" }) },
+    ({ id: id3 }) => run9(ctx, ["run", "inspect", id3])
+  );
   const runParent = Command_exports.make("run").pipe(Command_exports.withSubcommands([runUpsert, runInspect]));
-  const enqueue = Command_exports.make("enqueue", { scope: Options_exports.text("scope"), capability: Options_exports.choice("capability", ["triage", "design", "execute", "escalate"]), title: Options_exports.text("title"), body: Options_exports.text("body").pipe(Options_exports.optional), bodyFile: Options_exports.text("body-file").pipe(Options_exports.optional), runId: Options_exports.text("run").pipe(Options_exports.optional), dependsOn: Options_exports.text("depends-on").pipe(Options_exports.repeated) }, (o) => run9(ctx, ["task", "enqueue", "_", "--scope", o.scope, "--capability", o.capability, "--title", o.title, ...flag("body", opt(o.body)), ...flag("body-file", opt(o.bodyFile)), ...flag("run", opt(o.runId)), ...o.dependsOn.flatMap((d) => ["--depends-on", d])]));
-  const claim = Command_exports.make("claim", { runId: Options_exports.text("run"), scope: Options_exports.text("scope"), capability: Options_exports.choice("capability", ["triage", "design", "execute", "escalate"]) }, (o) => run9(ctx, ["task", "claim", "_", "--run", o.runId, "--scope", o.scope, "--capability", o.capability]));
-  const heartbeat = Command_exports.make("heartbeat", { runId: Options_exports.text("run"), task: Options_exports.text("task").pipe(Options_exports.optional), token: Options_exports.integer("token").pipe(Options_exports.optional) }, (o) => run9(ctx, ["task", "heartbeat", "_", "--run", o.runId, ...flag("task", opt(o.task)), ...flag("token", opt(o.token))]));
-  const complete4 = Command_exports.make("complete", { id: Args_exports.text({ name: "task-id" }), runId: Options_exports.text("run"), token: Options_exports.integer("token"), resultFile: Options_exports.text("result-file").pipe(Options_exports.optional) }, (o) => run9(ctx, ["task", "complete", o.id, "--run", o.runId, "--token", String(o.token), ...flag("result-file", opt(o.resultFile))]));
-  const fail21 = Command_exports.make("fail", { id: Args_exports.text({ name: "task-id" }), runId: Options_exports.text("run"), token: Options_exports.integer("token"), reason: Options_exports.text("reason") }, (o) => run9(ctx, ["task", "fail", o.id, "--run", o.runId, "--token", String(o.token), "--reason", o.reason]));
-  const inspect = Command_exports.make("inspect", { id: Args_exports.text({ name: "task-id" }) }, ({ id: id3 }) => run9(ctx, ["task", "inspect", id3]));
-  const supersede = Command_exports.make("supersede", { id: Args_exports.text({ name: "task-id" }), runId: Options_exports.text("run"), reason: Options_exports.text("reason") }, (o) => run9(ctx, ["task", "supersede", o.id, "--run", o.runId, "--reason", o.reason]));
-  const cancel = Command_exports.make("cancel", { id: Args_exports.text({ name: "task-id" }), runId: Options_exports.text("run"), reason: Options_exports.text("reason") }, (o) => run9(ctx, ["task", "cancel", o.id, "--run", o.runId, "--reason", o.reason]));
-  const artifactAdd = Command_exports.make("add", { task: Options_exports.text("task"), runId: Options_exports.text("run"), kind: Options_exports.text("kind"), title: Options_exports.text("title"), bodyFile: Options_exports.text("body-file").pipe(Options_exports.optional) }, (o) => run9(ctx, ["task", "artifact", "add", "--task", o.task, "--run", o.runId, "--kind", o.kind, "--title", o.title, ...flag("body-file", opt(o.bodyFile))]));
+  const enqueue = Command_exports.make(
+    "enqueue",
+    {
+      scope: Options_exports.text("scope"),
+      capability: Options_exports.choice("capability", [
+        "triage",
+        "design",
+        "execute",
+        "escalate"
+      ]),
+      title: Options_exports.text("title"),
+      body: Options_exports.text("body").pipe(Options_exports.optional),
+      bodyFile: Options_exports.text("body-file").pipe(Options_exports.optional),
+      runId: Options_exports.text("run").pipe(Options_exports.optional),
+      dependsOn: Options_exports.text("depends-on").pipe(Options_exports.repeated)
+    },
+    (o) => run9(ctx, [
+      "task",
+      "enqueue",
+      "_",
+      "--scope",
+      o.scope,
+      "--capability",
+      o.capability,
+      "--title",
+      o.title,
+      ...flag("body", opt(o.body)),
+      ...flag("body-file", opt(o.bodyFile)),
+      ...flag("run", opt(o.runId)),
+      ...o.dependsOn.flatMap((d) => ["--depends-on", d])
+    ])
+  );
+  const claim = Command_exports.make(
+    "claim",
+    {
+      runId: Options_exports.text("run"),
+      scope: Options_exports.text("scope"),
+      capability: Options_exports.choice("capability", [
+        "triage",
+        "design",
+        "execute",
+        "escalate"
+      ])
+    },
+    (o) => run9(ctx, [
+      "task",
+      "claim",
+      "_",
+      "--run",
+      o.runId,
+      "--scope",
+      o.scope,
+      "--capability",
+      o.capability
+    ])
+  );
+  const heartbeat = Command_exports.make(
+    "heartbeat",
+    {
+      runId: Options_exports.text("run"),
+      task: Options_exports.text("task").pipe(Options_exports.optional),
+      token: Options_exports.integer("token").pipe(Options_exports.optional)
+    },
+    (o) => run9(ctx, [
+      "task",
+      "heartbeat",
+      "_",
+      "--run",
+      o.runId,
+      ...flag("task", opt(o.task)),
+      ...flag("token", opt(o.token))
+    ])
+  );
+  const complete4 = Command_exports.make(
+    "complete",
+    {
+      id: Args_exports.text({ name: "task-id" }),
+      runId: Options_exports.text("run"),
+      token: Options_exports.integer("token"),
+      resultFile: Options_exports.text("result-file").pipe(Options_exports.optional)
+    },
+    (o) => run9(ctx, [
+      "task",
+      "complete",
+      o.id,
+      "--run",
+      o.runId,
+      "--token",
+      String(o.token),
+      ...flag("result-file", opt(o.resultFile))
+    ])
+  );
+  const fail21 = Command_exports.make(
+    "fail",
+    {
+      id: Args_exports.text({ name: "task-id" }),
+      runId: Options_exports.text("run"),
+      token: Options_exports.integer("token"),
+      reason: Options_exports.text("reason")
+    },
+    (o) => run9(ctx, [
+      "task",
+      "fail",
+      o.id,
+      "--run",
+      o.runId,
+      "--token",
+      String(o.token),
+      "--reason",
+      o.reason
+    ])
+  );
+  const inspect = Command_exports.make(
+    "inspect",
+    { id: Args_exports.text({ name: "task-id" }) },
+    ({ id: id3 }) => run9(ctx, ["task", "inspect", id3])
+  );
+  const supersede = Command_exports.make(
+    "supersede",
+    {
+      id: Args_exports.text({ name: "task-id" }),
+      runId: Options_exports.text("run"),
+      reason: Options_exports.text("reason")
+    },
+    (o) => run9(ctx, ["task", "supersede", o.id, "--run", o.runId, "--reason", o.reason])
+  );
+  const cancel = Command_exports.make(
+    "cancel",
+    {
+      id: Args_exports.text({ name: "task-id" }),
+      runId: Options_exports.text("run"),
+      reason: Options_exports.text("reason")
+    },
+    (o) => run9(ctx, ["task", "cancel", o.id, "--run", o.runId, "--reason", o.reason])
+  );
+  const artifactAdd = Command_exports.make(
+    "add",
+    {
+      task: Options_exports.text("task"),
+      runId: Options_exports.text("run"),
+      kind: Options_exports.text("kind"),
+      title: Options_exports.text("title"),
+      bodyFile: Options_exports.text("body-file").pipe(Options_exports.optional)
+    },
+    (o) => run9(ctx, [
+      "task",
+      "artifact",
+      "add",
+      "--task",
+      o.task,
+      "--run",
+      o.runId,
+      "--kind",
+      o.kind,
+      "--title",
+      o.title,
+      ...flag("body-file", opt(o.bodyFile))
+    ])
+  );
   const artifact = Command_exports.make("artifact").pipe(Command_exports.withSubcommands([artifactAdd]));
-  const task = Command_exports.make("task").pipe(Command_exports.withSubcommands([enqueue, claim, heartbeat, complete4, fail21, supersede, cancel, inspect, artifact]));
-  const graphInspect = Command_exports.make("inspect", { task: Options_exports.text("task").pipe(Options_exports.optional), scope: Options_exports.text("scope").pipe(Options_exports.optional), all: Options_exports.boolean("all"), flat: Options_exports.boolean("flat"), dump: Options_exports.boolean("dump") }, (o) => run9(ctx, ["graph", "inspect", "_", ...flag("task", opt(o.task)), ...flag("scope", opt(o.scope)), ...bool("all", o.all), ...bool("flat", o.flat), ...bool("dump", o.dump)]));
+  const task = Command_exports.make("task").pipe(
+    Command_exports.withSubcommands([
+      enqueue,
+      claim,
+      heartbeat,
+      complete4,
+      fail21,
+      supersede,
+      cancel,
+      inspect,
+      artifact
+    ])
+  );
+  const graphInspect = Command_exports.make(
+    "inspect",
+    {
+      task: Options_exports.text("task").pipe(Options_exports.optional),
+      scope: Options_exports.text("scope").pipe(Options_exports.optional),
+      all: Options_exports.boolean("all"),
+      flat: Options_exports.boolean("flat"),
+      dump: Options_exports.boolean("dump")
+    },
+    (o) => run9(ctx, [
+      "graph",
+      "inspect",
+      "_",
+      ...flag("task", opt(o.task)),
+      ...flag("scope", opt(o.scope)),
+      ...bool("all", o.all),
+      ...bool("flat", o.flat),
+      ...bool("dump", o.dump)
+    ])
+  );
   const graph = Command_exports.make("graph").pipe(Command_exports.withSubcommands([graphInspect]));
-  const eventsTail = Command_exports.make("tail", { limit: Options_exports.integer("limit").pipe(Options_exports.optional) }, (o) => run9(ctx, ["events", "tail", "_", ...flag("limit", opt(o.limit))]));
+  const eventsTail = Command_exports.make(
+    "tail",
+    { limit: Options_exports.integer("limit").pipe(Options_exports.optional) },
+    (o) => run9(ctx, ["events", "tail", "_", ...flag("limit", opt(o.limit))])
+  );
   const events = Command_exports.make("events").pipe(Command_exports.withSubcommands([eventsTail]));
-  const briefing = Command_exports.make("briefing", { agent: Options_exports.text("agent").pipe(Options_exports.optional) }, () => run9(ctx, ["briefing"]));
-  return Command_exports.make("pithos").pipe(Command_exports.withSubcommands([init, scope5, runParent, task, graph, events, briefing]));
+  const briefing = Command_exports.make(
+    "briefing",
+    { agent: Options_exports.text("agent").pipe(Options_exports.optional) },
+    () => run9(ctx, ["briefing"])
+  );
+  return Command_exports.make("pithos").pipe(
+    Command_exports.withSubcommands([init, scope5, runParent, task, graph, events, briefing])
+  );
 };
 
 // src/config.ts

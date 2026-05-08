@@ -1,14 +1,14 @@
-import { Effect } from "effect"
-import { DbService } from "../services/db.ts"
-import { OutputService } from "../services/output.ts"
-import { PithosError } from "../errors/errors.ts"
-import { canonicalizePath, deriveScopeId, nameFromPath } from "../domain/scope.ts"
-import type { ScopeKind } from "../domain/scope.ts"
-import { withCommandObservability } from "../layers/metrics.ts"
+import { Effect } from "effect";
+import { DbService } from "../services/db.ts";
+import { OutputService } from "../services/output.ts";
+import { PithosError } from "../errors/errors.ts";
+import { canonicalizePath, deriveScopeId, nameFromPath } from "../domain/scope.ts";
+import type { ScopeKind } from "../domain/scope.ts";
+import { withCommandObservability } from "../layers/metrics.ts";
 
 export interface ScopeUpsertOptions {
-  readonly kind: ScopeKind
-  readonly path: string | undefined
+	readonly kind: ScopeKind;
+	readonly path: string | undefined;
 }
 
 /**
@@ -22,60 +22,57 @@ export interface ScopeUpsertOptions {
  * and update `updated_at` only.
  */
 export const scopeUpsertCommand = (
-  opts: ScopeUpsertOptions,
+	opts: ScopeUpsertOptions,
 ): Effect.Effect<void, PithosError, DbService | OutputService> =>
-  Effect.gen(function* () {
-    const db = yield* DbService
-    const output = yield* OutputService
+	Effect.gen(function* () {
+		const db = yield* DbService;
+		const output = yield* OutputService;
 
-    if (opts.kind === "global") {
-      yield* db.run(
-        `INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
+		if (opts.kind === "global") {
+			yield* db.run(
+				`INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
          VALUES ('global', 'global', 'global', NULL, '{}', CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`,
-      )
-      yield* output.print(
-        JSON.stringify({ ok: true, scope: { id: "global", kind: "global", name: "global" } }),
-      )
-      return
-    }
+			);
+			yield* output.print(
+				JSON.stringify({ ok: true, scope: { id: "global", kind: "global", name: "global" } }),
+			);
+			return;
+		}
 
-    // repo / worktree — path required
-    if (!opts.path) {
-      yield* Effect.fail(
-        new PithosError({
-          code: "VALIDATION_ERROR",
-          message: `--path is required for kind '${opts.kind}'`,
-        }),
-      )
-      return
-    }
+		// repo / worktree — path required
+		if (!opts.path) {
+			yield* Effect.fail(
+				new PithosError({
+					code: "VALIDATION_ERROR",
+					message: `--path is required for kind '${opts.kind}'`,
+				}),
+			);
+			return;
+		}
 
-    const canonicalPath = canonicalizePath(opts.path)
-    const id = deriveScopeId(opts.kind, canonicalPath)
-    const name = nameFromPath(canonicalPath)
+		const canonicalPath = canonicalizePath(opts.path);
+		const id = deriveScopeId(opts.kind, canonicalPath);
+		const name = nameFromPath(canonicalPath);
 
-    yield* db.run(
-      `INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
+		yield* db.run(
+			`INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
        VALUES (?, ?, ?, ?, '{}', CURRENT_TIMESTAMP)
        ON CONFLICT(id) DO UPDATE SET
          kind           = excluded.kind,
          name           = excluded.name,
          canonical_path = excluded.canonical_path,
          updated_at     = CURRENT_TIMESTAMP`,
-      [id, opts.kind, name, canonicalPath],
-    )
+			[id, opts.kind, name, canonicalPath],
+		);
 
-    yield* output.print(
-      JSON.stringify({
-        ok: true,
-        scope: { id, kind: opts.kind, name, canonical_path: canonicalPath },
-      }),
-    )
-  }).pipe(
-    Effect.withLogSpan("pithos.scope.upsert"),
-    withCommandObservability("scope.upsert"),
-  )
+		yield* output.print(
+			JSON.stringify({
+				ok: true,
+				scope: { id, kind: opts.kind, name, canonical_path: canonicalPath },
+			}),
+		);
+	}).pipe(Effect.withLogSpan("pithos.scope.upsert"), withCommandObservability("scope.upsert"));
 
 export const SCOPE_UPSERT_HELP = `pithos scope upsert - Register a scope (global/repo/worktree)
 
@@ -100,4 +97,4 @@ Notes:
   - Calling upsert twice with the same path is idempotent.
 
 Exit codes: 0 success | 2 validation error
-`
+`;

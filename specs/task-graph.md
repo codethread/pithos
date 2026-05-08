@@ -17,6 +17,7 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 - Preserve history when one task replaces another.
 - Let agents inspect blockers, dependents, and the current connected graph without reconstructing it from prose.
 - Surface ready versus blocked work in `pithos briefing`.
+
 ### Non-Goals
 
 - A generic mutable graph editor for arbitrary post-creation rewiring.
@@ -132,8 +133,6 @@ CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
   ON task_supersessions(new_task_id);
 ```
 
-
-
 ### Readiness contract
 
 A task is claimable when all of the following are true:
@@ -148,20 +147,20 @@ The last rule is enforced operationally by `supersede`: if the old task is still
 
 ```ts
 type GraphEdge =
-  | { kind: "depends_on"; from_task_id: string; to_task_id: string; satisfied: boolean }
-  | { kind: "supersedes"; from_task_id: string; to_task_id: string }
+	| { kind: "depends_on"; from_task_id: string; to_task_id: string; satisfied: boolean }
+	| { kind: "supersedes"; from_task_id: string; to_task_id: string };
 
 type GraphNode = {
-  id: string
-  scope_id: string
-  capability: string
-  status: string
-  title: string
-  claimable: boolean
-  unresolved_dependency_ids: readonly string[]
-  supersedes_task_id: string | null
-  superseded_by_task_id: string | null
-}
+	id: string;
+	scope_id: string;
+	capability: string;
+	status: string;
+	title: string;
+	claimable: boolean;
+	unresolved_dependency_ids: readonly string[];
+	supersedes_task_id: string | null;
+	superseded_by_task_id: string | null;
+};
 ```
 
 These are response-contract types, not a directive to mirror them 1:1 in source.
@@ -172,28 +171,28 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 > Note: `control-plane-supervision.md` supersedes the command paths, capability vocabulary, and authorization requirements below. The graph semantics in this spec remain normative, but the post-rewrite public surface uses nested commands such as `pithos task enqueue`, `pithos task claim`, `pithos task inspect`, and `pithos graph inspect`, with capabilities limited to `triage`, `design`, `execute`, and `escalate`.
 
-| Command | Change | Contract |
-| ------- | ------ | -------- |
-| `pithos task enqueue` | Modify | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. Requires a resolved run, non-empty body, known capability, and `agent_enqueues` authorization. |
-| `pithos task claim` | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
-| `pithos task inspect <id>` | Expand output | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links. |
-| `pithos graph inspect` | New | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`). |
-| `pithos task supersede <task-id>` | New | Create a replacement task, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued. |
-| `pithos briefing` | Modify output | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items. |
-| `pithos tail` | New event types | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows. |
+| Command                           | Change           | Contract                                                                                                                                                                                                                                 |
+| --------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pithos task enqueue`             | Modify           | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. Requires a resolved run, non-empty body, known capability, and `agent_enqueues` authorization.                              |
+| `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
+| `pithos task inspect <id>`        | Expand output    | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links.                                                                                                               |
+| `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                     |
+| `pithos task supersede <task-id>` | New              | Create a replacement task, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.                                                    |
+| `pithos briefing`                 | Modify output    | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items.                                                                                                                                  |
+| `pithos tail`                     | New event types  | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows.                                                                                                                                                   |
 
 ### `pithos task enqueue`
 
 New flag surface:
 
-| Flag | Description | Default |
-| ---- | ----------- | ------- |
-| `--scope <scope-id>` | Scope for the new task | required |
-| `--capability <triage|design|execute|escalate>` | Capability for matching agents | required |
-| `--title <title>` | Human-readable title for the task | required |
-| `--body <text>` / `--body-file <path>` | Task body | required |
-| `--run <run-id>` | Creating run; defaults from `PITHOS_RUN_ID` for spawned agents | required after env resolution |
-| `--depends-on <task-id>` | Dependency edge to an existing task; repeatable | none |
+| Flag                                   | Description                                                    | Default                       |
+| -------------------------------------- | -------------------------------------------------------------- | ----------------------------- | ---------- | ------------------------------ | -------- |
+| `--scope <scope-id>`                   | Scope for the new task                                         | required                      |
+| `--capability <triage                  | design                                                         | execute                       | escalate>` | Capability for matching agents | required |
+| `--title <title>`                      | Human-readable title for the task                              | required                      |
+| `--body <text>` / `--body-file <path>` | Task body                                                      | required                      |
+| `--run <run-id>`                       | Creating run; defaults from `PITHOS_RUN_ID` for spawned agents | required after env resolution |
+| `--depends-on <task-id>`               | Dependency edge to an existing task; repeatable                | none                          |
 
 Behavioral rules:
 
@@ -211,15 +210,15 @@ Behavioral rules:
 
 Required/optional surface:
 
-| Flag / arg | Description | Default |
-| ---------- | ----------- | ------- |
-| `<task-id>` | Task being replaced | required |
-| `--run <run-id>` | Actor performing the replacement | required |
-| `--title <title>` | Replacement task title | old task title |
-| `--body <text>` / `--body-file <path>` | Replacement task body | old task body |
-| `--scope <scope-id>` | Replacement task scope | old task scope |
-| `--capability <cap>` | Replacement task capability | old task capability |
-| `--reason <text>` | Human-readable reason stored with supersession | required |
+| Flag / arg                             | Description                                    | Default             |
+| -------------------------------------- | ---------------------------------------------- | ------------------- |
+| `<task-id>`                            | Task being replaced                            | required            |
+| `--run <run-id>`                       | Actor performing the replacement               | required            |
+| `--title <title>`                      | Replacement task title                         | old task title      |
+| `--body <text>` / `--body-file <path>` | Replacement task body                          | old task body       |
+| `--scope <scope-id>`                   | Replacement task scope                         | old task scope      |
+| `--capability <cap>`                   | Replacement task capability                    | old task capability |
+| `--reason <text>`                      | Human-readable reason stored with supersession | required            |
 
 Transaction contract:
 
@@ -245,13 +244,13 @@ The command returns JSON:
 
 ```json
 {
-  "ok": true,
-  "task": { "id": "task_d", "status": "queued", "scope_id": "repo:be", "capability": "execute" },
-  "supersession": {
-    "old_task_id": "task_b",
-    "new_task_id": "task_d",
-    "retargeted_dependent_task_ids": ["task_c"]
-  }
+	"ok": true,
+	"task": { "id": "task_d", "status": "queued", "scope_id": "repo:be", "capability": "execute" },
+	"supersession": {
+		"old_task_id": "task_b",
+		"new_task_id": "task_d",
+		"retargeted_dependent_task_ids": ["task_c"]
+	}
 }
 ```
 
@@ -261,22 +260,22 @@ Success response shape:
 
 ```json
 {
-  "ok": true,
-  "task": {
-    "id": "task_c",
-    "scope_id": "repo:fe",
-    "capability": "execute",
-    "status": "queued",
-    "claimable": false,
-    "unresolved_dependency_ids": ["task_d"]
-  },
-  "dependencies": [
-    { "id": "task_d", "scope_id": "repo:be", "status": "queued", "title": "Fix API" }
-  ],
-  "dependents": [],
-  "supersedes": null,
-  "superseded_by": null,
-  "artifacts": []
+	"ok": true,
+	"task": {
+		"id": "task_c",
+		"scope_id": "repo:fe",
+		"capability": "execute",
+		"status": "queued",
+		"claimable": false,
+		"unresolved_dependency_ids": ["task_d"]
+	},
+	"dependencies": [
+		{ "id": "task_d", "scope_id": "repo:be", "status": "queued", "title": "Fix API" }
+	],
+	"dependents": [],
+	"supersedes": null,
+	"superseded_by": null,
+	"artifacts": []
 }
 ```
 
@@ -285,22 +284,23 @@ Requirements:
 - relationship arrays must be deterministic and sorted by `created_at`, then `id`
 - dependency/dependent summaries must always include `scope_id`
 - `claimable` and `unresolved_dependency_ids` are computed, never stored
+
 ### `pithos graph inspect`
 
 Selectors are mutually exclusive:
 
-| Selector | Result |
-| -------- | ------ |
-| `--task <id>` | Transitive closure around that task following dependency and supersession edges both directions |
-| `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency and supersession edges in both directions recursively until the response is closed |
-| `--all` | All non-cancelled tasks and all current graph edges, plus any referenced dependency or supersession neighbors needed to keep the response closed (deprecated alias: `--current`) |
+| Selector             | Result                                                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--task <id>`        | Transitive closure around that task following dependency and supersession edges both directions                                                                                  |
+| `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency and supersession edges in both directions recursively until the response is closed                         |
+| `--all`              | All non-cancelled tasks and all current graph edges, plus any referenced dependency or supersession neighbors needed to keep the response closed (deprecated alias: `--current`) |
 
 Output flags:
 
-| Flag | Effect |
-| ---- | ------ |
+| Flag     | Effect                                                                                            |
+| -------- | ------------------------------------------------------------------------------------------------- |
 | `--flat` | Render a plain-text supersession-chain tree (opt-in text mode; hides completed chains by default) |
-| `--dump` | Show all chains including completed ones; only meaningful with `--flat`, no-op in JSON mode |
+| `--dump` | Show all chains including completed ones; only meaningful with `--flat`, no-op in JSON mode       |
 
 #### `--flat` filtering behavior
 
@@ -321,61 +321,66 @@ Success response shape:
 
 ```json
 {
-  "ok": true,
-  "graph": {
-    "selector": { "kind": "task", "value": "task_c" },
-    "nodes": [
-      {
-        "id": "task_a",
-        "scope_id": "repo:design",
-        "capability": "design",
-        "status": "done",
-        "title": "Finalize API sketch",
-        "claimable": false,
-        "unresolved_dependency_ids": [],
-        "supersedes_task_id": null,
-        "superseded_by_task_id": null
-      },
-      {
-        "id": "task_b",
-        "scope_id": "repo:be",
-        "capability": "execute",
-        "status": "cancelled",
-        "title": "Original API task",
-        "claimable": false,
-        "unresolved_dependency_ids": [],
-        "supersedes_task_id": null,
-        "superseded_by_task_id": "task_d"
-      },
-      {
-        "id": "task_d",
-        "scope_id": "repo:be",
-        "capability": "execute",
-        "status": "queued",
-        "title": "Fix API",
-        "claimable": true,
-        "unresolved_dependency_ids": [],
-        "supersedes_task_id": "task_b",
-        "superseded_by_task_id": null
-      },
-      {
-        "id": "task_c",
-        "scope_id": "repo:fe",
-        "capability": "execute",
-        "status": "queued",
-        "title": "Update FE client",
-        "claimable": false,
-        "unresolved_dependency_ids": ["task_d"],
-        "supersedes_task_id": null,
-        "superseded_by_task_id": null
-      }
-    ],
-    "edges": [
-      { "kind": "depends_on", "from_task_id": "task_d", "to_task_id": "task_a", "satisfied": true },
-      { "kind": "depends_on", "from_task_id": "task_c", "to_task_id": "task_d", "satisfied": false },
-      { "kind": "supersedes", "from_task_id": "task_d", "to_task_id": "task_b" }
-    ]
-  }
+	"ok": true,
+	"graph": {
+		"selector": { "kind": "task", "value": "task_c" },
+		"nodes": [
+			{
+				"id": "task_a",
+				"scope_id": "repo:design",
+				"capability": "design",
+				"status": "done",
+				"title": "Finalize API sketch",
+				"claimable": false,
+				"unresolved_dependency_ids": [],
+				"supersedes_task_id": null,
+				"superseded_by_task_id": null
+			},
+			{
+				"id": "task_b",
+				"scope_id": "repo:be",
+				"capability": "execute",
+				"status": "cancelled",
+				"title": "Original API task",
+				"claimable": false,
+				"unresolved_dependency_ids": [],
+				"supersedes_task_id": null,
+				"superseded_by_task_id": "task_d"
+			},
+			{
+				"id": "task_d",
+				"scope_id": "repo:be",
+				"capability": "execute",
+				"status": "queued",
+				"title": "Fix API",
+				"claimable": true,
+				"unresolved_dependency_ids": [],
+				"supersedes_task_id": "task_b",
+				"superseded_by_task_id": null
+			},
+			{
+				"id": "task_c",
+				"scope_id": "repo:fe",
+				"capability": "execute",
+				"status": "queued",
+				"title": "Update FE client",
+				"claimable": false,
+				"unresolved_dependency_ids": ["task_d"],
+				"supersedes_task_id": null,
+				"superseded_by_task_id": null
+			}
+		],
+		"edges": [
+			{ "kind": "depends_on", "from_task_id": "task_d", "to_task_id": "task_a", "satisfied": true },
+			{
+				"kind": "depends_on",
+				"from_task_id": "task_c",
+				"to_task_id": "task_d",
+				"satisfied": false
+			},
+			{ "kind": "supersedes", "from_task_id": "task_d", "to_task_id": "task_b" }
+		]
+	}
 }
 ```
 
@@ -413,11 +418,11 @@ This is the core “next available task” rule.
 
 New/changed event contracts:
 
-| Event | `task_id` | Payload |
-| ----- | --------- | ------- |
-| `task.created` | new task id | existing fields plus `depends_on_task_ids: string[]` and optional `supersedes_task_id` |
-| `task.superseded` | old task id | `new_task_id`, `reason`, `retargeted_dependent_task_ids` |
-| `task.cancelled` | old task id | `reason`, `superseded_by_task_id` |
+| Event             | `task_id`   | Payload                                                                                |
+| ----------------- | ----------- | -------------------------------------------------------------------------------------- |
+| `task.created`    | new task id | existing fields plus `depends_on_task_ids: string[]` and optional `supersedes_task_id` |
+| `task.superseded` | old task id | `new_task_id`, `reason`, `retargeted_dependent_task_ids`                               |
+| `task.cancelled`  | old task id | `reason`, `superseded_by_task_id`                                                      |
 
 ## 6. Implementation Phases
 
@@ -451,22 +456,21 @@ New/changed event contracts:
 
 ## 7. Code Locations
 
-| File | Change |
-| ---- | ------ |
-| `packages/cli/src/db/migrate.ts` | Modify: add `task_dependencies` and `task_supersessions` to initial schema |
-| `packages/cli/src/db/rows.ts` | Modify: add relationship row decoders |
-| `packages/cli/src/domain/task-graph.ts` | New: graph queries, summaries, cycle detection, claimability helpers |
-| `packages/cli/src/commands/enqueue.ts` | Modify: repeated `--depends-on`, dependency validation, event payload update |
-| `packages/cli/src/commands/claim.ts` | Modify: dependency-aware claim query |
-| `packages/cli/src/commands/inspect.ts` | Modify: relationship-aware task inspect; add graph inspect |
-| `packages/cli/src/commands/briefing.ts` | Modify: blocked vs ready sections and blocker rendering |
-| `packages/cli/src/commands/supersede.ts` | New: replacement flow |
-| `packages/cli/src/cli/commands.ts` | Modify: wire new flags and subcommands into `--help` |
-| `packages/cli/src/commands/*.test.ts` | Modify/add: unit coverage for new command contracts |
-| `packages/cli/test/*.integration.test.ts` | Modify/add: end-to-end SQLite coverage for DAG + supersession flows |
-| `packages/cli/README.md` | Modify: document new command surface and semantics |
+| File                                      | Change                                                                       |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `packages/cli/src/db/migrate.ts`          | Modify: add `task_dependencies` and `task_supersessions` to initial schema   |
+| `packages/cli/src/db/rows.ts`             | Modify: add relationship row decoders                                        |
+| `packages/cli/src/domain/task-graph.ts`   | New: graph queries, summaries, cycle detection, claimability helpers         |
+| `packages/cli/src/commands/enqueue.ts`    | Modify: repeated `--depends-on`, dependency validation, event payload update |
+| `packages/cli/src/commands/claim.ts`      | Modify: dependency-aware claim query                                         |
+| `packages/cli/src/commands/inspect.ts`    | Modify: relationship-aware task inspect; add graph inspect                   |
+| `packages/cli/src/commands/briefing.ts`   | Modify: blocked vs ready sections and blocker rendering                      |
+| `packages/cli/src/commands/supersede.ts`  | New: replacement flow                                                        |
+| `packages/cli/src/cli/commands.ts`        | Modify: wire new flags and subcommands into `--help`                         |
+| `packages/cli/src/commands/*.test.ts`     | Modify/add: unit coverage for new command contracts                          |
+| `packages/cli/test/*.integration.test.ts` | Modify/add: end-to-end SQLite coverage for DAG + supersession flows          |
+| `packages/cli/README.md`                  | Modify: document new command surface and semantics                           |
 
 ## 8. Open Questions
 
 - Do we need an explicit future `pithos dependency waive` command for human-approved unblocking, or is `supersede` enough until a real workflow demands waivers?
-

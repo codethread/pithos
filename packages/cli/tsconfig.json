@@ -1,14 +1,14 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "."
-  },
-  "include": [
-    "src/**/*",
-    "bin/**/*",
-    "test/**/*",
-    "vitest.config.ts",
-    "vitest.unit.config.ts",
-    "vitest.integration.config.ts"
-  ]
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": "."
+	},
+	"include": [
+		"src/**/*",
+		"bin/**/*",
+		"test/**/*",
+		"vitest.config.ts",
+		"vitest.unit.config.ts",
+		"vitest.integration.config.ts"
+	]
 }

@@ -31,16 +31,16 @@ Read these once; this workflow does not restate them.
 
 ## Variables
 
-| Variable        | Value                                               | Notes                                                              |
-| --------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
-| REPO_ROOT       | `~/dev/pithos`                                      | repo under test                                                    |
-| DEFAULT_DB      | `~/.pandora/pithos.sqlite`                          | preferred DB on this machine unless explicitly testing propagation |
-| SCOPE_KIND      | `repo`                                              | scope under test                                                   |
-| REQUEST_TITLE   | `Write hello script then update to hello pandora via delegated path` | seed task title                                      |
-| REQUEST_TARGET  | `scripts/hello.sh`                                                     | expected created file                                |
-| VERIFY_CMD      | `test "$(bash scripts/hello.sh)" = "hello pandora"`                 | expected final verification command                  |
-| TMP_DB_GLOB     | `/tmp/pithos-e2e.*`                                 | temp DB scratch path from prior runs                               |
-| TEST_SESSION_RG | `pithos-(pandora\|toil\|envy)-`                   | tmux test session matcher                                          |
+| Variable        | Value                                                                | Notes                                                              |
+| --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| REPO_ROOT       | `~/dev/pithos`                                                       | repo under test                                                    |
+| DEFAULT_DB      | `~/.pandora/pithos.sqlite`                                           | preferred DB on this machine unless explicitly testing propagation |
+| SCOPE_KIND      | `repo`                                                               | scope under test                                                   |
+| REQUEST_TITLE   | `Write hello script then update to hello pandora via delegated path` | seed task title                                                    |
+| REQUEST_TARGET  | `scripts/hello.sh`                                                   | expected created file                                              |
+| VERIFY_CMD      | `test "$(bash scripts/hello.sh)" = "hello pandora"`                  | expected final verification command                                |
+| TMP_DB_GLOB     | `/tmp/pithos-e2e.*`                                                  | temp DB scratch path from prior runs                               |
+| TEST_SESSION_RG | `pithos-(pandora\|toil\|envy)-`                                      | tmux test session matcher                                          |
 
 ## Prerequisites
 

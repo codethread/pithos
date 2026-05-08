@@ -2,13 +2,13 @@
 
 ## Control-plane layers
 
-| Term               | Definition                                                                                               | Aliases to avoid                                |
-| ------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Term               | Definition                                                                                                | Aliases to avoid                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | **Pithos**         | The durable state system that owns tasks, runs, claims, fencing, artifacts, events, and graph invariants. | DB layer, queue CLI, state CLI                  |
-| **Spawner**        | The harness launcher that renders agent prompts and starts AFK processes or HITL tmux sessions.          | Supervisor, control plane, daemon, launcher CLI |
-| **pdx**            | The local supervisor that reconciles Pithos state with live processes and tmux sessions.                 | pithosd, daemon, spawner, control-plane CLI     |
-| **Registry**       | The in-memory pdx view of currently launching, live, or terminating supervised agents.                   | State store, persisted registry, run table      |
-| **Supervisor log** | Structured JSONL records of pdx decisions and OS/tmux outcomes.                                          | Daemon log, unstructured log, transcript        |
+| **Spawner**        | The harness launcher that renders agent prompts and starts AFK processes or HITL tmux sessions.           | Supervisor, control plane, daemon, launcher CLI |
+| **pdx**            | The local supervisor that reconciles Pithos state with live processes and tmux sessions.                  | pithosd, daemon, spawner, control-plane CLI     |
+| **Registry**       | The in-memory pdx view of currently launching, live, or terminating supervised agents.                    | State store, persisted registry, run table      |
+| **Supervisor log** | Structured JSONL records of pdx decisions and OS/tmux outcomes.                                           | Daemon log, unstructured log, transcript        |
 
 ## Work graph
 
@@ -29,12 +29,12 @@
 
 Run terms apply to an agent invocation, not to queue work itself.
 
-| Term              | Definition                                                                                                      | Aliases to avoid                   |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| **Run**           | A durable Pithos record for one agent invocation or long-lived session.                                         | Session, process, claim            |
-| **Cleanup**       | The Pithos run transition pdx calls after confirmed natural run/session death; it ends the run and may requeue or dead-letter a held task. | Sweep, reclaim, interrupt, run end, finish |
-| **Interrupt**     | The Pithos run transition pdx calls when a live run is deliberately stopped. If the run has a held task, that task becomes `failed` and its claim is invalidated; if no task is held, only the run is terminalized. | Cancel, cleanup, reclaim, finish |
-| **Timed out run** | A terminal run state for a non-Pandora no-claim session that exceeded the bootstrap timeout without holding a task. | Failed task, dead-letter, cleanup |
+| Term              | Definition                                                                                                                                                                                                          | Aliases to avoid                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| **Run**           | A durable Pithos record for one agent invocation or long-lived session.                                                                                                                                             | Session, process, claim                    |
+| **Cleanup**       | The Pithos run transition pdx calls after confirmed natural run/session death; it ends the run and may requeue or dead-letter a held task.                                                                          | Sweep, reclaim, interrupt, run end, finish |
+| **Interrupt**     | The Pithos run transition pdx calls when a live run is deliberately stopped. If the run has a held task, that task becomes `failed` and its claim is invalidated; if no task is held, only the run is terminalized. | Cancel, cleanup, reclaim, finish           |
+| **Timed out run** | A terminal run state for a non-Pandora no-claim session that exceeded the bootstrap timeout without holding a task.                                                                                                 | Failed task, dead-letter, cleanup          |
 
 ## Claims and fencing
 
@@ -51,30 +51,30 @@ Claim terms describe the relationship between a run and a task.
 
 Task transitions apply to queue work, not to the live agent run.
 
-| Term            | Definition                                                                                                                                 | Aliases to avoid           |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| Term            | Definition                                                                                                                                                                    | Aliases to avoid                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
 | **Cancel**      | The Pithos task transition that intentionally abandons a task that is not currently held by a live run. Use it for queued/failed/dead-lettered work that should not continue. | Interrupt, fail, delete, cleanup |
-| **Dead-letter** | A terminal task state reached when retry attempts are exhausted.                                                                           | Failed, cancelled, blocked |
+| **Dead-letter** | A terminal task state reached when retry attempts are exhausted.                                                                                                              | Failed, cancelled, blocked       |
 
 ## Agents, harnesses, and supervision modes
 
-| Term                      | Definition                                                                               | Aliases to avoid                                      |
-| ------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| **Agent kind**            | A built-in role name that determines claim authorization and template selection.         | Harness, process, worker type, capability             |
-| **Agent run**             | One live or historical invocation of an agent kind, represented by a Pithos run row.     | Agent kind, harness session, process                  |
-| **Harness**               | The underlying AI runtime used to execute an agent prompt, such as Claude or Pi.         | Agent, pdx, spawner, tmux                             |
-| **Harness session**       | The runtime session created by a harness, identified by a harness session id and log.    | Run, tmux session, agent kind                         |
-| **Control plane**         | The supervision system that observes durable work state and owns live execution resources. | Harness, agent, spawner                             |
-| **Control-plane backend** | The replaceable local execution substrate used by pdx to host interactive agents.        | Harness, agent runtime                               |
-| **Pandora**               | The long-lived HITL agent that claims escalation tasks and works with Adam on decisions. | Coordinator if it implies non-claiming, inbox watcher |
-| **Toil**                  | The agent kind that claims triage tasks and decomposes or routes work.                   | Planner, dispatcher                                   |
-| **Greed**                 | The agent kind that claims design tasks and produces design briefs.                      | Designer, researcher                                  |
-| **War**                   | The agent kind that claims execute tasks and performs repo/worktree execution.           | Worker, implementer, Envy                             |
-| **AFK mode**              | A supervised headless harness invocation whose process exit is the lifecycle signal.     | Headless worker, subprocess mode                      |
-| **HITL mode**             | A supervised tmux-backed harness invocation that may wait for Adam.                      | Interactive mode, tmux mode                           |
+| Term                      | Definition                                                                                                                            | Aliases to avoid                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Agent kind**            | A built-in role name that determines claim authorization and template selection.                                                      | Harness, process, worker type, capability             |
+| **Agent run**             | One live or historical invocation of an agent kind, represented by a Pithos run row.                                                  | Agent kind, harness session, process                  |
+| **Harness**               | The underlying AI runtime used to execute an agent prompt, such as Claude or Pi.                                                      | Agent, pdx, spawner, tmux                             |
+| **Harness session**       | The runtime session created by a harness, identified by a harness session id and log.                                                 | Run, tmux session, agent kind                         |
+| **Control plane**         | The supervision system that observes durable work state and owns live execution resources.                                            | Harness, agent, spawner                               |
+| **Control-plane backend** | The replaceable local execution substrate used by pdx to host interactive agents.                                                     | Harness, agent runtime                                |
+| **Pandora**               | The long-lived HITL agent that claims escalation tasks and works with Adam on decisions.                                              | Coordinator if it implies non-claiming, inbox watcher |
+| **Toil**                  | The agent kind that claims triage tasks and decomposes or routes work.                                                                | Planner, dispatcher                                   |
+| **Greed**                 | The agent kind that claims design tasks and produces design briefs.                                                                   | Designer, researcher                                  |
+| **War**                   | The agent kind that claims execute tasks and performs repo/worktree execution.                                                        | Worker, implementer, Envy                             |
+| **AFK mode**              | A supervised headless harness invocation whose process exit is the lifecycle signal.                                                  | Headless worker, subprocess mode                      |
+| **HITL mode**             | A supervised tmux-backed harness invocation that may wait for Adam.                                                                   | Interactive mode, tmux mode                           |
 | **No-claim session**      | A live non-Pandora spawned run whose `runs.task_id` is still null before its initial claim; Pandora is excluded because she may idle. | Zombie if HITL waiting is possible, idle claim        |
-| **Same-run resurrection** | Recreating a dead process/tmux session with the same run id and claim.                   | Restart, resume                                       |
-| **Fresh run**             | A new run spawned after the prior run was cleaned up.                                    | Restart if it implies same-run resurrection           |
+| **Same-run resurrection** | Recreating a dead process/tmux session with the same run id and claim.                                                                | Restart, resume                                       |
+| **Fresh run**             | A new run spawned after the prior run was cleaned up.                                                                                 | Restart if it implies same-run resurrection           |
 
 ## Operator actions and naming
 
@@ -85,7 +85,7 @@ Task transitions apply to queue work, not to the live agent run.
 | **Kill**          | A pdx operator action that interrupts Pithos state first and then kills the live process or tmux session. | Restart, cleanup, cancel                                   |
 | **Wakeup**        | A content-free `tmux send-keys` marker to live Pandora that claimable escalation work exists.             | Nudge if it implies task body injection, message injection |
 | **Logical name**  | A friendly pdx-owned name for a supervised entry, using the `pdx--...` convention.                        | Session id, run id                                         |
-| **tmux target**   | The current control-plane backend address for a HITL agent.                                                | Harness session, logical name if used for AFK too          |
+| **tmux target**   | The current control-plane backend address for a HITL agent.                                               | Harness session, logical name if used for AFK too          |
 
 ## Relationships
 

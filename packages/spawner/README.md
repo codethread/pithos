@@ -47,36 +47,36 @@ templates/
 
 ```json
 {
-  "launchers": {
-    "local_agent_tmux": {
-      "kind": "tmux",
-      "harness": "pandora-spawn",
-      "commands": {
-        "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
-        "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
-        "nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
-        "kill": "pandora-spawn kill --target {{target}}",
-        "tty_status": "pandora-spawn tty-status --target {{target}}"
-      },
-      "meta": { "status_source": "session_jsonl_auto", "tty_provider": "tmux" }
-    }
-  },
-  "agents": [
-    {
-      "agent": "envy",
-      "harness": {
-        "kind": "claude",
-        "model": "sonnet",
-        "tools": ["Bash", "Read", "Edit", "Write", "Grep", "Glob", "LS"],
-        "system_prompt_mode": "replace"
-      },
-      "capability": "implement",
-      "includes": ["_common.md"],
-      "system_prompt": "envy.md.tmpl",
-      "launcher": "local_agent_tmux",
-      "inject_meta": false
-    }
-  ]
+	"launchers": {
+		"local_agent_tmux": {
+			"kind": "tmux",
+			"harness": "pandora-spawn",
+			"commands": {
+				"spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
+				"status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
+				"nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
+				"kill": "pandora-spawn kill --target {{target}}",
+				"tty_status": "pandora-spawn tty-status --target {{target}}"
+			},
+			"meta": { "status_source": "session_jsonl_auto", "tty_provider": "tmux" }
+		}
+	},
+	"agents": [
+		{
+			"agent": "envy",
+			"harness": {
+				"kind": "claude",
+				"model": "sonnet",
+				"tools": ["Bash", "Read", "Edit", "Write", "Grep", "Glob", "LS"],
+				"system_prompt_mode": "replace"
+			},
+			"capability": "implement",
+			"includes": ["_common.md"],
+			"system_prompt": "envy.md.tmpl",
+			"launcher": "local_agent_tmux",
+			"inject_meta": false
+		}
+	]
 }
 ```
 

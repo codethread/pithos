@@ -1,15 +1,15 @@
-import { HashMap, Layer, List, Logger, LogLevel } from "effect"
+import { HashMap, Layer, List, Logger, LogLevel } from "effect";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface LogEntry {
-  readonly level: string
-  readonly message: string
-  readonly date: Date
-  readonly spans: readonly string[]
-  readonly annotations: Readonly<Record<string, string>>
+	readonly level: string;
+	readonly message: string;
+	readonly date: Date;
+	readonly spans: readonly string[];
+	readonly annotations: Readonly<Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -21,27 +21,27 @@ export interface LogEntry {
  * Defaults to None (fully silent) so diagnostic output is strictly opt-in.
  */
 const getEnvLogLevel = (): LogLevel.LogLevel => {
-  const raw = process.env.PITHOS_LOG_LEVEL?.toLowerCase()
-  switch (raw) {
-    case "trace":
-      return LogLevel.Trace
-    case "debug":
-      return LogLevel.Debug
-    case "info":
-      return LogLevel.Info
-    case "warning":
-    case "warn":
-      return LogLevel.Warning
-    case "error":
-      return LogLevel.Error
-    case "fatal":
-      return LogLevel.Fatal
-    case "none":
-      return LogLevel.None
-    default:
-      return LogLevel.None // silent by default; opt in with PITHOS_LOG_LEVEL=debug|info|warning|error
-  }
-}
+	const raw = process.env.PITHOS_LOG_LEVEL?.toLowerCase();
+	switch (raw) {
+		case "trace":
+			return LogLevel.Trace;
+		case "debug":
+			return LogLevel.Debug;
+		case "info":
+			return LogLevel.Info;
+		case "warning":
+		case "warn":
+			return LogLevel.Warning;
+		case "error":
+			return LogLevel.Error;
+		case "fatal":
+			return LogLevel.Fatal;
+		case "none":
+			return LogLevel.None;
+		default:
+			return LogLevel.None; // silent by default; opt in with PITHOS_LOG_LEVEL=debug|info|warning|error
+	}
+};
 
 /**
  * A structured JSON logger that writes to process.stderr, keeping diagnostics
@@ -56,28 +56,28 @@ const getEnvLogLevel = (): LogLevel.LogLevel => {
  *   ctx     – annotation key/value pairs, omitted when empty
  */
 const pithosStderrLogger = Logger.make<unknown, void>(
-  ({ logLevel, message, date, spans, annotations }) => {
-    const entry: Record<string, unknown> = {
-      ts: date.toISOString(),
-      level: logLevel.label,
-      msg: String(message),
-    }
+	({ logLevel, message, date, spans, annotations }) => {
+		const entry: Record<string, unknown> = {
+			ts: date.toISOString(),
+			level: logLevel.label,
+			msg: String(message),
+		};
 
-    if (List.isCons(spans)) {
-      const labels: string[] = []
-      for (const s of spans) labels.push(s.label)
-      entry.spans = labels
-    }
+		if (List.isCons(spans)) {
+			const labels: string[] = [];
+			for (const s of spans) labels.push(s.label);
+			entry.spans = labels;
+		}
 
-    if (HashMap.size(annotations) > 0) {
-      const ctx: Record<string, string> = {}
-      for (const [k, v] of annotations) ctx[k] = String(v)
-      entry.ctx = ctx
-    }
+		if (HashMap.size(annotations) > 0) {
+			const ctx: Record<string, string> = {};
+			for (const [k, v] of annotations) ctx[k] = String(v);
+			entry.ctx = ctx;
+		}
 
-    process.stderr.write(JSON.stringify(entry) + "\n")
-  },
-)
+		process.stderr.write(JSON.stringify(entry) + "\n");
+	},
+);
 
 // ---------------------------------------------------------------------------
 // Live layer
@@ -95,9 +95,9 @@ const pithosStderrLogger = Logger.make<unknown, void>(
  * stay on a separate channel from user-visible command output (OutputService).
  */
 export const LoggerLive: Layer.Layer<never> = Layer.merge(
-  Logger.replace(Logger.defaultLogger, pithosStderrLogger),
-  Logger.minimumLogLevel(getEnvLogLevel()),
-)
+	Logger.replace(Logger.defaultLogger, pithosStderrLogger),
+	Logger.minimumLogLevel(getEnvLogLevel()),
+);
 
 // ---------------------------------------------------------------------------
 // Silent layer — for tests that don't care about diagnostics
@@ -113,20 +113,17 @@ export const LoggerLive: Layer.Layer<never> = Layer.merge(
  * their loggers additively, and Logger.none simply produces no output while
  * the capture logger records entries.
  */
-export const LoggerSilent: Layer.Layer<never> = Logger.replace(
-  Logger.defaultLogger,
-  Logger.none,
-)
+export const LoggerSilent: Layer.Layer<never> = Logger.replace(Logger.defaultLogger, Logger.none);
 
 // ---------------------------------------------------------------------------
 // Capture layer — for tests that assert on diagnostic messages
 // ---------------------------------------------------------------------------
 
 export interface LogCapture {
-  /** Provide this layer to the effect under test. */
-  readonly layer: Layer.Layer<never>
-  /** Returns all log entries emitted so far. */
-  readonly entries: () => readonly LogEntry[]
+	/** Provide this layer to the effect under test. */
+	readonly layer: Layer.Layer<never>;
+	/** Returns all log entries emitted so far. */
+	readonly entries: () => readonly LogEntry[];
 }
 
 /**
@@ -141,38 +138,36 @@ export interface LogCapture {
  * expect(cap.entries()).toContainEqual(expect.objectContaining({ level: "DEBUG" }))
  * ```
  */
-export const makeLogCapture = (
-  minLevel: LogLevel.LogLevel = LogLevel.Trace,
-): LogCapture => {
-  const entries: LogEntry[] = []
+export const makeLogCapture = (minLevel: LogLevel.LogLevel = LogLevel.Trace): LogCapture => {
+	const entries: LogEntry[] = [];
 
-  const captureLogger = Logger.make<unknown, void>(
-    ({ logLevel, message, date, spans, annotations }) => {
-      const spanLabels: string[] = []
-      if (List.isCons(spans)) {
-        for (const s of spans) spanLabels.push(s.label)
-      }
+	const captureLogger = Logger.make<unknown, void>(
+		({ logLevel, message, date, spans, annotations }) => {
+			const spanLabels: string[] = [];
+			if (List.isCons(spans)) {
+				for (const s of spans) spanLabels.push(s.label);
+			}
 
-      const anns: Record<string, string> = {}
-      if (HashMap.size(annotations) > 0) {
-        for (const [k, v] of annotations) anns[k] = String(v)
-      }
+			const anns: Record<string, string> = {};
+			if (HashMap.size(annotations) > 0) {
+				for (const [k, v] of annotations) anns[k] = String(v);
+			}
 
-      entries.push({
-        level: logLevel.label,
-        message: String(message),
-        date,
-        spans: spanLabels,
-        annotations: anns,
-      })
-    },
-  )
+			entries.push({
+				level: logLevel.label,
+				message: String(message),
+				date,
+				spans: spanLabels,
+				annotations: anns,
+			});
+		},
+	);
 
-  return {
-    layer: Layer.merge(
-      Logger.replace(Logger.defaultLogger, captureLogger),
-      Logger.minimumLogLevel(minLevel),
-    ),
-    entries: () => entries,
-  }
-}
+	return {
+		layer: Layer.merge(
+			Logger.replace(Logger.defaultLogger, captureLogger),
+			Logger.minimumLogLevel(minLevel),
+		),
+		entries: () => entries,
+	};
+};

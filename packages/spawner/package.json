@@ -1,32 +1,32 @@
 {
-  "name": "@pithos/spawner",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "keywords": [
-    "pi-package"
-  ],
-  "pi": {
-    "extensions": [
-      "./pi-extension"
-    ]
-  },
-  "bin": {
-    "pandora-spawn": "./bin/pandora-spawn"
-  },
-  "scripts": {
-    "clean": "rimraf dist bin/pandora-spawn bin/pandora-spawn-dev *.tsbuildinfo",
-    "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --config vitest.config.ts",
-    "test:watch": "vitest --config vitest.config.ts",
-    "build": "node scripts/build.mjs",
-    "start": "node scripts/build.mjs --dev --run --"
-  },
-  "dependencies": {
-    "@effect/cli": "0.75.1",
-    "@effect/platform": "^0.96.1",
-    "@effect/platform-node": "^0.106.0",
-    "effect": "^3.21.2"
-  }
+	"name": "@pithos/spawner",
+	"version": "0.1.0",
+	"private": true,
+	"keywords": [
+		"pi-package"
+	],
+	"bin": {
+		"pandora-spawn": "./bin/pandora-spawn"
+	},
+	"type": "module",
+	"scripts": {
+		"clean": "rimraf dist bin/pandora-spawn bin/pandora-spawn-dev *.tsbuildinfo",
+		"lint": "eslint .",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"test": "vitest run --config vitest.config.ts",
+		"test:watch": "vitest --config vitest.config.ts",
+		"build": "node scripts/build.mjs",
+		"start": "node scripts/build.mjs --dev --run --"
+	},
+	"dependencies": {
+		"@effect/cli": "0.75.1",
+		"@effect/platform": "^0.96.1",
+		"@effect/platform-node": "^0.106.0",
+		"effect": "^3.21.2"
+	},
+	"pi": {
+		"extensions": [
+			"./pi-extension"
+		]
+	}
 }

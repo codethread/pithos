@@ -1,4 +1,4 @@
-import { Context, type Effect } from "effect"
+import { Context, type Effect } from "effect";
 
 /**
  * `OutputService` — centralises all user-visible CLI output.
@@ -9,11 +9,11 @@ import { Context, type Effect } from "effect"
  * assert on output without noisy global interception.
  */
 export class OutputService extends Context.Tag("@pithos/OutputService")<
-  OutputService,
-  {
-    /** Write a line to stdout (no trailing newline added by caller). */
-    readonly print: (line: string) => Effect.Effect<void>
-    /** Write a line to stderr (no trailing newline added by caller). */
-    readonly printError: (line: string) => Effect.Effect<void>
-  }
+	OutputService,
+	{
+		/** Write a line to stdout (no trailing newline added by caller). */
+		readonly print: (line: string) => Effect.Effect<void>;
+		/** Write a line to stderr (no trailing newline added by caller). */
+		readonly printError: (line: string) => Effect.Effect<void>;
+	}
 >() {}

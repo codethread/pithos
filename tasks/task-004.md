@@ -22,12 +22,12 @@ Input shape:
 
 ```ts
 {
-  agent: AgentKind
-  mode: "afk" | "hitl"
-  runId: string
-  sessionId: string
-  scopeId: string
-  cwd: string
+	agent: AgentKind;
+	mode: "afk" | "hitl";
+	runId: string;
+	sessionId: string;
+	scopeId: string;
+	cwd: string;
 }
 ```
 
@@ -37,12 +37,12 @@ Manifest schema (per spec §9, locked):
 
 ```json
 {
-  "agent": "war",
-  "mode": "afk",
-  "claims": ["execute"],
-  "enqueues": ["escalate"],
-  "harness": { "kind": "claude" },
-  "template": "war.md.tmpl"
+	"agent": "war",
+	"mode": "afk",
+	"claims": ["execute"],
+	"enqueues": ["escalate"],
+	"harness": { "kind": "claude" },
+	"template": "war.md.tmpl"
 }
 ```
 

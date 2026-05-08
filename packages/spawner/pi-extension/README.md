@@ -39,7 +39,7 @@ Project-local via `.pi/settings.json`:
 
 ```json
 {
-  "packages": ["../packages/spawner"]
+	"packages": ["../packages/spawner"]
 }
 ```
 

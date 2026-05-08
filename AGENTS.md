@@ -32,8 +32,8 @@ Errors are tagged and carry a machine-readable code, not free-form strings:
 
 ```ts
 export class PithosError extends Data.TaggedError("PithosError")<{
-  readonly code: ErrorCode;
-  readonly message: string;
+	readonly code: ErrorCode;
+	readonly message: string;
 }> {}
 ```
 
@@ -45,17 +45,17 @@ Validate fencing/preconditions, then write inside a transaction, and if a race i
 
 ```ts
 if (taskRows.length === 0) {
-  // pre-check passed but UPDATE found no row: concurrent reclaim invalidated
-  // the token. Throw to roll back the whole transaction.
-  return (
-    yield *
-    Effect.fail(
-      new PithosError({
-        code: "STALE_TOKEN_RACE",
-        message: "concurrent reclaim invalidated the token",
-      }),
-    )
-  );
+	// pre-check passed but UPDATE found no row: concurrent reclaim invalidated
+	// the token. Throw to roll back the whole transaction.
+	return (
+		yield *
+		Effect.fail(
+			new PithosError({
+				code: "STALE_TOKEN_RACE",
+				message: "concurrent reclaim invalidated the token",
+			}),
+		)
+	);
 }
 ```
 
@@ -67,16 +67,16 @@ Anything crossing IO (stdin, CLI args, DB rows, files, subprocess output) gets p
 const ScopeKindSchema = Schema.Literal("global", "repo", "worktree");
 
 const kind =
-  yield *
-  Schema.decodeUnknown(ScopeKindSchema)(rawKind).pipe(
-    Effect.mapError(
-      () =>
-        new PithosError({
-          code: "VALIDATION_ERROR",
-          message: `Invalid --kind value: '${rawKind}'. Valid values: global, repo, worktree`,
-        }),
-    ),
-  );
+	yield *
+	Schema.decodeUnknown(ScopeKindSchema)(rawKind).pipe(
+		Effect.mapError(
+			() =>
+				new PithosError({
+					code: "VALIDATION_ERROR",
+					message: `Invalid --kind value: '${rawKind}'. Valid values: global, repo, worktree`,
+				}),
+		),
+	);
 ```
 
 ### Discriminated unions over optional bags
@@ -85,10 +85,10 @@ If two states cannot coexist, the type must say so. Tagged variants, not wide in
 
 ```ts
 export type ParsedArgs =
-  | { command: "version" }
-  | { command: "help"; topic?: string }
-  | { command: "init" }
-  | { command: "scope:upsert"; kind: ScopeKind; path: string | undefined };
+	| { command: "version" }
+	| { command: "help"; topic?: string }
+	| { command: "init" }
+	| { command: "scope:upsert"; kind: ScopeKind; path: string | undefined };
 // ...
 ```
 
@@ -98,10 +98,7 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 
 - **Structured logs only.** Use `Effect.log*` with `Effect.annotateLogs` for context (ids, inputs, outcomes). No `console.log`, no bare strings.
   ```ts
-  yield *
-    Effect.logDebug("task completed").pipe(
-      Effect.annotateLogs({ taskId, runId }),
-    );
+  yield * Effect.logDebug("task completed").pipe(Effect.annotateLogs({ taskId, runId }));
   ```
   The logger emits JSON to stderr with span labels, level, timestamp, and annotations.
 - **Wrap non-trivial units of work in `Effect.withSpan`.** Spans give the causal tree; logs alone are flat. Span labels appear in every log line emitted inside the span.

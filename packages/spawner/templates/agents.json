@@ -1,135 +1,92 @@
 {
-  "launchers": {
-    "local_agent_tmux": {
-      "kind": "tmux",
-      "harness": "pandora-spawn",
-      "commands": {
-        "spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
-        "status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
-        "nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
-        "kill": "pandora-spawn kill --target {{target}}",
-        "tty_status": "pandora-spawn tty-status --target {{target}}"
-      },
-      "meta": {
-        "status_source": "session_jsonl_auto",
-        "tty_provider": "tmux",
-        "target_format": "pithos-<agent>-<session_id_first_8_chars>",
-        "debug_rule": "Use status first. Use tty_status only if status is missing, stale, or debugging harness/TTY issues. The --target for nudge/kill/tty_status is the tmux_session field returned by spawn, derivable from session_id via target_format."
-      }
-    }
-  },
-  "agents": [
-    {
-      "agent": "pandora",
-      "harness": {
-        "kind": "pi",
-        "model": "deepseek-v4-pro",
-        "tools": [
-          "bash",
-          "read",
-          "edit",
-          "write",
-          "grep",
-          "find",
-          "ls"
-        ],
-        "system_prompt_mode": "replace"
-      },
-      "cwd": "~/.pandora",
-      "capability": "orchestrate",
-      "includes": [
-        "_common.md"
-      ],
-      "system_prompt": "pandora.md.tmpl",
-      "launcher": "local_agent_tmux",
-      "inject_meta": true
-    },
-    {
-      "agent": "envy",
-      "harness": {
-        "kind": "pi",
-        "model": "deepseek-v4-pro",
-        "tools": [
-          "bash",
-          "read"
-        ],
-        "system_prompt_mode": "replace"
-      },
-      "capability": "implement",
-      "includes": [
-        "_common.md"
-      ],
-      "system_prompt": "envy.md.tmpl",
-      "launcher": "local_agent_tmux",
-      "inject_meta": false
-    },
-    {
-      "agent": "toil",
-      "harness": {
-        "kind": "pi",
-        "model": "deepseek-v4-pro",
-        "tools": [
-          "bash",
-          "read",
-          "edit",
-          "write",
-          "grep",
-          "find",
-          "ls"
-        ],
-        "system_prompt_mode": "append"
-      },
-      "capability": "triage",
-      "includes": [
-        "_common.md"
-      ],
-      "system_prompt": "toil.md.tmpl",
-      "launcher": "local_agent_tmux",
-      "inject_meta": false
-    },
-    {
-      "agent": "greed",
-      "harness": {
-        "kind": "pi",
-        "model": "deepseek-v4-pro",
-        "tools": [
-          "bash",
-          "read",
-          "edit",
-          "write",
-          "grep",
-          "find",
-          "ls"
-        ],
-        "system_prompt_mode": "replace"
-      },
-      "capability": "design",
-      "includes": [
-        "_common.md"
-      ],
-      "system_prompt": "greed.md.tmpl",
-      "launcher": "local_agent_tmux",
-      "inject_meta": false
-    },
-    {
-      "agent": "worker",
-      "harness": {
-        "kind": "pi",
-        "model": "deepseek-v4-pro",
-        "tools": [
-          "bash",
-          "read",
-          "edit",
-          "write",
-          "grep",
-          "find",
-          "ls"
-        ],
-        "system_prompt_mode": "append"
-      },
-      "system_prompt": "worker.md.tmpl",
-      "launcher": "local_agent_tmux",
-      "inject_meta": false
-    }
-  ]
+	"launchers": {
+		"local_agent_tmux": {
+			"kind": "tmux",
+			"harness": "pandora-spawn",
+			"commands": {
+				"spawn": "pandora-spawn --agent {{agent}} --scope {{scope_id}} --cwd {{cwd}}",
+				"status": "pandora-spawn status --session-id {{session_id}} --lines {{lines}}",
+				"nudge": "pandora-spawn nudge --target {{target}} --message {{message}}",
+				"kill": "pandora-spawn kill --target {{target}}",
+				"tty_status": "pandora-spawn tty-status --target {{target}}"
+			},
+			"meta": {
+				"status_source": "session_jsonl_auto",
+				"tty_provider": "tmux",
+				"target_format": "pithos-<agent>-<session_id_first_8_chars>",
+				"debug_rule": "Use status first. Use tty_status only if status is missing, stale, or debugging harness/TTY issues. The --target for nudge/kill/tty_status is the tmux_session field returned by spawn, derivable from session_id via target_format."
+			}
+		}
+	},
+	"agents": [
+		{
+			"agent": "pandora",
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"tools": ["bash", "read", "edit", "write", "grep", "find", "ls"],
+				"system_prompt_mode": "replace"
+			},
+			"cwd": "~/.pandora",
+			"capability": "orchestrate",
+			"includes": ["_common.md"],
+			"system_prompt": "pandora.md.tmpl",
+			"launcher": "local_agent_tmux",
+			"inject_meta": true
+		},
+		{
+			"agent": "envy",
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"tools": ["bash", "read"],
+				"system_prompt_mode": "replace"
+			},
+			"capability": "implement",
+			"includes": ["_common.md"],
+			"system_prompt": "envy.md.tmpl",
+			"launcher": "local_agent_tmux",
+			"inject_meta": false
+		},
+		{
+			"agent": "toil",
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"tools": ["bash", "read", "edit", "write", "grep", "find", "ls"],
+				"system_prompt_mode": "append"
+			},
+			"capability": "triage",
+			"includes": ["_common.md"],
+			"system_prompt": "toil.md.tmpl",
+			"launcher": "local_agent_tmux",
+			"inject_meta": false
+		},
+		{
+			"agent": "greed",
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"tools": ["bash", "read", "edit", "write", "grep", "find", "ls"],
+				"system_prompt_mode": "replace"
+			},
+			"capability": "design",
+			"includes": ["_common.md"],
+			"system_prompt": "greed.md.tmpl",
+			"launcher": "local_agent_tmux",
+			"inject_meta": false
+		},
+		{
+			"agent": "worker",
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"tools": ["bash", "read", "edit", "write", "grep", "find", "ls"],
+				"system_prompt_mode": "append"
+			},
+			"system_prompt": "worker.md.tmpl",
+			"launcher": "local_agent_tmux",
+			"inject_meta": false
+		}
+	]
 }

@@ -32,7 +32,20 @@ CLI requirements:
 `run inspect` minimum output:
 
 ```json
-{ "ok": true, "run": { "id": "run_...", "agent": "war", "mode": "afk", "scope_id": "...", "status": "live", "task_id": null, "session_id": "...", "created_at": "...", "updated_at": "..." } }
+{
+	"ok": true,
+	"run": {
+		"id": "run_...",
+		"agent": "war",
+		"mode": "afk",
+		"scope_id": "...",
+		"status": "live",
+		"task_id": null,
+		"session_id": "...",
+		"created_at": "...",
+		"updated_at": "..."
+	}
+}
 ```
 
 ## Test focus

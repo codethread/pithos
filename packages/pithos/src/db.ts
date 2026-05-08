@@ -1,18 +1,25 @@
-import Database from "better-sqlite3"
-import { fail } from "./errors.js"
+import Database from "better-sqlite3";
+import { fail } from "./errors.js";
 
-export type Db = Database.Database
-export type ScopeKind = "global" | "repo" | "worktree"
-export type Mode = "afk" | "hitl"
-export type AgentKind = "pdx" | "pandora" | "toil" | "greed" | "war"
-export type Capability = "triage" | "design" | "execute" | "escalate"
-export type TaskStatus = "queued" | "claimed" | "running" | "done" | "failed" | "dead_letter" | "cancelled"
+export type Db = Database.Database;
+export type ScopeKind = "global" | "repo" | "worktree";
+export type Mode = "afk" | "hitl";
+export type AgentKind = "pdx" | "pandora" | "toil" | "greed" | "war";
+export type Capability = "triage" | "design" | "execute" | "escalate";
+export type TaskStatus =
+	| "queued"
+	| "claimed"
+	| "running"
+	| "done"
+	| "failed"
+	| "dead_letter"
+	| "cancelled";
 
-export const openDb = (path: string): Db => new Database(path)
+export const openDb = (path: string): Db => new Database(path);
 
 export const migrate = (db: Db): void => {
-  db.pragma("foreign_keys = ON")
-  db.exec(`
+	db.pragma("foreign_keys = ON");
+	db.exec(`
 CREATE TABLE IF NOT EXISTS scopes (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('global','repo','worktree')), canonical_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, CHECK ((kind='global' AND canonical_path IS NULL) OR (kind <> 'global')));
 CREATE TABLE IF NOT EXISTS agent_kinds (agent_kind TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS capabilities (capability TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -28,20 +35,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id) WHERE task_i
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_task ON task_dependencies(task_id);
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker ON task_dependencies(depends_on_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_supersessions_new ON task_supersessions(new_task_id);
-`)
-  seed(db)
-}
+`);
+	seed(db);
+};
 
 const seed = (db: Db): void => {
-  db.prepare("INSERT OR IGNORE INTO scopes(id, kind) VALUES ('global','global')").run()
-  for (const agent of ["pdx", "pandora", "toil", "greed", "war"]) db.prepare("INSERT OR IGNORE INTO agent_kinds(agent_kind) VALUES (?)").run(agent)
-  for (const cap of ["triage", "design", "execute", "escalate"]) db.prepare("INSERT OR IGNORE INTO capabilities(capability) VALUES (?)").run(cap)
-  for (const [a, c] of [["pandora","escalate"],["toil","triage"],["greed","design"],["war","execute"]]) db.prepare("INSERT OR IGNORE INTO agent_claims(agent_kind, capability) VALUES (?,?)").run(a, c)
-  for (const [a, caps] of Object.entries({ pdx:["escalate"], pandora:["triage","design","escalate"], toil:["triage","design","execute","escalate"], greed:["triage","design","escalate"], war:["escalate"] })) for (const c of caps) db.prepare("INSERT OR IGNORE INTO agent_enqueues(agent_kind, capability) VALUES (?,?)").run(a, c)
-}
+	db.prepare("INSERT OR IGNORE INTO scopes(id, kind) VALUES ('global','global')").run();
+	for (const agent of ["pdx", "pandora", "toil", "greed", "war"])
+		db.prepare("INSERT OR IGNORE INTO agent_kinds(agent_kind) VALUES (?)").run(agent);
+	for (const cap of ["triage", "design", "execute", "escalate"])
+		db.prepare("INSERT OR IGNORE INTO capabilities(capability) VALUES (?)").run(cap);
+	for (const [a, c] of [
+		["pandora", "escalate"],
+		["toil", "triage"],
+		["greed", "design"],
+		["war", "execute"],
+	])
+		db.prepare("INSERT OR IGNORE INTO agent_claims(agent_kind, capability) VALUES (?,?)").run(a, c);
+	for (const [a, caps] of Object.entries({
+		pdx: ["escalate"],
+		pandora: ["triage", "design", "escalate"],
+		toil: ["triage", "design", "execute", "escalate"],
+		greed: ["triage", "design", "escalate"],
+		war: ["escalate"],
+	}))
+		for (const c of caps)
+			db.prepare("INSERT OR IGNORE INTO agent_enqueues(agent_kind, capability) VALUES (?,?)").run(
+				a,
+				c,
+			);
+};
 
 export const row = <T extends object>(value: unknown, message: string): T => {
-  if (value === undefined) fail("NOT_FOUND", message)
-  if (value === null || typeof value !== "object") fail("INTERNAL_ERROR", `invalid database row: ${message}`)
-  return value as T
-}
+	if (value === undefined) fail("NOT_FOUND", message);
+	if (value === null || typeof value !== "object")
+		fail("INTERNAL_ERROR", `invalid database row: ${message}`);
+	return value as T;
+};

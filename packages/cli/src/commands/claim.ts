@@ -1,22 +1,22 @@
-import { Effect, Metric, Schema } from "effect"
-import { DbService } from "../services/db.ts"
-import { OutputService } from "../services/output.ts"
-import { PithosError } from "../errors/errors.ts"
-import { TaskRow } from "../db/rows.ts"
-import { tasksClaimedCounter, withCommandObservability } from "../layers/metrics.ts"
+import { Effect, Metric, Schema } from "effect";
+import { DbService } from "../services/db.ts";
+import { OutputService } from "../services/output.ts";
+import { PithosError } from "../errors/errors.ts";
+import { TaskRow } from "../db/rows.ts";
+import { tasksClaimedCounter, withCommandObservability } from "../layers/metrics.ts";
 
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
 
 export interface ClaimOptions {
-  readonly run: string | undefined
-  readonly scope: string | undefined
-  readonly capability: string | undefined
-  readonly leaseMinutes?: number | undefined
+	readonly run: string | undefined;
+	readonly scope: string | undefined;
+	readonly capability: string | undefined;
+	readonly leaseMinutes?: number | undefined;
 }
 
-const DEFAULT_LEASE_MINUTES = 10
+const DEFAULT_LEASE_MINUTES = 10;
 
 // ---------------------------------------------------------------------------
 // pithos claim
@@ -36,70 +36,70 @@ const DEFAULT_LEASE_MINUTES = 10
  * Exits with code 3 (NOT_FOUND) when the specified run does not exist.
  */
 export const claimCommand = (
-  opts: ClaimOptions,
+	opts: ClaimOptions,
 ): Effect.Effect<void, PithosError, DbService | OutputService> =>
-  Effect.gen(function* () {
-    if (!opts.run) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--run is required" }),
-      )
-      return
-    }
-    if (!opts.scope) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--scope is required" }),
-      )
-      return
-    }
-    if (!opts.capability) {
-      yield* Effect.fail(
-        new PithosError({ code: "VALIDATION_ERROR", message: "--capability is required" }),
-      )
-      return
-    }
+	Effect.gen(function* () {
+		if (!opts.run) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--run is required" }),
+			);
+			return;
+		}
+		if (!opts.scope) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--scope is required" }),
+			);
+			return;
+		}
+		if (!opts.capability) {
+			yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: "--capability is required" }),
+			);
+			return;
+		}
 
-    const runId = opts.run
-    const scope = opts.scope
-    const capability = opts.capability
-    const leaseMinutes = opts.leaseMinutes ?? DEFAULT_LEASE_MINUTES
+		const runId = opts.run;
+		const scope = opts.scope;
+		const capability = opts.capability;
+		const leaseMinutes = opts.leaseMinutes ?? DEFAULT_LEASE_MINUTES;
 
-    if (!Number.isFinite(leaseMinutes) || leaseMinutes <= 0) {
-      yield* Effect.fail(
-        new PithosError({
-          code: "VALIDATION_ERROR",
-          message: `--lease-minutes must be a positive number, got: ${String(leaseMinutes)}`,
-        }),
-      )
-      return
-    }
+		if (!Number.isFinite(leaseMinutes) || leaseMinutes <= 0) {
+			yield* Effect.fail(
+				new PithosError({
+					code: "VALIDATION_ERROR",
+					message: `--lease-minutes must be a positive number, got: ${String(leaseMinutes)}`,
+				}),
+			);
+			return;
+		}
 
-    const db = yield* DbService
-    const output = yield* OutputService
+		const db = yield* DbService;
+		const output = yield* OutputService;
 
-    // Validate run exists before attempting the claim transaction.
-    const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId])
-    if (runRows.length === 0) {
-      yield* Effect.fail(
-        new PithosError({ code: "NOT_FOUND", message: `Run not found: ${runId}` }),
-      )
-      return
-    }
+		// Validate run exists before attempting the claim transaction.
+		const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId]);
+		if (runRows.length === 0) {
+			yield* Effect.fail(
+				new PithosError({ code: "NOT_FOUND", message: `Run not found: ${runId}` }),
+			);
+			return;
+		}
 
-    // Atomic claim: single transaction, no select-then-update race.
-    //
-    // TODO: test cross-process contention. In-process tests (claim.test.ts +
-    // claim-sqlite.integration.test.ts) verify the state-machine invariant
-    // (first claim wins, second fails) but cannot simulate true concurrent
-    // processes inside the critical section. A proper race test needs a
-    // synchronization barrier (e.g. test-only env hook / named pipe / file
-    // lock) that holds all N processes at the transaction boundary and
-    // releases them together, then asserts exactly M < N succeed with no
-    // duplicate owners. Without this, a regression in SQLite's locking mode
-    // or the UPDATE RETURNING atomicity would not be caught.
-    const claimedTask = yield* db.withTransaction(
-      Effect.gen(function* () {
-        const rows = yield* db.query(
-          `UPDATE tasks
+		// Atomic claim: single transaction, no select-then-update race.
+		//
+		// TODO: test cross-process contention. In-process tests (claim.test.ts +
+		// claim-sqlite.integration.test.ts) verify the state-machine invariant
+		// (first claim wins, second fails) but cannot simulate true concurrent
+		// processes inside the critical section. A proper race test needs a
+		// synchronization barrier (e.g. test-only env hook / named pipe / file
+		// lock) that holds all N processes at the transaction boundary and
+		// releases them together, then asserts exactly M < N succeed with no
+		// duplicate owners. Without this, a regression in SQLite's locking mode
+		// or the UPDATE RETURNING atomicity would not be caught.
+		const claimedTask = yield* db.withTransaction(
+			Effect.gen(function* () {
+				const rows = yield* db.query(
+					`UPDATE tasks
            SET
              status             = 'claimed',
              lease_owner_run_id = ?,
@@ -124,60 +124,59 @@ export const claimCommand = (
              LIMIT 1
            )
            RETURNING *`,
-          [runId, leaseMinutes, scope, capability],
-        )
+					[runId, leaseMinutes, scope, capability],
+				);
 
-        if (rows.length === 0) return null
+				if (rows.length === 0) return null;
 
-        // Decode the returned row via Schema to get typed field access.
-        const task = yield* Schema.decodeUnknown(TaskRow)(rows[0]!).pipe(
-          Effect.mapError(
-            () => new PithosError({ code: "INTERNAL_ERROR", message: "TaskRow shape violation from DB" }),
-          ),
-        )
+				// Decode the returned row via Schema to get typed field access.
+				const task = yield* Schema.decodeUnknown(TaskRow)(rows[0]!).pipe(
+					Effect.mapError(
+						() =>
+							new PithosError({
+								code: "INTERNAL_ERROR",
+								message: "TaskRow shape violation from DB",
+							}),
+					),
+				);
 
-        yield* db.run(
-          `UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`,
-          [task.id, runId],
-        )
+				yield* db.run(`UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`, [
+					task.id,
+					runId,
+				]);
 
-        yield* db.run(
-          `INSERT INTO events (task_id, actor_run_id, type, payload_json)
+				yield* db.run(
+					`INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.claimed', ?)`,
-          [
-            task.id,
-            runId,
-            JSON.stringify({
-              run_id: runId,
-              fencing_token: task.fencing_token,
-              lease_until: task.lease_until,
-            }),
-          ],
-        )
+					[
+						task.id,
+						runId,
+						JSON.stringify({
+							run_id: runId,
+							fencing_token: task.fencing_token,
+							lease_until: task.lease_until,
+						}),
+					],
+				);
 
-        return task
-      }),
-    )
+				return task;
+			}),
+		);
 
-    if (claimedTask === null) {
-      yield* Effect.logDebug("no claimable work").pipe(
-        Effect.annotateLogs({ scope, capability }),
-      )
-      yield* Effect.fail(
-        new PithosError({ code: "NO_CLAIMABLE_WORK", message: "no claimable work found" }),
-      )
-      return
-    }
+		if (claimedTask === null) {
+			yield* Effect.logDebug("no claimable work").pipe(Effect.annotateLogs({ scope, capability }));
+			yield* Effect.fail(
+				new PithosError({ code: "NO_CLAIMABLE_WORK", message: "no claimable work found" }),
+			);
+			return;
+		}
 
-    yield* Metric.increment(tasksClaimedCounter)
-    yield* Effect.logDebug("task claimed").pipe(
-      Effect.annotateLogs({ taskId: claimedTask.id, runId }),
-    )
-    yield* output.print(JSON.stringify({ ok: true, task: claimedTask }))
-  }).pipe(
-    Effect.withLogSpan("pithos.claim"),
-    withCommandObservability("claim"),
-  )
+		yield* Metric.increment(tasksClaimedCounter);
+		yield* Effect.logDebug("task claimed").pipe(
+			Effect.annotateLogs({ taskId: claimedTask.id, runId }),
+		);
+		yield* output.print(JSON.stringify({ ok: true, task: claimedTask }));
+	}).pipe(Effect.withLogSpan("pithos.claim"), withCommandObservability("claim"));
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -212,4 +211,4 @@ Examples:
   pithos claim --run run_abc --scope repo:work/perkbox/protobuf --capability watch --lease-minutes 20
 
 Exit codes: 0 success | 2 validation error | 3 not found (run) | 5 no claimable work
-`
+`;

@@ -1,44 +1,46 @@
 {
-  "name": "pithos-workspace",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "clean": "pnpm -r --if-present clean && rimraf dist *.tsbuildinfo",
-    "clean:deps": "pnpm clean && rimraf node_modules packages/*/node_modules",
-    "lint": "eslint . && pnpm -r --if-present lint",
-    "typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r --if-present typecheck",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "build": "pnpm -r --if-present build && cd packages/cli && npm link && cd ../spawner && npm link",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm run build",
-    "prepare": "husky"
-  },
-  "lint-staged": {
-    "*.ts": "eslint"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ]
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.27.0",
-    "@types/node": "^25.6.0",
-    "@vitest/eslint-plugin": "^1.1.44",
-    "esbuild": "^0.28.0",
-    "eslint": "^9.27.0",
-    "eslint-config-prettier": "^10.1.5",
-    "eslint-plugin-unused-imports": "^4.1.4",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.4.0",
-    "rimraf": "^6.1.3",
-    "typescript": "^5.8.3",
-    "typescript-eslint": "^8.32.1",
-    "vitest": "^3.1.4"
-  },
-  "volta": {
-    "node": "24.15.0"
-  }
+	"name": "pithos-workspace",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"clean": "pnpm -r --if-present clean && rimraf dist *.tsbuildinfo",
+		"clean:deps": "pnpm clean && rimraf node_modules packages/*/node_modules",
+		"lint": "eslint . && pnpm -r --if-present lint",
+		"typecheck": "tsc -p tsconfig.json --noEmit && pnpm -r --if-present typecheck",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"format": "oxfmt",
+		"build": "pnpm -r --if-present build && cd packages/cli && npm link && cd ../spawner && npm link",
+		"verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm run build",
+		"prepare": "husky"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.27.0",
+		"@types/node": "^25.6.0",
+		"@vitest/eslint-plugin": "^1.1.44",
+		"esbuild": "^0.28.0",
+		"eslint": "^9.27.0",
+		"eslint-config-prettier": "^10.1.5",
+		"eslint-plugin-unused-imports": "^4.1.4",
+		"husky": "^9.1.7",
+		"lint-staged": "^16.4.0",
+		"oxfmt": "^0.48.0",
+		"rimraf": "^6.1.3",
+		"typescript": "^5.8.3",
+		"typescript-eslint": "^8.32.1",
+		"vitest": "^3.1.4"
+	},
+	"lint-staged": {
+		"*": "oxfmt --no-error-on-unmatched-pattern"
+	},
+	"volta": {
+		"node": "24.15.0"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"better-sqlite3",
+			"esbuild"
+		]
+	}
 }

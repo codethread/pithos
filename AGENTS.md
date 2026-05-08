@@ -124,4 +124,7 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 
 ## Testing
 
+- Tests must earn their place: add or keep them only when they protect user-visible behavior, DB/source-of-truth invariants, fail-loud error contracts, agent-facing observability, or a regression that would have failed before the fix.
+- Prefer stable public boundaries and deterministic fixtures: real isolated SQLite for DB behavior, command/CLI output for contracts, pure input→output tests for transformations; never use sleeps, live services, broad mocks, or fake-service tests as a substitute for behavior.
+- Do not write tests for coverage, missing-flag permutations, private implementation details, or guarantees already owned by TypeScript/runtime schemas; snapshot only when the exact text/argv is the product contract.
 - Use `vitest run --update` to fix snapshots after corrections, don't manually edit the snapshots.

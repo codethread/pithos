@@ -2,7 +2,7 @@
 
 Checklist of all 12 implementation slices, grouped by availability. Uncheck = not started. Each task file lists its specific blockers.
 
-Your job: complete **exactly one** approved task, end-to-end, then stop.
+Your job: complete **exactly one** approved task, end-to-end, commit with a clear and informative message, then stop.
 
 ## Required reading
 
@@ -114,17 +114,14 @@ Demo gates: task-003 (gate 1) and task-006 (gate 2) are independent of each othe
 
 ### If you completed the slice successfully
 
+Stop and provide a brief summary of work completed
+
+### If you cannot complete the slice or all slices are now complete
+
 Reply with exactly:
 
 `COMPLETE`
 
 and **nothing else**.
-
-### If you cannot complete the slice
-
-Reply with exactly one of:
-
-- `BLOCKED` — a real blocker prevents completion
-- `NO_TASKS_REMAIN` — no eligible pending slice exists
 
 Do not include any extra text.

@@ -52,4 +52,32 @@ export const ProcessServiceLive: Layer.Layer<ProcessService> = Layer.succeed(Pro
           message: `Process execution failed: ${error instanceof Error ? error.message : String(error)}`,
         }),
     }),
+  probePid: (pid) =>
+    Effect.sync(() => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
+          return false
+        }
+
+        throw new PdxError({
+          code: "USER_ERROR",
+          message: `Failed to probe pid ${pid}: ${error instanceof Error ? error.message : String(error)}`,
+        })
+      }
+    }),
+  signalPid: (pid, signal) =>
+    Effect.try({
+      try: () => {
+        process.kill(pid, signal)
+      },
+      catch: (error) => {
+        throw new PdxError({
+          code: "USER_ERROR",
+          message: `Failed to send ${signal} to pid ${pid}: ${error instanceof Error ? error.message : String(error)}`,
+        })
+      },
+    }),
 })

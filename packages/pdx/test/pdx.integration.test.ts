@@ -1,5 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
-import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, readFileSync } from "node:fs"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -56,6 +56,17 @@ const waitFor = async (
 
 const tmuxHasSession = (target: string): boolean =>
   spawnSync("tmux", ["has-session", "-t", target], { encoding: "utf8" }).status === 0
+
+const killPdxSessions = () => {
+  const sessions = spawnSync("tmux", ["ls", "-F", "#S"], { encoding: "utf8" })
+  if (sessions.status !== 0) {
+    return
+  }
+
+  for (const name of sessions.stdout.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("pdx--"))) {
+    spawnSync("tmux", ["kill-session", "-t", name], { encoding: "utf8" })
+  }
+}
 
 const makeFakePiBin = (root: string): string => {
   const binDir = join(root, "fake-bin")
@@ -183,17 +194,19 @@ describe("pdx pandora singleton", () => {
     }
   })
 
+  beforeEach(() => {
+    killPdxSessions()
+  })
+
   afterEach(() => {
     for (const home of homes.splice(0)) {
-      spawnSync("tmux", ["kill-session", "-t", "pdx--pandora"], { encoding: "utf8" })
-      spawnSync("tmux", ["kill-session", "-t", "pdx--daemon"], { encoding: "utf8" })
+      killPdxSessions()
       spawnSync("rm", ["-rf", home])
     }
   })
 
   afterAll(() => {
-    spawnSync("tmux", ["kill-session", "-t", "pdx--pandora"], { encoding: "utf8" })
-    spawnSync("tmux", ["kill-session", "-t", "pdx--daemon"], { encoding: "utf8" })
+    killPdxSessions()
   })
 
   it("open launches pandora, status reflects registry and queue, death respawns with a fresh run id, and close tears down", async () => {

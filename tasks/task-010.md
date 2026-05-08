@@ -48,11 +48,11 @@ Builds on task-005 §Implementation primitives (Tmux service, FileSystem) and ta
 
 ## Acceptance criteria
 
-- [ ] Startup settlement runs before any new resources are created on `pdx open`
-- [ ] tmux orphans matched by `^pdx--` are killed
-- [ ] Live-pid pidfile orphans are killed and cleaned up
-- [ ] Stale pidfile orphans are cleaned up without a failed kill attempt
-- [ ] `pdx open` succeeds cleanly after a previous unclean shutdown
+- [x] Startup settlement runs before any new resources are created on `pdx open`
+- [x] tmux orphans matched by `^pdx--` are killed
+- [x] Live-pid pidfile orphans are killed and cleaned up
+- [x] Stale pidfile orphans are cleaned up without a failed kill attempt
+- [x] `pdx open` succeeds cleanly after a previous unclean shutdown
 
 ## Blocked by
 

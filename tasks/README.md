@@ -52,7 +52,7 @@ Tasks with no unblocked dependencies — pick any.
 ## Ready after slice 5
 
 - [x] **[6 — Pandora singleton + death detection + DEMO GATE 2](task-006.md):** reconcile loop, Pandora lifecycle, respawn
-- [ ] **[10 — Orphan discovery](task-010.md):** reap stale HITL/AFK sessions on `pdx open`
+- [x] **[10 — Orphan discovery](task-010.md):** reap stale HITL/AFK sessions on `pdx open`
 
 ---
 

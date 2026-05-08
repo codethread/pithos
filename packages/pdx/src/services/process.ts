@@ -19,5 +19,7 @@ export class ProcessService extends Context.Tag("@pithos/pdx/ProcessService")<
         readonly stdin?: string
       },
     ) => Effect.Effect<ProcessResult, PdxError>
+    readonly probePid: (pid: number) => Effect.Effect<boolean, PdxError>
+    readonly signalPid: (pid: number, signal: NodeJS.Signals) => Effect.Effect<void, PdxError>
   }
 >() {}

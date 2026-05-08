@@ -8,6 +8,7 @@ import { OutputServiceLive } from "./layers/output.ts"
 import { ProcessServiceLive } from "./layers/process.ts"
 import { TmuxLive } from "./layers/tmux.ts"
 import { PithosClientLive } from "./layers/pithos.ts"
+import { FileSystemLive } from "./layers/filesystem.ts"
 import { VERSION } from "./version.ts"
 
 const cli = Command.run(pdxCommand, {
@@ -41,6 +42,7 @@ const infrastructure = Layer.mergeAll(
 
 const appLayer = Layer.mergeAll(
   infrastructure,
+  FileSystemLive,
   TmuxLive.pipe(Layer.provide(ProcessServiceLive)),
   PithosClientLive.pipe(Layer.provide(ProcessServiceLive)),
 )

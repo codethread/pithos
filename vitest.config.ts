@@ -16,6 +16,7 @@ export default defineConfig({
       "packages/pithos/vitest.unit.config.ts",
       "packages/pithos/vitest.integration.config.ts",
       "packages/spawner/vitest.config.ts",
+      "packages/pdx/vitest.config.ts",
     ],
   },
 });

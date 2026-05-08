@@ -50,6 +50,7 @@ flowchart TD
 
 - **`pithos`** — the state CLI. Owns the SQLite store, queue, leases, events, artifacts, and briefing.
 - **`pandora-spawn`** — the agent spawner. Owns templates, manifest config, launcher recipes, hooks, and harness argv construction.
+- **`pdx`** — the local supervisor. Owns daemon lifecycle, tmux ownership, structured supervisor logs, operator status, and local control-plane IPC.
 
 Agents register runs, claim fenced tasks, heartbeat, attach artifacts, and complete or fail — all through `pithos`. Nothing else writes to the database.
 
@@ -64,13 +65,14 @@ Prereqs: `tmux` plus at least one supported harness CLI on PATH (`claude`, `pi`,
 
 ```sh
 pnpm install
-pnpm run build      # builds both packages and links pithos + pandora-spawn on PATH
+pnpm run build      # builds workspace packages and links pithos + pithos-next + pandora-spawn + pdx on PATH
 pithos --help
 pithos-next init --fresh
 PITHOS_BIN=pithos-next pandora-spawn preview --agent pandora --mode hitl --scope global --run run_PREVIEW --session-id session_PREVIEW --cwd ~/.pandora
+PITHOS_BIN=pithos-next pdx open
 ```
 
-Interactive control-plane startup moves to `pdx open` in slice 5. For slice 4, `pandora-spawn preview ...` is the supported launcher validation path and `scripts/pandora-start.sh` now fails loudly to point at that flow.
+`pdx open` is the current local control-plane entrypoint. `pandora-spawn preview ...` remains the supported launcher validation path.
 
 ### Harness hooks
 
@@ -165,6 +167,8 @@ pithos enqueue --capability escalate  -> Pandora claims
 | `packages/cli/CONTRIBUTING.md`             | CLI package quality bar and add-a-command checklist                    |
 | `packages/spawner/README.md`               | `pandora-spawn` preview CLI, launcher library API, manifests, harnesses |
 | `packages/spawner/CONTRIBUTING.md`         | Spawner package constraints and change checklist                       |
+| `packages/pdx/README.md`                   | `pdx` daemon surface, local supervision, and operator commands         |
+| `packages/pdx/CONTRIBUTING.md`             | pdx package constraints and change checklist                           |
 | `packages/spawner/claude-plugin/README.md` | Claude Code plugin install/use                                         |
 | `packages/spawner/pi-extension/README.md`  | Pi extension install/use                                               |
 | `references/README.md`                     | Copied prior art; read-only reference behaviour                        |

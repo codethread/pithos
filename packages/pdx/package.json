@@ -1,0 +1,28 @@
+{
+  "name": "@pithos/pdx",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pdx": "./bin/pdx"
+  },
+  "scripts": {
+    "clean": "rimraf dist bin/pdx bin/pdx-dev *.tsbuildinfo",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs --dev --run --"
+  },
+  "dependencies": {
+    "@effect/cli": "0.75.1",
+    "@effect/platform": "^0.96.1",
+    "@effect/platform-node": "^0.106.0",
+    "@pithos/spawner": "workspace:*",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@effect/vitest": "^0.29.0"
+  }
+}

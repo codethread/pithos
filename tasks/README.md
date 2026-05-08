@@ -45,22 +45,25 @@ Tasks with no unblocked dependencies — pick any.
 ## Ready after slice 2
 
 - [x] **[3 — Task graph tightening + DEMO GATE 1](task-003.md):** supersede preconditions, consolidated events, demo walkthrough
-- [ ] **[5 — pdx skeleton](task-005.md):** open / close / status / logs + system run
+- [x] **[5 — pdx skeleton](task-005.md):** open / close / status / logs + system run
+
+---
+
+## Ready after slice 5
+
+- [ ] **[6 — Pandora singleton + death detection + DEMO GATE 2](task-006.md):** reconcile loop, Pandora lifecycle, respawn
+- [ ] **[10 — Orphan discovery](task-010.md):** reap stale HITL/AFK sessions on `pdx open`
 
 ---
 
 ## Still blocked
 
-- [ ] **[6 — Pandora singleton + death detection + DEMO GATE 2](task-006.md):** reconcile loop, Pandora lifecycle, respawn
-  - ↳ Blocked by: task-004, task-005
 - [ ] **[7 — pdx kill flow](task-007.md):** interrupt → escalate → kill → retry
   - ↳ Blocked by: task-006
 - [ ] **[8 — Agent spawning](task-008.md):** caps, no-claim timeout, pidfiles
   - ↳ Blocked by: task-006
 - [ ] **[9 — Wakeup transport + Pandora marker](task-009.md):** escalate transition → tmux wakeup
   - ↳ Blocked by: task-006
-- [ ] **[10 — Orphan discovery](task-010.md):** reap stale HITL/AFK sessions on `pdx open`
-  - ↳ Blocked by: task-005
 
 ---
 

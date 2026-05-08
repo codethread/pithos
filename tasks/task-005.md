@@ -79,12 +79,12 @@ Canonical daemon-shape primitives — referenced by tasks 006/007/009/010.
 
 ## Acceptance criteria
 
-- [ ] `packages/pdx/` builds and tests green
-- [ ] `pdx open` / `pdx close` / `pdx status` / `pdx logs show` round-trip works
-- [ ] pdx system run created on open and cleaned up last on close
-- [ ] `pdx status` JSON has required top-level keys; `daemon.running=false` on no-daemon
-- [ ] Supervisor log lines validated against minimum schema
-- [ ] `pdx open` / `pdx close` exit codes and error wording are loud
+- [x] `packages/pdx/` builds and tests green
+- [x] `pdx open` / `pdx close` / `pdx status` / `pdx logs show` round-trip works
+- [x] pdx system run created on open and cleaned up last on close
+- [x] `pdx status` JSON has required top-level keys; `daemon.running=false` on no-daemon
+- [x] Supervisor log lines validated against minimum schema
+- [x] `pdx open` / `pdx close` exit codes and error wording are loud
 
 ## Blocked by
 

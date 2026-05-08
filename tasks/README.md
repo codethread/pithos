@@ -31,7 +31,7 @@ Read these before choosing work:
 Tasks with no unblocked dependencies — pick any.
 
 - [x] **[1 — Pithos foundation](task-001.md):** schema, seeds, nested CLI, authorization
-- [ ] **[4 — Spawner in-place refactor](task-004.md):** launcher-only library + preview CLI
+- [x] **[4 — Spawner in-place refactor](task-004.md):** launcher-only library + preview CLI
 
 ---
 

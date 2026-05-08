@@ -1,31 +1,33 @@
 # @pithos/spawner agent notes
 
-Tiny TypeScript CLI that turns versioned agent config + prompt templates into an agent-harness session.
+Launcher-only package for manifests, prompt rendering, harness argv/env construction, and launch mechanics.
 
 ## Shape
 
 - Bin: `pandora-spawn`
-- Real harnesses: Claude Code and Pi
-- Test/debug harness: `fake`
-- State boundary: never touch SQLite; call `pithos` CLI subprocess only
-- Config API: `templates/agents.json` + `templates/*.md.tmpl` + includes like `_common.md`
+- Public CLI: `pandora-spawn preview ...`
+- Public library API: `renderAgent(input)`, `launchAgent(input)`
+- Harnesses: Claude Code and Pi
+- No DB writes, run registration, status inspection, message injection, or lifecycle policy
 
 ## Design notes
 
-- Keep this package simple: the only allowed Effect abstraction is the injected harness service. No DB imports, no daemon logic.
-- Fail loudly on bad JSON, unknown template vars, missing template files, bad includes.
-- Includes are explicit vars: listing `_common.md` makes `{{_common.md}}` available; placement is controlled by the prompt template.
-- `--preview` must not register a run or spawn a harness.
+- Fail loudly on invalid manifest JSON, template mismatch, unknown template vars, or mode mismatch.
+- Manifest `claims` / `enqueues` must match the seeded Pithos capability matrix for that agent.
+- `renderAgent` is pure apart from reading manifest/template files.
+- `launchAgent` owns process / tmux launch only; callers own lifecycle decisions.
 
 ## Manual test
 
 ```sh
-pnpm --filter @pithos/spawner start --agent envy --scope repo:work/example --preview | jq .
+packages/pithos/bin/pithos-next init --fresh
+PITHOS_BIN=pithos-next pnpm --filter @pithos/spawner start -- preview --agent war --mode afk --scope repo:work/example --run run_PREVIEW --session-id session_PREVIEW --cwd ~/work/example | jq .
 ```
 
 With built/link bin:
 
 ```sh
 pnpm run build
-pandora-spawn --agent envy --scope repo:work/example --preview | jq .
+packages/pithos/bin/pithos-next init --fresh
+PITHOS_BIN=pithos-next pandora-spawn preview --agent pandora --mode hitl --scope global --run run_PREVIEW --session-id session_PREVIEW --cwd ~/.pandora | jq .
 ```

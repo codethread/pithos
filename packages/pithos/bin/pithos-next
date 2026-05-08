@@ -78080,6 +78080,7 @@ var exitCodeFor = (code2) => {
 
 // src/domain/control-plane.ts
 var AGENT_KINDS = ["pdx", "pandora", "toil", "greed", "war"];
+var SPAWNABLE_AGENT_KINDS = ["pandora", "toil", "greed", "war"];
 var CAPABILITIES = ["triage", "design", "execute", "escalate"];
 var RUN_MODES = ["afk", "hitl"];
 var RUN_STATUSES = [
@@ -78102,7 +78103,22 @@ var TASK_STATUSES = [
   "cancelled"
 ];
 var AgentKindSchema = Schema_exports.Literal(...AGENT_KINDS);
+var SpawnableAgentKindSchema = Schema_exports.Literal(...SPAWNABLE_AGENT_KINDS);
 var CapabilitySchema = Schema_exports.Literal(...CAPABILITIES);
+var AGENT_CLAIMS_BY_KIND = {
+  pdx: [],
+  pandora: ["escalate"],
+  toil: ["triage"],
+  greed: ["design"],
+  war: ["execute"]
+};
+var AGENT_ENQUEUES_BY_KIND = {
+  pdx: ["escalate"],
+  pandora: ["triage", "design", "escalate"],
+  toil: ["triage", "design", "execute", "escalate"],
+  greed: ["triage", "design", "escalate"],
+  war: ["escalate"]
+};
 var RunModeSchema = Schema_exports.Literal(...RUN_MODES);
 var RunStatusSchema = Schema_exports.Literal(...RUN_STATUSES);
 var TaskStatusSchema = Schema_exports.Literal(...TASK_STATUSES);
@@ -78918,7 +78934,7 @@ var BRIEFING_SQL = {
                ORDER BY updated_at DESC, id ASC`,
   ARTIFACTS: `SELECT *
               FROM artifacts
-              WHERE kind IN ('worker-completion', 'design-brief', 'question')
+              WHERE kind IN ('war-completion', 'design-brief', 'question')
               ORDER BY created_at DESC, id DESC
               LIMIT 50`,
   HELD_TASKS: `SELECT id AS run_id, task_id FROM runs WHERE task_id IS NOT NULL ORDER BY id ASC`,
@@ -79024,7 +79040,7 @@ var briefingCommand = (opts = {}) => Effect_exports.gen(function* () {
   for (const task2 of doneTasks) {
     const taskArtifacts = artifactsByTaskId.get(task2.id) ?? [];
     const reviewArtifacts = taskArtifacts.filter(
-      (artifact) => artifact.kind === "worker-completion" || artifact.kind === "design-brief"
+      (artifact) => artifact.kind === "war-completion" || artifact.kind === "design-brief"
     );
     const taskLine = `- [done] \`${task2.id}\`: "${task2.title}" (scope: ${task2.scope_id}, capability: ${task2.capability})`;
     if (reviewArtifacts.length === 0) {
@@ -79932,29 +79948,25 @@ var INDEX_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_events_created ON events(id)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id) WHERE task_id IS NOT NULL`
 ];
+var sqlString = (value8) => `'${value8.replaceAll("'", "''")}'`;
+var sqlTuples = (rows) => rows.map((row) => `(${row.map(sqlString).join(", ")})`).join(", ");
+var claimSeedRows = Object.entries(AGENT_CLAIMS_BY_KIND).flatMap(
+  ([agentKind, capabilities]) => capabilities.map((capability) => [agentKind, capability])
+);
+var enqueueSeedRows = Object.entries(AGENT_ENQUEUES_BY_KIND).flatMap(
+  ([agentKind, capabilities]) => capabilities.map((capability) => [agentKind, capability])
+);
 var SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO scopes (id, kind, name, canonical_path, metadata_json)
    VALUES ('global', 'global', 'global', NULL, '{}')`,
   `INSERT OR IGNORE INTO agent_kinds (agent_kind)
-   VALUES ('pdx'), ('pandora'), ('toil'), ('greed'), ('war')`,
+   VALUES ${sqlTuples(AGENT_KINDS.map((agentKind) => [agentKind]))}`,
   `INSERT OR IGNORE INTO capabilities (capability)
-   VALUES ('triage'), ('design'), ('execute'), ('escalate')`,
+   VALUES ${sqlTuples(CAPABILITIES.map((capability) => [capability]))}`,
   `INSERT OR IGNORE INTO agent_claims (agent_kind, capability)
-   VALUES ('pandora', 'escalate'), ('toil', 'triage'), ('greed', 'design'), ('war', 'execute')`,
+   VALUES ${sqlTuples(claimSeedRows)}`,
   `INSERT OR IGNORE INTO agent_enqueues (agent_kind, capability)
-   VALUES
-     ('pdx', 'escalate'),
-     ('pandora', 'triage'),
-     ('pandora', 'design'),
-     ('pandora', 'escalate'),
-     ('toil', 'triage'),
-     ('toil', 'design'),
-     ('toil', 'execute'),
-     ('toil', 'escalate'),
-     ('greed', 'triage'),
-     ('greed', 'design'),
-     ('greed', 'escalate'),
-     ('war', 'escalate')`
+   VALUES ${sqlTuples(enqueueSeedRows)}`
 ];
 var MANAGED_TABLE_COLUMNS = {
   schema_migrations: ["version", "applied_at"],
@@ -81372,7 +81384,7 @@ var taskArtifactAdd = Command_exports.make(
     desc(
       "Attach an artifact to a task",
       "pithos-next task artifact add",
-      ["pithos-next task artifact add --task task_abc --run run_war --kind worker-completion --title 'Worker report' --body-file report.md"],
+      ["pithos-next task artifact add --task task_abc --run run_war --kind war-completion --title 'War report' --body-file report.md"],
       "0 success | 2 validation error | 3 not found"
     )
   )

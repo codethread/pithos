@@ -1,5 +1,5 @@
 {
-  "description": "Pithos liveness heartbeat and clean session-end hooks. No-ops in normal Claude sessions; only active when PITHOS_AGENT and PITHOS_RUN_ID are set by pandora-spawn.",
+  "description": "Pithos liveness heartbeat and session-end observation hooks. No-ops in normal Claude sessions; only active when PITHOS_AGENT and PITHOS_RUN_ID are set by pandora-spawn.",
   "hooks": {
     "PreToolUse": [
       {

@@ -1,13 +1,13 @@
 # Pithos Claude Code Plugin
 
-Declarative Claude Code plugin that registers Pithos liveness and session-end hooks without mutating `~/.claude/settings.json`.
+Declarative Claude Code plugin that registers Pithos liveness and session-end observation hooks without mutating `~/.claude/settings.json`.
 It implements the shared harness hook contract documented in [`../README.md#harness-hooks`](../README.md#harness-hooks).
 
 ## What ships
 
 - **`hooks/hooks.json`** — two hook registrations:
-  - `PreToolUse`: throttled `pithos heartbeat` so the sweep daemon does not flag active runs as stale (60 s throttle).
-  - `SessionEnd` (matcher: `prompt_input_exit`): `pithos run end --status ended` to close the run cleanly when the agent process actually terminates.
+  - `PreToolUse`: `pithos task heartbeat --run ...` so active sessions record liveness.
+  - `SessionEnd` (matcher: `prompt_input_exit`): observation-only signal forwarded to the shared dispatcher. `pdx` still owns run finalization.
 
 Both hooks delegate to `${CLAUDE_PLUGIN_ROOT}/hooks/dispatch.sh`, which is a symlink into `packages/spawner/hooks/dispatch.sh`. The script is a no-op in normal Claude sessions — it exits immediately unless `PITHOS_AGENT` and `PITHOS_RUN_ID` are set, which `pandora-spawn` injects at spawn time.
 

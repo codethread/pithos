@@ -18,6 +18,7 @@ await esbuild.build({
   target: "es2024",
   format: "esm",
   bundle: true,
+  external: ["@pithos/pithos", "@pithos/pithos/*"],
   sourcemap: dev ? "inline" : false,
   banner: {
     js: "#!/usr/bin/env node\nimport { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);",

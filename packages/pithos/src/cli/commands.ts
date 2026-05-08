@@ -462,7 +462,7 @@ const taskArtifactAdd = Command.make(
     desc(
       "Attach an artifact to a task",
       "pithos-next task artifact add",
-      ["pithos-next task artifact add --task task_abc --run run_war --kind worker-completion --title 'Worker report' --body-file report.md"],
+      ["pithos-next task artifact add --task task_abc --run run_war --kind war-completion --title 'War report' --body-file report.md"],
       "0 success | 2 validation error | 3 not found",
     ),
   ),

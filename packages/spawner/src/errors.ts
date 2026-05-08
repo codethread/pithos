@@ -1,6 +1,10 @@
 import { Data } from "effect"
 
-export type ErrorCode = "VALIDATION_ERROR" | "NOT_FOUND" | "UPSTREAM_ERROR"
+export type ErrorCode =
+  | "VALIDATION_ERROR"
+  | "TEMPLATE_ERROR"
+  | "HARNESS_ERROR"
+  | "LAUNCH_ERROR"
 
 export class SpawnerError extends Data.TaggedError("SpawnerError")<{
   readonly code: ErrorCode
@@ -10,10 +14,10 @@ export class SpawnerError extends Data.TaggedError("SpawnerError")<{
 export const exitCodeFor = (code: ErrorCode): number => {
   switch (code) {
     case "VALIDATION_ERROR":
+    case "TEMPLATE_ERROR":
       return 2
-    case "NOT_FOUND":
-      return 3
-    case "UPSTREAM_ERROR":
+    case "HARNESS_ERROR":
+    case "LAUNCH_ERROR":
       return 1
   }
 }

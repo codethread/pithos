@@ -66,25 +66,19 @@ Prereqs: `tmux` plus at least one supported harness CLI on PATH (`claude`, `pi`,
 pnpm install
 pnpm run build      # builds both packages and links pithos + pandora-spawn on PATH
 pithos --help
-pandora-spawn templates list
+pithos-next init --fresh
+PITHOS_BIN=pithos-next pandora-spawn preview --agent pandora --mode hitl --scope global --run run_PREVIEW --session-id session_PREVIEW --cwd ~/.pandora
 ```
 
-Bring up Pandora for the current repo:
-
-```sh
-scripts/pandora-start.sh
-```
-
-This initialises the store, upserts a repo scope, spawns Pandora into a detached tmux session, and attaches.
+Interactive control-plane startup moves to `pdx open` in slice 5. For slice 4, `pandora-spawn preview ...` is the supported launcher validation path and `scripts/pandora-start.sh` now fails loudly to point at that flow.
 
 ### Harness hooks
 
-Real spawned sessions rely on tiny harness adapters for two jobs:
+Real spawned sessions rely on tiny harness adapters for one job:
 
-- **liveness** — native harness activity becomes throttled `pithos heartbeat`
-- **clean shutdown** — real session termination becomes `pithos run end --status ended`
+- **liveness** — native harness activity becomes `pithos task heartbeat --run ...`
 
-Claude Code and Pi use different native hook APIs, but both forward into the same shared dispatcher. The adapters no-op in normal non-Pithos sessions because `pandora-spawn` only activates them when it injects the required `PITHOS_*` environment.
+Claude Code and Pi use different native hook APIs, but both forward into the same shared dispatcher. The adapters no-op in normal non-Pithos sessions because `pandora-spawn` only activates them when it injects the required `PITHOS_*` environment. Run finalization stays with `pdx`; the hooks do not close runs.
 
 Install per harness:
 
@@ -141,25 +135,25 @@ Envy ─── claims implement work, spawns workers, watches, reports
 Workers ─── perform the actual repo/worktree mutation
 ```
 
-Each handoff is deliberate: Pandora should not burn context on repo discovery, and Envy should not burn context doing the mutation herself.
+Each handoff is deliberate: Pandora should not burn context on repo discovery, and War should not burn context on planning outside her `execute` remit.
 
 ### Claim routing
 
 Queue capabilities describe the requested outcome class, not the agent's internal execution style. Pandora does not claim queue work — she coordinates across scopes and capabilities.
 
 ```text
-pithos enqueue --capability triage     -> Toil claims
-pithos enqueue --capability implement  -> Envy claims
-pithos enqueue --capability design     -> Greed claims
+pithos enqueue --capability triage    -> Toil claims
+pithos enqueue --capability design    -> Greed claims
+pithos enqueue --capability execute   -> War claims
+pithos enqueue --capability escalate  -> Pandora claims
 ```
 
 ### Per-agent notes
 
-- **Pandora** — the human-facing bridge. Consumes briefings, inspects tasks/runs/artifacts, decides where attention is needed, and spawns the right specialist. Should not personally track every worker session in context.
-- **Toil** — in `~/.pandora` she does broad repo discovery and breakdown; in a concrete repo scope she turns goals into actionable queue work and then exits.
-- **Envy** — coordinator, not mutator. Spawns a separate worker session for repo/worktree changes, watches progress, and records the result as a `worker-completion` artifact before completing or failing the task.
-- **Worker** — intentionally Pithos-unaware. Performs the mutation, produces a completion report, and exits. Envy translates that result back into Pithos state.
-- **Greed** — design-quality agent. Owns `design` tasks, explores code deeply, interviews Adam one question at a time, and records the outcome as a `design-brief` artifact.
+- **Pandora** — the human-facing bridge. Consumes briefings, inspects tasks/runs/artifacts, decides where attention is needed, and spawns the right specialist. Owns `escalate`.
+- **Toil** — in `~/.pandora` she does broad repo discovery and breakdown; in a concrete repo scope she turns goals into actionable queue work and then exits. Owns `triage`.
+- **Greed** — design-quality agent. Owns `design`, explores code deeply, interviews Adam one question at a time, and records the outcome as a `design-brief` artifact.
+- **War** — execution agent. Owns `execute`, performs repo/worktree mutation in scope, records the result as a `war-completion` artifact, and escalates when human attention is needed.
 
 ## Documents
 
@@ -169,7 +163,7 @@ pithos enqueue --capability design     -> Greed claims
 | `CONTRIBUTING.md`                          | Setup, verify, commit hygiene, doc map                                 |
 | `packages/cli/README.md`                   | `pithos` CLI surface and runtime contract                              |
 | `packages/cli/CONTRIBUTING.md`             | CLI package quality bar and add-a-command checklist                    |
-| `packages/spawner/README.md`               | `pandora-spawn` CLI, templates, harnesses, hooks, status, session logs |
+| `packages/spawner/README.md`               | `pandora-spawn` preview CLI, launcher library API, manifests, harnesses |
 | `packages/spawner/CONTRIBUTING.md`         | Spawner package constraints and change checklist                       |
 | `packages/spawner/claude-plugin/README.md` | Claude Code plugin install/use                                         |
 | `packages/spawner/pi-extension/README.md`  | Pi extension install/use                                               |

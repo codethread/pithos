@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": "./src/index.ts",
   "keywords": [
     "pi-package"
   ],
@@ -27,6 +28,7 @@
     "@effect/cli": "0.75.1",
     "@effect/platform": "^0.96.1",
     "@effect/platform-node": "^0.106.0",
+    "@pithos/pithos": "workspace:*",
     "effect": "^3.21.2"
   }
 }

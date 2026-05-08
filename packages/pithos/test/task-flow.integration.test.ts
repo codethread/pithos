@@ -732,9 +732,9 @@ describe("pithos-next task flow contracts", () => {
         "--run",
         globalRuns.toil!,
         "--kind",
-        "worker-completion",
+        "war-completion",
         "--title",
-        "Worker report",
+        "War report",
         "--body-file",
         reportPath,
       ],
@@ -743,7 +743,7 @@ describe("pithos-next task flow contracts", () => {
     expect(artifact.artifact).toMatchObject({
       task_id: task.id,
       run_id: globalRuns.toil!,
-      title: "Worker report",
+      title: "War report",
     })
 
     const resultPath = join(tempDir, "result.json")
@@ -780,7 +780,7 @@ describe("pithos-next task flow contracts", () => {
     expect(taskInspect.dependencies).toEqual([])
     expect(taskInspect.dependents).toEqual([])
     expect(taskInspect.artifacts).toEqual([
-      expect.objectContaining({ title: "Worker report" }),
+      expect.objectContaining({ kind: "war-completion", title: "War report" }),
     ])
 
     const graphInspect = await runOkJson<{

@@ -1,15 +1,15 @@
 # Pithos Pi extension
 
-Tiny Pi extension that wires Pithos liveness and session-end hooks into Pi.
+Tiny Pi extension that wires Pithos liveness and session-end observation hooks into Pi.
 It is the Pi equivalent of the Claude Code plugin and forwards Pi lifecycle events into the shared [`../hooks/dispatch.sh`](../hooks/dispatch.sh) contract documented in [`../README.md#harness-hooks`](../README.md#harness-hooks).
 
 ## What it does
 
 - `tool_call` → `dispatch.sh PreToolUse`
 - `session_shutdown` with `reason !== "reload"` → `dispatch.sh SessionEnd`
-- both are gated by `PITHOS_SESSION_ID` so replacement Pi sessions do not heartbeat/finalize the wrong run
+- both are gated by `PITHOS_SESSION_ID` so replacement Pi sessions do not heartbeat against the wrong run
 
-The dispatcher no-ops unless `pandora-spawn` injected `PITHOS_AGENT` and `PITHOS_RUN_ID`, so it is safe to keep installed for normal Pi sessions.
+The dispatcher no-ops unless `pandora-spawn` injected `PITHOS_AGENT` and `PITHOS_RUN_ID`, so it is safe to keep installed for normal Pi sessions. `pdx` still owns run finalization.
 
 ## Install
 

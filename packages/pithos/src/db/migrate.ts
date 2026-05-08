@@ -1,4 +1,10 @@
 import { Effect, Schema } from "effect"
+import {
+  AGENT_CLAIMS_BY_KIND,
+  AGENT_ENQUEUES_BY_KIND,
+  AGENT_KINDS,
+  CAPABILITIES,
+} from "../domain/control-plane.ts"
 import type { PithosError } from "../errors/errors.ts"
 import { PithosError as PE } from "../errors/errors.ts"
 import { DbService } from "../services/db.ts"
@@ -50,29 +56,30 @@ const INDEX_STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id) WHERE task_id IS NOT NULL`,
 ] as const
 
+const sqlString = (value: string): string => `'${value.replaceAll("'", "''")}'`
+
+const sqlTuples = (rows: readonly (readonly string[])[]): string =>
+  rows.map((row) => `(${row.map(sqlString).join(", ")})`).join(", ")
+
+const claimSeedRows = Object.entries(AGENT_CLAIMS_BY_KIND).flatMap(([agentKind, capabilities]) =>
+  capabilities.map((capability) => [agentKind, capability] as const),
+)
+
+const enqueueSeedRows = Object.entries(AGENT_ENQUEUES_BY_KIND).flatMap(([agentKind, capabilities]) =>
+  capabilities.map((capability) => [agentKind, capability] as const),
+)
+
 const SEED_STATEMENTS = [
   `INSERT OR IGNORE INTO scopes (id, kind, name, canonical_path, metadata_json)
    VALUES ('global', 'global', 'global', NULL, '{}')`,
   `INSERT OR IGNORE INTO agent_kinds (agent_kind)
-   VALUES ('pdx'), ('pandora'), ('toil'), ('greed'), ('war')`,
+   VALUES ${sqlTuples(AGENT_KINDS.map((agentKind) => [agentKind]))}`,
   `INSERT OR IGNORE INTO capabilities (capability)
-   VALUES ('triage'), ('design'), ('execute'), ('escalate')`,
+   VALUES ${sqlTuples(CAPABILITIES.map((capability) => [capability]))}`,
   `INSERT OR IGNORE INTO agent_claims (agent_kind, capability)
-   VALUES ('pandora', 'escalate'), ('toil', 'triage'), ('greed', 'design'), ('war', 'execute')`,
+   VALUES ${sqlTuples(claimSeedRows)}`,
   `INSERT OR IGNORE INTO agent_enqueues (agent_kind, capability)
-   VALUES
-     ('pdx', 'escalate'),
-     ('pandora', 'triage'),
-     ('pandora', 'design'),
-     ('pandora', 'escalate'),
-     ('toil', 'triage'),
-     ('toil', 'design'),
-     ('toil', 'execute'),
-     ('toil', 'escalate'),
-     ('greed', 'triage'),
-     ('greed', 'design'),
-     ('greed', 'escalate'),
-     ('war', 'escalate')`,
+   VALUES ${sqlTuples(enqueueSeedRows)}`,
 ] as const
 
 const MANAGED_TABLE_COLUMNS = {

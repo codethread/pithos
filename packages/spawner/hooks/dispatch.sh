@@ -1,8 +1,23 @@
 #!/usr/bin/env bash
-[ -n "${PITHOS_AGENT:-}" ]  || exit 0
+set -euo pipefail
+
+[ -n "${PITHOS_AGENT:-}" ] || exit 0
 [ -n "${PITHOS_RUN_ID:-}" ] || exit 0
+[ -n "${PITHOS_BIN:-}" ] || {
+  printf '%s\n' 'pandora-spawn dispatch.sh: missing PITHOS_BIN' >&2
+  exit 1
+}
+
 case "${1:-}" in
-  PreToolUse) pithos heartbeat --run "$PITHOS_RUN_ID" --hook PreToolUse --throttle-seconds 60 >/dev/null 2>&1 || true ;;
-  SessionEnd) pithos run end --run "$PITHOS_RUN_ID" --status ended >/dev/null 2>&1 || true ;;
-  *)          printf '{"systemMessage":"pandora-spawn dispatch.sh: unknown hook event %s; check packages/spawner/README.md#harness-hooks and harness adapter wiring"}\n' "${1:-<empty>}" ;;
+  PreToolUse)
+    "$PITHOS_BIN" task heartbeat --run "$PITHOS_RUN_ID"
+    ;;
+  SessionEnd)
+    # `pdx` owns run finalization. Session-end hooks are observation only.
+    exit 0
+    ;;
+  *)
+    printf '%s\n' "pandora-spawn dispatch.sh: unknown hook event ${1:-<empty>}" >&2
+    exit 1
+    ;;
 esac

@@ -1,172 +1,190 @@
-import { readFileSync } from "node:fs"
+import * as FileSystem from "@effect/platform/FileSystem"
+import { Context, Effect, Layer, ParseResult, Schema } from "effect"
+import {
+  CapabilitySchema,
+  RunModeSchema,
+  SpawnableAgentKindSchema,
+  type SpawnableAgentKind,
+} from "@pithos/pithos/src/domain/control-plane.ts"
 import { basename, join } from "node:path"
-import { Either, ParseResult, Schema } from "effect"
 import { SpawnerError } from "./errors.ts"
+import type { HarnessName } from "./harness-name.ts"
+import { agentsPath, templatesDir } from "./paths.ts"
 
-const SystemPromptModeSchema = Schema.Literal("replace", "append")
-const ClaudeToolSchema = Schema.Literal("Bash", "Read", "Edit", "Write", "Grep", "Glob", "LS")
-const PiToolSchema = Schema.Literal("bash", "read", "edit", "write", "grep", "find", "ls")
-
-const ClaudeHarnessConfigSchema = Schema.Struct({
-  kind: Schema.Literal("claude"),
-  model: Schema.NonEmptyString,
-  tools: Schema.Array(ClaudeToolSchema).pipe(Schema.minItems(1)),
-  system_prompt_mode: SystemPromptModeSchema,
+const AgentHarnessSchema = Schema.Struct({
+  kind: Schema.Literal("claude", "pi"),
 })
 
-const PiHarnessConfigSchema = Schema.Struct({
-  kind: Schema.Literal("pi"),
-  model: Schema.NonEmptyString,
-  tools: Schema.Array(PiToolSchema).pipe(Schema.minItems(1)),
-  system_prompt_mode: SystemPromptModeSchema,
-})
-
-const HarnessConfigSchema = Schema.Union(ClaudeHarnessConfigSchema, PiHarnessConfigSchema)
-
-const LauncherCommandsSchema = Schema.Struct({
-  spawn: Schema.NonEmptyString,
-  status: Schema.NonEmptyString,
-  nudge: Schema.NonEmptyString,
-  kill: Schema.NonEmptyString,
-  tty_status: Schema.NonEmptyString,
-})
-
-const LauncherManifestSchema = Schema.Struct({
-  kind: Schema.NonEmptyString,
-  harness: Schema.NonEmptyString,
-  commands: LauncherCommandsSchema,
-  meta: Schema.optionalWith(Schema.Record({ key: Schema.String, value: Schema.String }), {
-    default: () => ({}),
-  }),
-})
-
-const AgentManifestSchema = Schema.Struct({
-  agent: Schema.NonEmptyString,
-  harness: HarnessConfigSchema,
-  capability: Schema.optionalWith(Schema.String, { default: () => "" }),
-  cwd: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
-  includes: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
-  system_prompt: Schema.NonEmptyString,
-  launcher: Schema.optionalWith(Schema.NonEmptyString, { exact: true }),
-  inject_meta: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+export const AgentManifestSchema = Schema.Struct({
+  agent: SpawnableAgentKindSchema,
+  mode: RunModeSchema,
+  claims: Schema.Array(CapabilitySchema).pipe(Schema.minItems(1)),
+  enqueues: Schema.Array(CapabilitySchema),
+  harness: AgentHarnessSchema,
+  template: Schema.NonEmptyString,
 })
 
 const AgentsFileSchema = Schema.Struct({
-  agents: Schema.Array(AgentManifestSchema),
-  launchers: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: LauncherManifestSchema }),
-    { default: () => ({}) },
-  ),
+  agents: Schema.Array(AgentManifestSchema).pipe(Schema.minItems(1)),
 })
 
-export type LauncherManifest = Schema.Schema.Type<typeof LauncherManifestSchema>
 export type AgentManifest = Schema.Schema.Type<typeof AgentManifestSchema>
-export type HarnessConfig = Schema.Schema.Type<typeof HarnessConfigSchema>
-export type SystemPromptMode = Schema.Schema.Type<typeof SystemPromptModeSchema>
-export type ClaudeTool = Schema.Schema.Type<typeof ClaudeToolSchema>
-export type PiTool = Schema.Schema.Type<typeof PiToolSchema>
+export type TemplateContext = Readonly<Record<string, string>>
 
 export interface LoadedTemplate {
   readonly manifest: AgentManifest
-  readonly launcher: LauncherManifest | undefined
   readonly body: string
-  readonly includes: Record<string, string>
 }
 
-export type RenderContext = Record<string, string>
+export interface TemplatePathsShape {
+  readonly agentsPath: string
+  readonly templatesDir: string
+}
+
+export class TemplatePaths extends Context.Tag("@pithos/spawner/TemplatePaths")<
+  TemplatePaths,
+  TemplatePathsShape
+>() {}
+
+export const TemplatePathsLive = Layer.succeed(TemplatePaths, {
+  agentsPath,
+  templatesDir,
+})
+
+export const makeTemplatePaths = (paths: TemplatePathsShape): Layer.Layer<TemplatePaths> =>
+  Layer.succeed(TemplatePaths, paths)
 
 type AgentsFile = Schema.Schema.Type<typeof AgentsFileSchema>
 
-const schemaError = (path: string, error: ParseResult.ParseError): SpawnerError =>
-  new SpawnerError({
-    code: "VALIDATION_ERROR",
-    message: `${path}: invalid template config\n${ParseResult.TreeFormatter.formatErrorSync(error)}`,
+const renderParseError = (error: ParseResult.ParseError): string =>
+  ParseResult.TreeFormatter.formatErrorSync(error)
+
+const validationError = (message: string): SpawnerError =>
+  new SpawnerError({ code: "VALIDATION_ERROR", message })
+
+const templateError = (message: string): SpawnerError =>
+  new SpawnerError({ code: "TEMPLATE_ERROR", message })
+
+const decodeUnknown = <A, I>(
+  schema: Schema.Schema<A, I>,
+  value: unknown,
+  message: string,
+): Effect.Effect<A, SpawnerError> =>
+  Schema.decodeUnknown(schema)(value).pipe(
+    Effect.mapError((error) => validationError(`${message}\n${renderParseError(error)}`)),
+  )
+
+const readFileUtf8 = (
+  path: string,
+  code: "VALIDATION_ERROR" | "TEMPLATE_ERROR",
+  message: string,
+): Effect.Effect<string, SpawnerError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    return yield* fs.readFileString(path, "utf-8").pipe(
+      Effect.mapError(
+        (error) =>
+          new SpawnerError({
+            code,
+            message: `${message}: ${error.message}`,
+          }),
+      ),
+    )
   })
 
-const decodeOrThrow = <A, I>(schema: Schema.Schema<A, I>, value: unknown, path: string): A => {
-  const decoded = Schema.decodeUnknownEither(schema)(value)
-  if (Either.isLeft(decoded)) throw schemaError(path, decoded.left)
-  return decoded.right
-}
-
-const readTemplateFile = (path: string): string => {
-  try {
-    return readFileSync(path, "utf8")
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw new SpawnerError({
-      code: "VALIDATION_ERROR",
-      message: `${path}: failed to read template file: ${message}`,
-    })
-  }
-}
-
-const loadAgentsFile = (agentsPath: string): AgentsFile => {
-  const raw = readTemplateFile(agentsPath)
-  const parsed = decodeOrThrow(Schema.parseJson(AgentsFileSchema), raw, agentsPath)
-  const names = new Set<string>()
-  for (const manifest of parsed.agents) {
-    if (names.has(manifest.agent)) {
-      throw new SpawnerError({
-        code: "VALIDATION_ERROR",
-        message: `${agentsPath}: duplicate agent ${manifest.agent}`,
-      })
+const validateManifest = (manifest: AgentManifest, sourcePath: string): Effect.Effect<void, SpawnerError> =>
+  Effect.gen(function* () {
+    if (manifest.claims.length !== 1) {
+      yield* Effect.fail(
+        validationError(
+          `${sourcePath}: ${manifest.agent} must declare exactly one claim; got ${manifest.claims.length}`,
+        ),
+      )
     }
-    names.add(manifest.agent)
-    if (manifest.launcher !== undefined && !(manifest.launcher in parsed.launchers)) {
-      throw new SpawnerError({
-        code: "VALIDATION_ERROR",
-        message: `${agentsPath}: unknown launcher for ${manifest.agent}: ${manifest.launcher}`,
-      })
-    }
-  }
-  return parsed
-}
 
-export const loadAgentManifests = (agentsPath: string): readonly AgentManifest[] => loadAgentsFile(agentsPath).agents
-
-export const loadTemplate = (agentsPath: string, templatesDir: string, agent: string): LoadedTemplate => {
-  const agentsFile = loadAgentsFile(agentsPath)
-  const manifest = agentsFile.agents.find((item) => item.agent === agent)
-  if (!manifest) {
-    throw new SpawnerError({
-      code: "VALIDATION_ERROR",
-      message: `${agentsPath}: unknown agent ${agent}`,
-    })
-  }
-  if (basename(manifest.system_prompt) !== manifest.system_prompt) {
-    throw new SpawnerError({
-      code: "VALIDATION_ERROR",
-      message: `${agentsPath}: system_prompt must be a template basename`,
-    })
-  }
-  if (manifest.system_prompt !== `${agent}.md.tmpl`) {
-    throw new SpawnerError({
-      code: "VALIDATION_ERROR",
-      message: `${agentsPath}: system_prompt must match agent stem: ${agent}.md.tmpl`,
-    })
-  }
-  const includes: Record<string, string> = {}
-  for (const include of manifest.includes) {
-    if (basename(include) !== include) {
-      throw new SpawnerError({
-        code: "VALIDATION_ERROR",
-        message: `${agentsPath}: include must be a template basename: ${include}`,
-      })
+    if (basename(manifest.template) !== manifest.template) {
+      yield* Effect.fail(
+        validationError(`${sourcePath}: template must be a basename for ${manifest.agent}`),
+      )
     }
-    includes[include] = readTemplateFile(join(templatesDir, include))
-  }
-  const launcher = manifest.launcher === undefined ? undefined : agentsFile.launchers[manifest.launcher]
-  return { manifest, launcher, body: readTemplateFile(join(templatesDir, manifest.system_prompt)), includes }
-}
 
-export const render = (template: string, ctx: RenderContext): string =>
-  template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key: string) => {
-    if (!(key in ctx)) {
-      throw new SpawnerError({
-        code: "VALIDATION_ERROR",
-        message: `Unknown template var: ${key}`,
-      })
+    const expectedTemplate = `${manifest.agent}.md.tmpl`
+    if (manifest.template !== expectedTemplate) {
+      yield* Effect.fail(
+        validationError(
+          `${sourcePath}: template for ${manifest.agent} must be ${expectedTemplate}; got ${manifest.template}`,
+        ),
+      )
     }
-    return ctx[key] ?? ""
+
   })
+
+const loadAgentsFile = (): Effect.Effect<AgentsFile, SpawnerError, FileSystem.FileSystem | TemplatePaths> =>
+  Effect.gen(function* () {
+    const paths = yield* TemplatePaths
+    const raw = yield* readFileUtf8(paths.agentsPath, "VALIDATION_ERROR", `${paths.agentsPath}: failed to read manifest file`)
+    const parsedJson = yield* Effect.try({
+      try: () => JSON.parse(raw) as unknown,
+      catch: (error) =>
+        validationError(
+          `${paths.agentsPath}: invalid manifest file: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+    })
+    const parsed = yield* decodeUnknown(AgentsFileSchema, parsedJson, `${paths.agentsPath}: invalid manifest file`)
+
+    const names = new Set<string>()
+    for (const manifest of parsed.agents) {
+      if (names.has(manifest.agent)) {
+        yield* Effect.fail(
+          validationError(`${paths.agentsPath}: duplicate agent manifest for ${manifest.agent}`),
+        )
+      }
+      names.add(manifest.agent)
+      yield* validateManifest(manifest, paths.agentsPath)
+    }
+
+    return parsed
+  })
+
+export const loadTemplate = (
+  agent: SpawnableAgentKind,
+): Effect.Effect<LoadedTemplate, SpawnerError, FileSystem.FileSystem | TemplatePaths> =>
+  Effect.gen(function* () {
+    const paths = yield* TemplatePaths
+    const agentsFile = yield* loadAgentsFile()
+    const manifest = agentsFile.agents.find((candidate) => candidate.agent === agent)
+
+    if (manifest === undefined) {
+      return yield* Effect.fail(validationError(`${paths.agentsPath}: unknown agent ${agent}`))
+    }
+
+    const templatePath = join(paths.templatesDir, manifest.template)
+    const body = yield* readFileUtf8(
+      templatePath,
+      "TEMPLATE_ERROR",
+      `${templatePath}: failed to read template file`,
+    )
+
+    return { manifest, body }
+  })
+
+export const render = (template: string, context: TemplateContext): Effect.Effect<string, SpawnerError> =>
+  Effect.try({
+    try: () =>
+      template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key: string) => {
+        if (!(key in context)) {
+          throw templateError(`Unknown template variable: ${key}`)
+        }
+
+        return context[key] ?? ""
+      }),
+    catch: (error) =>
+      error instanceof SpawnerError
+        ? error
+        : templateError(error instanceof Error ? error.message : String(error)),
+  })
+
+export const decodeHarnessKind = (raw: unknown): Effect.Effect<HarnessName, SpawnerError> =>
+  Schema.decodeUnknown(Schema.Literal("claude", "pi"))(raw).pipe(
+    Effect.mapError((error) => validationError(`Invalid harness kind\n${renderParseError(error)}`)),
+  )

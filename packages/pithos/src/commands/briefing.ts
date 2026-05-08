@@ -43,7 +43,7 @@ export const BRIEFING_SQL = {
                ORDER BY updated_at DESC, id ASC`,
   ARTIFACTS: `SELECT *
               FROM artifacts
-              WHERE kind IN ('worker-completion', 'design-brief', 'question')
+              WHERE kind IN ('war-completion', 'design-brief', 'question')
               ORDER BY created_at DESC, id DESC
               LIMIT 50`,
   HELD_TASKS: `SELECT id AS run_id, task_id FROM runs WHERE task_id IS NOT NULL ORDER BY id ASC`,
@@ -178,7 +178,7 @@ export const briefingCommand = (
     for (const task of doneTasks) {
       const taskArtifacts = artifactsByTaskId.get(task.id) ?? []
       const reviewArtifacts = taskArtifacts.filter(
-        (artifact) => artifact.kind === "worker-completion" || artifact.kind === "design-brief",
+        (artifact) => artifact.kind === "war-completion" || artifact.kind === "design-brief",
       )
       const taskLine = `- [done] \`${task.id}\`: "${task.title}" (scope: ${task.scope_id}, capability: ${task.capability})`
       if (reviewArtifacts.length === 0) {

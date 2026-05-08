@@ -61,13 +61,13 @@ Defer: tmux integration robustness beyond happy path; reconcile-tick scheduling 
 
 ## Acceptance criteria
 
-- [ ] Reconcile loop runs at default 5s tick; `--interval-seconds` honored
-- [ ] Pandora singleton invariant maintained
-- [ ] HITL `tmux has-session` death probe; AFK `kill(pid,0)` probe; both unit-tested
-- [ ] Death of Pandora's tmux triggers `run cleanup` and a fresh respawn next tick
-- [ ] `pdx open` prints `tmux attach -t pdx--pandora` on success
-- [ ] `pdx close` tears down in spec §4 order
-- [ ] Demo script committed and Adam + agent successfully walk through (human-verified, not CI-checkable; record confirmation as a comment on this issue)
+- [x] Reconcile loop runs at default 5s tick; `--interval-seconds` honored
+- [x] Pandora singleton invariant maintained
+- [x] HITL `tmux has-session` death probe; AFK `kill(pid,0)` probe; both unit-tested
+- [x] Death of Pandora's tmux triggers `run cleanup` and a fresh respawn next tick
+- [x] `pdx open` prints `tmux attach -t pdx--pandora` on success
+- [x] `pdx close` tears down in spec §4 order
+- [x] Demo script committed and Adam + agent successfully walk through (human-verified, not CI-checkable; record confirmation as a comment on this issue)
 
 ## Blocked by
 

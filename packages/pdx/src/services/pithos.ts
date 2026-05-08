@@ -13,12 +13,23 @@ export interface RunOutput {
   readonly updated_at: string
 }
 
+export interface GraphNodeSummary {
+  readonly id: string
+  readonly scope_id: string
+  readonly capability: string
+  readonly status: string
+  readonly claimable: boolean
+}
+
 export class PithosClient extends Context.Tag("@pithos/pdx/PithosClient")<
   PithosClient,
   {
     readonly init: () => Effect.Effect<void, PdxError>
-    readonly upsertSystemRun: (input: {
-      readonly home: string
+    readonly upsertRun: (input: {
+      readonly agent: "pdx" | "pandora"
+      readonly mode: "afk" | "hitl"
+      readonly scopeId: string
+      readonly cwd: string
       readonly runId: string
       readonly sessionId: string
     }) => Effect.Effect<RunOutput, PdxError>
@@ -26,5 +37,9 @@ export class PithosClient extends Context.Tag("@pithos/pdx/PithosClient")<
       readonly runId: string
       readonly reason: string
     }) => Effect.Effect<RunOutput, PdxError>
+    readonly heartbeatRun: (input: {
+      readonly runId: string
+    }) => Effect.Effect<RunOutput, PdxError>
+    readonly inspectGraphAll: () => Effect.Effect<readonly GraphNodeSummary[], PdxError>
   }
 >() {}

@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { mkdir } from "node:fs/promises"
-import { isAbsolute, resolve } from "node:path"
+import { dirname, isAbsolute, resolve } from "node:path"
 import { PdxError } from "../errors.ts"
 import { DAEMON_TARGET, resolveHome, socketPath } from "../home.ts"
 import { sendDaemonRequest } from "../socket-client.ts"
@@ -36,10 +36,19 @@ const waitForDaemonReady = (path: string): Effect.Effect<void, PdxError> =>
   Effect.async<void, PdxError>((resume) => {
     const startedAt = Date.now()
     const interval = setInterval(() => {
-      sendDaemonRequest(path, { type: "status" }).pipe(Effect.runPromise).then(() => {
-        clearInterval(interval)
-        resume(Effect.void)
+      sendDaemonRequest(path, { type: "status" }).pipe(Effect.runPromise).then((response) => {
+        if (response.ok !== true || response.state === undefined) {
+          return
+        }
+
+        const pandora = response.state.registry.find((entry) => entry.agent === "pandora")
+        if (pandora?.state === "live" && pandora.tmuxTarget === "pdx--pandora") {
+          clearInterval(interval)
+          resume(Effect.void)
+        }
       }).catch(() => {
+        // keep polling until timeout
+      }).finally(() => {
         if (Date.now() - startedAt > 5000) {
           clearInterval(interval)
           resume(
@@ -102,6 +111,7 @@ export const openCommand = (options: {
     const resolvedExecutable = resolve(process.cwd(), executable)
     const resolvedPithosBin = resolvePithosBinForDaemon(process.env.PITHOS_BIN)
     const resolvedPithosDb = resolvePathForDaemon(process.env.PITHOS_DB)
+    const spawnerPackageRoot = resolve(dirname(resolvedExecutable), "..", "..", "spawner")
 
     yield* tmux.newSession({
       target: DAEMON_TARGET,
@@ -120,6 +130,7 @@ export const openCommand = (options: {
       env: {
         ...(resolvedPithosBin === undefined ? {} : { PITHOS_BIN: resolvedPithosBin }),
         ...(resolvedPithosDb === undefined ? {} : { PITHOS_DB: resolvedPithosDb }),
+        PANDORA_SPAWN_PACKAGE_ROOT: spawnerPackageRoot,
       },
     })
 

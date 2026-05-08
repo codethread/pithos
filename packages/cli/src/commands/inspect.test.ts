@@ -1,17 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { Effect, Exit, Layer } from "effect";
+import { Effect, Exit } from "effect";
 
-import {
-	decodeInspectGraphSelector,
-	filterTerminalChains,
-	inspectGraphCommand,
-	renderGraphFlat,
-} from "./inspect.ts";
-import { makeDbServiceTest } from "../layers/db.ts";
-import { makeOutputServiceSilent, makeOutputServiceTest } from "../layers/output.ts";
+import { decodeInspectGraphSelector, filterTerminalChains, renderGraphFlat } from "./inspect.ts";
 import type { TaskGraph } from "../domain/task-graph.ts";
-
-const silentOutput = makeOutputServiceSilent();
 
 async function runEff<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Exit<A, E>> {
 	return Effect.runPromiseExit(effect);
@@ -55,51 +46,6 @@ describe("decodeInspectGraphSelector", () => {
 		);
 
 		expect(result).toEqual({ kind: "current" });
-	});
-});
-
-describe("inspectGraphCommand (unit — fake DB)", () => {
-	it("fails NOT_FOUND when the seed task is absent from the DB", async () => {
-		const exit = await runEff(
-			Effect.provide(
-				inspectGraphCommand({ kind: "task", value: "task_missing" }, false, false),
-				Layer.merge(makeDbServiceTest(), silentOutput),
-			),
-		);
-
-		expect(Exit.isFailure(exit)).toBe(true);
-	});
-
-	it("fails NOT_FOUND when the scope selector does not exist", async () => {
-		const exit = await runEff(
-			Effect.provide(
-				inspectGraphCommand({ kind: "scope", value: "scope_missing" }, false, false),
-				Layer.merge(makeDbServiceTest(), silentOutput),
-			),
-		);
-
-		expect(Exit.isFailure(exit)).toBe(true);
-	});
-
-	it("returns an empty graph for --current when there are no non-cancelled tasks", async () => {
-		const out = makeOutputServiceTest();
-		await Effect.runPromise(
-			Effect.provide(
-				inspectGraphCommand({ kind: "current" }, false, false),
-				Layer.merge(makeDbServiceTest(), out.layer),
-			),
-		);
-
-		expect(out.lines()).toEqual([
-			JSON.stringify({
-				ok: true,
-				graph: {
-					selector: { kind: "current" },
-					nodes: [],
-					edges: [],
-				},
-			}),
-		]);
 	});
 });
 

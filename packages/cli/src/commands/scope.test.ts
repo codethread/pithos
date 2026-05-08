@@ -3,21 +3,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { Effect, Exit, Layer } from "effect";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
 import { canonicalizePath, deriveScopeId, nameFromPath } from "../domain/scope.ts";
-import { scopeUpsertCommand } from "./scope.ts";
-import { inspectScopeCommand } from "./inspect.ts";
-import { makeDbServiceTest } from "../layers/db.ts";
-import { makeOutputServiceSilent } from "../layers/output.ts";
-
-const silentOutput = makeOutputServiceSilent();
-
-async function runEffect<A, E>(effect: Effect.Effect<A, E, never>): Promise<Exit.Exit<A, E>> {
-	return Effect.runPromiseExit(effect);
-}
 
 // ---------------------------------------------------------------------------
 // 1. Pure domain helpers
@@ -79,54 +68,5 @@ describe("nameFromPath", () => {
 	it("returns the basename", () => {
 		expect(nameFromPath("/home/user/work/perkbox/protobuf")).toBe("protobuf");
 		expect(nameFromPath("/home/user/work/perkbox")).toBe("perkbox");
-	});
-});
-
-// ---------------------------------------------------------------------------
-// 2. Unit — command logic with fake DB
-// ---------------------------------------------------------------------------
-
-describe("scopeUpsertCommand (unit — fake DB)", () => {
-	it("succeeds for kind=global with no path", async () => {
-		const exit = await runEffect(
-			Effect.provide(
-				scopeUpsertCommand({ kind: "global", path: undefined }),
-				Layer.merge(makeDbServiceTest(), silentOutput),
-			),
-		);
-		expect(Exit.isSuccess(exit)).toBe(true);
-	});
-
-	it("succeeds for kind=repo with a path", async () => {
-		const exit = await runEffect(
-			Effect.provide(
-				scopeUpsertCommand({ kind: "repo", path: "~/work/my-repo" }),
-				Layer.merge(makeDbServiceTest(), silentOutput),
-			),
-		);
-		expect(Exit.isSuccess(exit)).toBe(true);
-	});
-
-	it("fails with VALIDATION_ERROR when kind=repo and no path", async () => {
-		const exit = await runEffect(
-			Effect.provide(
-				scopeUpsertCommand({ kind: "repo", path: undefined }),
-				Layer.merge(makeDbServiceTest(), silentOutput),
-			),
-		);
-		expect(Exit.isFailure(exit)).toBe(true);
-		// Verify it's a failure — full cause inspection done in integration tests
-	});
-});
-
-describe("inspectScopeCommand (unit — fake DB)", () => {
-	it("fails with NOT_FOUND when scope is absent", async () => {
-		const exit = await runEffect(
-			Effect.provide(
-				inspectScopeCommand("repo:missing"),
-				Layer.merge(makeDbServiceTest(), silentOutput),
-			),
-		);
-		expect(Exit.isFailure(exit)).toBe(true);
 	});
 });

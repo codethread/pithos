@@ -4,6 +4,7 @@ import { FsService } from "../services/fs.ts";
 import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { staleTokensCompleteCounter, withCommandObservability } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -90,7 +91,7 @@ export const completeCommand = (
 		const txResult = yield* db.withTransaction(
 			Effect.gen(function* () {
 				const rows = yield* db.query(
-					`UPDATE tasks
+					sql`UPDATE tasks
            SET
              status       = 'done',
              result_json  = ?,
@@ -109,13 +110,13 @@ export const completeCommand = (
 				const task = rows[0]!;
 
 				yield* db.run(
-					`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+					sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.completed', ?)`,
 					[task.id, runId, JSON.stringify({ run_id: runId, fencing_token: token })],
 				);
 
 				yield* db.run(
-					`UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
+					sql`UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
 					[runId, taskId],
 				);
 

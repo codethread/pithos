@@ -8,6 +8,7 @@ import {
 	sweepRequeuedCounter,
 	withCommandObservability,
 } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -72,7 +73,7 @@ export const sweepCommand = (
 				// Step 1: Find expired claimed/running tasks.
 				// A task is expired when lease_until < now - leaseGraceSeconds.
 				const expiredRows = yield* db.query(
-					`SELECT * FROM tasks
+					sql`SELECT * FROM tasks
            WHERE status IN ('claimed', 'running')
              AND lease_until IS NOT NULL
              AND lease_until < strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '-' || ? || ' seconds'))`,
@@ -99,7 +100,7 @@ export const sweepCommand = (
 						// heartbeat extended the lease after the SELECT, the UPDATE will
 						// find no rows (safe skip — the task is no longer expired).
 						const requeuedRows = yield* db.query(
-							`UPDATE tasks
+							sql`UPDATE tasks
                SET
                  status             = 'queued',
                  lease_owner_run_id = NULL,
@@ -122,7 +123,7 @@ export const sweepCommand = (
 						}
 
 						yield* db.run(
-							`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+							sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
                VALUES (?, NULL, 'task.requeued', ?)`,
 							[
 								task.id,
@@ -139,7 +140,7 @@ export const sweepCommand = (
 						// Dead-letter: attempts exhausted.
 						// Same lease_until fence as above.
 						const deadRows = yield* db.query(
-							`UPDATE tasks
+							sql`UPDATE tasks
                SET
                  status     = 'dead_letter',
                  updated_at = datetime('now')
@@ -159,7 +160,7 @@ export const sweepCommand = (
 						}
 
 						yield* db.run(
-							`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+							sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
                VALUES (?, NULL, 'task.dead_lettered', ?)`,
 							[
 								task.id,
@@ -186,7 +187,7 @@ export const sweepCommand = (
 				// Comparing them directly as TEXT is incorrect (' ' < 'T' lexicographically).
 				// datetime(col) normalizes both to 'YYYY-MM-DD HH:MM:SS' for correct comparison.
 				const staleRunRows = yield* db.query(
-					`UPDATE runs
+					sql`UPDATE runs
            SET
              status     = 'stale',
              updated_at = datetime('now')

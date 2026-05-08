@@ -3,6 +3,7 @@ import { DbService } from "../services/db.ts";
 import { MigrationRow } from "./rows.ts";
 import type { PithosError } from "../errors/errors.ts";
 import { PithosError as PE } from "../errors/errors.ts";
+import { sql } from "./sql.ts";
 
 // ---------------------------------------------------------------------------
 // Migration definitions
@@ -24,7 +25,7 @@ const MIGRATION_1: Migration = {
 	version: 1,
 	name: "initial_schema",
 	statements: [
-		`CREATE TABLE IF NOT EXISTS scopes (
+		sql`CREATE TABLE IF NOT EXISTS scopes (
       id             TEXT PRIMARY KEY,
       kind           TEXT NOT NULL CHECK (kind IN ('global', 'repo', 'worktree')),
       name           TEXT NOT NULL,
@@ -33,7 +34,7 @@ const MIGRATION_1: Migration = {
       created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
-		`CREATE TABLE IF NOT EXISTS runs (
+		sql`CREATE TABLE IF NOT EXISTS runs (
       id                TEXT PRIMARY KEY,
       agent_kind        TEXT NOT NULL,
       scope_id          TEXT REFERENCES scopes(id),
@@ -52,7 +53,7 @@ const MIGRATION_1: Migration = {
       updated_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       ended_at          TEXT
     )`,
-		`CREATE TABLE IF NOT EXISTS tasks (
+		sql`CREATE TABLE IF NOT EXISTS tasks (
       id                 TEXT PRIMARY KEY,
       scope_id           TEXT NOT NULL REFERENCES scopes(id),
       capability         TEXT NOT NULL,
@@ -71,14 +72,14 @@ const MIGRATION_1: Migration = {
       updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       completed_at       TEXT
     )`,
-		`CREATE TABLE IF NOT EXISTS task_dependencies (
+		sql`CREATE TABLE IF NOT EXISTS task_dependencies (
       task_id            TEXT NOT NULL REFERENCES tasks(id),
       depends_on_task_id TEXT NOT NULL REFERENCES tasks(id),
       created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (task_id, depends_on_task_id),
       CHECK (task_id <> depends_on_task_id)
     )`,
-		`CREATE TABLE IF NOT EXISTS task_supersessions (
+		sql`CREATE TABLE IF NOT EXISTS task_supersessions (
       old_task_id       TEXT PRIMARY KEY REFERENCES tasks(id),
       new_task_id       TEXT NOT NULL UNIQUE REFERENCES tasks(id),
       created_by_run_id TEXT REFERENCES runs(id),
@@ -86,7 +87,7 @@ const MIGRATION_1: Migration = {
       created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CHECK (old_task_id <> new_task_id)
     )`,
-		`CREATE TABLE IF NOT EXISTS artifacts (
+		sql`CREATE TABLE IF NOT EXISTS artifacts (
       id            TEXT PRIMARY KEY,
       task_id       TEXT REFERENCES tasks(id),
       run_id        TEXT REFERENCES runs(id),
@@ -96,7 +97,7 @@ const MIGRATION_1: Migration = {
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
-		`CREATE TABLE IF NOT EXISTS events (
+		sql`CREATE TABLE IF NOT EXISTS events (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       actor_run_id TEXT REFERENCES runs(id),
@@ -105,13 +106,13 @@ const MIGRATION_1: Migration = {
       type         TEXT NOT NULL,
       payload_json TEXT NOT NULL DEFAULT '{}'
     )`,
-		`CREATE INDEX IF NOT EXISTS idx_tasks_claimable        ON tasks(scope_id, capability, status, lease_until)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_dependencies_task ON task_dependencies(task_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker ON task_dependencies(depends_on_task_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_task_supersessions_new ON task_supersessions(new_task_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_runs_status           ON runs(status, last_heartbeat_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_events_task           ON events(task_id, id)`,
-		`CREATE INDEX IF NOT EXISTS idx_events_created        ON events(id)`,
+		sql`CREATE INDEX IF NOT EXISTS idx_tasks_claimable        ON tasks(scope_id, capability, status, lease_until)`,
+		sql`CREATE INDEX IF NOT EXISTS idx_task_dependencies_task ON task_dependencies(task_id)`,
+		sql`CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker ON task_dependencies(depends_on_task_id)`,
+		sql`CREATE INDEX IF NOT EXISTS idx_task_supersessions_new ON task_supersessions(new_task_id)`,
+		sql`CREATE INDEX IF NOT EXISTS idx_runs_status           ON runs(status, last_heartbeat_at)`,
+		sql`CREATE INDEX IF NOT EXISTS idx_events_task           ON events(task_id, id)`,
+		sql`CREATE INDEX IF NOT EXISTS idx_events_created        ON events(id)`,
 	],
 };
 
@@ -134,14 +135,14 @@ export const runMigrations: Effect.Effect<void, PithosError, DbService> = Effect
 	// Bootstrap: ensure schema_migrations exists.
 	// Uses CREATE TABLE IF NOT EXISTS so this is safe to run every time.
 	yield* db.run(
-		`CREATE TABLE IF NOT EXISTS schema_migrations (
+		sql`CREATE TABLE IF NOT EXISTS schema_migrations (
          version    INTEGER PRIMARY KEY,
          applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
        )`,
 	);
 
 	// Determine which versions have already been applied.
-	const appliedRows = yield* db.query("SELECT version FROM schema_migrations");
+	const appliedRows = yield* db.query(sql`SELECT version FROM schema_migrations`);
 
 	// Decode version numbers via Schema to eliminate the `as number` cast.
 	const appliedVersions = new Set(
@@ -169,7 +170,7 @@ export const runMigrations: Effect.Effect<void, PithosError, DbService> = Effect
 					for (const sql of migration.statements) {
 						yield* db.run(sql);
 					}
-					yield* db.run("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", [
+					yield* db.run(sql`INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)`, [
 						migration.version,
 					]);
 				}),

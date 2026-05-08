@@ -17,6 +17,7 @@ import { DbService } from "../services/db.ts";
 import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { withCommandObservability } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 const decodeTaskRow = (row: unknown): Effect.Effect<TaskRow, PithosError> =>
 	Schema.decodeUnknown(TaskRow)(row).pipe(
@@ -79,7 +80,7 @@ export const inspectScopeCommand = (
 		const db = yield* DbService;
 		const output = yield* OutputService;
 
-		const rows = yield* db.query(`SELECT * FROM scopes WHERE id = ?`, [id]);
+		const rows = yield* db.query(sql`SELECT * FROM scopes WHERE id = ?`, [id]);
 
 		if (rows.length === 0) {
 			yield* Effect.fail(new PithosError({ code: "NOT_FOUND", message: `Scope not found: ${id}` }));
@@ -102,7 +103,7 @@ export const inspectTaskCommand = (
 		const db = yield* DbService;
 		const output = yield* OutputService;
 
-		const rows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [id]);
+		const rows = yield* db.query(sql`SELECT * FROM tasks WHERE id = ?`, [id]);
 
 		if (rows.length === 0) {
 			yield* Effect.fail(new PithosError({ code: "NOT_FOUND", message: `Task not found: ${id}` }));
@@ -119,7 +120,7 @@ export const inspectTaskCommand = (
 		const claimability = computeTaskClaimability(task, unresolvedDependencyIds, supersededBy);
 
 		const artifacts = yield* db
-			.query(`SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at ASC`, [id])
+			.query(sql`SELECT * FROM artifacts WHERE task_id = ? ORDER BY created_at ASC`, [id])
 			.pipe(Effect.flatMap((artifactRows) => Effect.forEach(artifactRows, decodeArtifactRow)));
 
 		yield* output.print(
@@ -358,7 +359,7 @@ export const inspectRunCommand = (
 		const db = yield* DbService;
 		const output = yield* OutputService;
 
-		const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id]);
+		const rows = yield* db.query(sql`SELECT * FROM runs WHERE id = ?`, [id]);
 
 		if (rows.length === 0) {
 			yield* Effect.fail(new PithosError({ code: "NOT_FOUND", message: `Run not found: ${id}` }));

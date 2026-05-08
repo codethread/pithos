@@ -9,6 +9,7 @@ import {
 	staleTokensHeartbeatCounter,
 	withCommandObservability,
 } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -123,7 +124,7 @@ export const heartbeatCommand = (
 			.withTransaction(
 				Effect.gen(function* () {
 					// 1. Check run exists and decode for typed field access.
-					const runRows = yield* db.query("SELECT * FROM runs WHERE id = ?", [runId]);
+					const runRows = yield* db.query(sql`SELECT * FROM runs WHERE id = ?`, [runId]);
 					if (runRows.length === 0) return { kind: "not_found" };
 
 					const run = yield* Schema.decodeUnknown(RunRow)(runRows[0]!).pipe(
@@ -141,7 +142,7 @@ export const heartbeatCommand = (
 					//    BEFORE any writes — stale token is always rejected even when throttled.
 					if (opts.task !== undefined && opts.token !== undefined) {
 						const tokenRows = yield* db.query(
-							`SELECT id FROM tasks
+							sql`SELECT id FROM tasks
              WHERE id = ?
                AND lease_owner_run_id = ?
                AND fencing_token = ?
@@ -169,7 +170,7 @@ export const heartbeatCommand = (
 					//    fail the Effect to trigger a rollback (no writes committed yet).
 					if (opts.task !== undefined && opts.token !== undefined) {
 						const taskRows = yield* db.query(
-							`UPDATE tasks
+							sql`UPDATE tasks
              SET
                status      = 'running',
                lease_until = strftime('%Y-%m-%dT%H:%M:%SZ',
@@ -196,7 +197,7 @@ export const heartbeatCommand = (
 
 						// 5. Task write succeeded — now update run heartbeat.
 						yield* db.run(
-							`UPDATE runs
+							sql`UPDATE runs
              SET
                status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
                last_heartbeat_at = datetime('now'),
@@ -211,7 +212,7 @@ export const heartbeatCommand = (
 
 					// 4b. No task — update run heartbeat unconditionally.
 					yield* db.run(
-						`UPDATE runs
+						sql`UPDATE runs
            SET
              status            = CASE WHEN status = 'starting' THEN 'running' ELSE status END,
              last_heartbeat_at = datetime('now'),
@@ -270,7 +271,7 @@ export const heartbeatCommand = (
 		}
 
 		// Re-read the updated run for the response
-		const runRows = yield* db.query("SELECT * FROM runs WHERE id = ?", [runId]);
+		const runRows = yield* db.query(sql`SELECT * FROM runs WHERE id = ?`, [runId]);
 		const run = runRows[0]!;
 
 		if (txResult.kind === "throttled") {

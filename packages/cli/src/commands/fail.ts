@@ -3,6 +3,7 @@ import { DbService } from "../services/db.ts";
 import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { staleTokensFailCounter, withCommandObservability } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -74,7 +75,7 @@ export const failCommand = (
 		const txResult = yield* db.withTransaction(
 			Effect.gen(function* () {
 				const rows = yield* db.query(
-					`UPDATE tasks
+					sql`UPDATE tasks
            SET
              status      = 'failed',
              result_json = ?,
@@ -92,13 +93,13 @@ export const failCommand = (
 				const task = rows[0]!;
 
 				yield* db.run(
-					`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+					sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.failed', ?)`,
 					[task.id, runId, JSON.stringify({ run_id: runId, fencing_token: token, reason })],
 				);
 
 				yield* db.run(
-					`UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
+					sql`UPDATE runs SET task_id = NULL, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
 					[runId, taskId],
 				);
 

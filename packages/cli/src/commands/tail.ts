@@ -4,6 +4,7 @@ import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { withCommandObservability } from "../layers/metrics.ts";
 import { EventRow } from "../db/rows.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -86,7 +87,7 @@ export const tailCommand = (
 		// chronological reading. The subquery selects DESC (newest first, for the
 		// LIMIT cut), then the outer query re-orders ASC.
 		const rawRows = yield* db.query(
-			`SELECT * FROM (SELECT * FROM events ORDER BY id DESC LIMIT ?) ORDER BY id ASC`,
+			sql`SELECT * FROM (SELECT * FROM events ORDER BY id DESC LIMIT ?) ORDER BY id ASC`,
 			[limit],
 		);
 

@@ -4,6 +4,7 @@ import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { TaskRow } from "../db/rows.ts";
 import { tasksClaimedCounter, withCommandObservability } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -77,7 +78,7 @@ export const claimCommand = (
 		const output = yield* OutputService;
 
 		// Validate run exists before attempting the claim transaction.
-		const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId]);
+		const runRows = yield* db.query(sql`SELECT id FROM runs WHERE id = ?`, [runId]);
 		if (runRows.length === 0) {
 			yield* Effect.fail(
 				new PithosError({ code: "NOT_FOUND", message: `Run not found: ${runId}` }),
@@ -99,7 +100,7 @@ export const claimCommand = (
 		const claimedTask = yield* db.withTransaction(
 			Effect.gen(function* () {
 				const rows = yield* db.query(
-					`UPDATE tasks
+					sql`UPDATE tasks
            SET
              status             = 'claimed',
              lease_owner_run_id = ?,
@@ -140,13 +141,13 @@ export const claimCommand = (
 					),
 				);
 
-				yield* db.run(`UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`, [
+				yield* db.run(sql`UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`, [
 					task.id,
 					runId,
 				]);
 
 				yield* db.run(
-					`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+					sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.claimed', ?)`,
 					[
 						task.id,

@@ -5,6 +5,7 @@ import { PithosError } from "../errors/errors.ts";
 import { canonicalizePath, deriveScopeId, nameFromPath } from "../domain/scope.ts";
 import type { ScopeKind } from "../domain/scope.ts";
 import { withCommandObservability } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 export interface ScopeUpsertOptions {
 	readonly kind: ScopeKind;
@@ -30,7 +31,7 @@ export const scopeUpsertCommand = (
 
 		if (opts.kind === "global") {
 			yield* db.run(
-				`INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
+				sql`INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
          VALUES ('global', 'global', 'global', NULL, '{}', CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP`,
 			);
@@ -56,7 +57,7 @@ export const scopeUpsertCommand = (
 		const name = nameFromPath(canonicalPath);
 
 		yield* db.run(
-			`INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
+			sql`INSERT INTO scopes (id, kind, name, canonical_path, metadata_json, updated_at)
        VALUES (?, ?, ?, ?, '{}', CURRENT_TIMESTAMP)
        ON CONFLICT(id) DO UPDATE SET
          kind           = excluded.kind,

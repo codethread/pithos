@@ -7,6 +7,7 @@ import { DbService } from "../services/db.ts";
 import { FsService } from "../services/fs.ts";
 import { IdService } from "../services/ids.ts";
 import { OutputService } from "../services/output.ts";
+import { sql } from "../db/sql.ts";
 
 class IdRow extends Schema.Class<IdRow>("IdRow")({
 	id: Schema.String,
@@ -186,7 +187,7 @@ export const supersedeCommand = (
 
 		const txResult = yield* db.withTransaction(
 			Effect.gen(function* () {
-				const taskRows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [taskId]);
+				const taskRows = yield* db.query(sql`SELECT * FROM tasks WHERE id = ?`, [taskId]);
 				if (taskRows.length === 0) {
 					yield* Effect.fail(
 						new PithosError({ code: "NOT_FOUND", message: `Task not found: ${taskId}` }),
@@ -195,7 +196,7 @@ export const supersedeCommand = (
 				}
 				const oldTask = yield* decodeTaskRow(taskRows[0]!);
 
-				const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId]);
+				const runRows = yield* db.query(sql`SELECT id FROM runs WHERE id = ?`, [runId]);
 				if (runRows.length === 0) {
 					yield* Effect.fail(
 						new PithosError({ code: "NOT_FOUND", message: `Run not found: ${runId}` }),
@@ -215,7 +216,7 @@ export const supersedeCommand = (
 				}
 
 				const supersessionRows = yield* db.query(
-					`SELECT new_task_id
+					sql`SELECT new_task_id
            FROM task_supersessions
            WHERE old_task_id = ?`,
 					[taskId],
@@ -233,7 +234,7 @@ export const supersedeCommand = (
 
 				const replacementScopeId = opts.scope ?? oldTask.scope_id;
 				if (opts.scope !== undefined) {
-					const scopeRows = yield* db.query(`SELECT id FROM scopes WHERE id = ?`, [
+					const scopeRows = yield* db.query(sql`SELECT id FROM scopes WHERE id = ?`, [
 						replacementScopeId,
 					]);
 					if (scopeRows.length === 0) {
@@ -249,7 +250,7 @@ export const supersedeCommand = (
 				}
 
 				const dependentRows = yield* db.query(
-					`SELECT t.id, t.status, t.created_at
+					sql`SELECT t.id, t.status, t.created_at
            FROM task_dependencies td
            JOIN tasks t ON t.id = td.task_id
            WHERE td.depends_on_task_id = ?
@@ -283,7 +284,7 @@ export const supersedeCommand = (
 					.map((dependent) => dependent.id);
 
 				const dependencyRows = yield* db.query(
-					`SELECT td.depends_on_task_id
+					sql`SELECT td.depends_on_task_id
            FROM task_dependencies td
            JOIN tasks t ON t.id = td.depends_on_task_id
            WHERE td.task_id = ?
@@ -300,7 +301,7 @@ export const supersedeCommand = (
 				const replacementBody = bodyOverride ?? oldTask.body;
 
 				const replacementRows = yield* db.query(
-					`INSERT INTO tasks
+					sql`INSERT INTO tasks
              (id, scope_id, capability, status, title, body, payload_json, lease_owner_run_id, lease_until, fencing_token, attempts, max_attempts, result_json, created_by_run_id, completed_at)
            VALUES (?, ?, ?, 'queued', ?, ?, ?, NULL, NULL, 0, 0, ?, '{}', ?, NULL)
            RETURNING *`,
@@ -328,7 +329,7 @@ export const supersedeCommand = (
 
 				for (const dependencyId of dependencyIds) {
 					yield* db.run(
-						`INSERT INTO task_dependencies (task_id, depends_on_task_id)
+						sql`INSERT INTO task_dependencies (task_id, depends_on_task_id)
              VALUES (?, ?)`,
 						[replacementTaskId, dependencyId],
 					);
@@ -337,11 +338,11 @@ export const supersedeCommand = (
 				// Remove the old task's direct upstream dependency rows so the current-state
 				// graph no longer includes obsolete old->blocker edges.
 				// Supersession history is preserved via task_supersessions and events.
-				yield* db.run(`DELETE FROM task_dependencies WHERE task_id = ?`, [taskId]);
+				yield* db.run(sql`DELETE FROM task_dependencies WHERE task_id = ?`, [taskId]);
 
 				for (const dependentTaskId of retargetedDependentTaskIds) {
 					const rewiredRows = yield* db.query(
-						`UPDATE task_dependencies
+						sql`UPDATE task_dependencies
              SET depends_on_task_id = ?
              WHERE task_id = ?
                AND depends_on_task_id = ?
@@ -367,14 +368,14 @@ export const supersedeCommand = (
 				}
 
 				yield* db.run(
-					`INSERT INTO task_supersessions (old_task_id, new_task_id, created_by_run_id, reason)
+					sql`INSERT INTO task_supersessions (old_task_id, new_task_id, created_by_run_id, reason)
            VALUES (?, ?, ?, ?)`,
 					[taskId, replacementTaskId, runId, reason],
 				);
 
 				if (oldTask.status === "queued") {
 					const cancelledRows = yield* db.query(
-						`UPDATE tasks
+						sql`UPDATE tasks
              SET status = 'cancelled', updated_at = datetime('now')
              WHERE id = ?
                AND status = 'queued'
@@ -400,7 +401,7 @@ export const supersedeCommand = (
 					} satisfies TaskCancelledEventPayload;
 
 					yield* db.run(
-						`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+						sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
              VALUES (?, ?, 'task.cancelled', ?)`,
 						[taskId, runId, JSON.stringify(taskCancelledEventPayload)],
 					);
@@ -415,7 +416,7 @@ export const supersedeCommand = (
 				} satisfies TaskCreatedEventPayload;
 
 				yield* db.run(
-					`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+					sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.created', ?)`,
 					[replacementTaskId, runId, JSON.stringify(taskCreatedEventPayload)],
 				);
@@ -427,7 +428,7 @@ export const supersedeCommand = (
 				} satisfies TaskSupersededEventPayload;
 
 				yield* db.run(
-					`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+					sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.superseded', ?)`,
 					[taskId, runId, JSON.stringify(taskSupersededEventPayload)],
 				);

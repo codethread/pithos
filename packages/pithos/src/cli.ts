@@ -6,6 +6,7 @@ import {
 	migrate,
 	openDb,
 	row,
+	sql,
 	type AgentKind,
 	type Capability,
 	type Mode,
@@ -97,7 +98,7 @@ const event = (
 	payload: { task_id?: string; run_id?: string; actor_run_id?: string; payload: unknown },
 ): void => {
 	db.prepare(
-		"INSERT INTO events(id,type,task_id,run_id,actor_run_id,payload_json) VALUES (?,?,?,?,?,?)",
+		sql`INSERT INTO events(id,type,task_id,run_id,actor_run_id,payload_json) VALUES (?,?,?,?,?,?)`,
 	).run(
 		id("event"),
 		type,
@@ -109,7 +110,7 @@ const event = (
 };
 const enforceCapScope = (db: Db, scopeId: string, cap: Capability): void => {
 	const s = row<ScopeRow>(
-		db.prepare("SELECT id,kind,canonical_path FROM scopes WHERE id=?").get(scopeId),
+		db.prepare(sql`SELECT id,kind,canonical_path FROM scopes WHERE id=?`).get(scopeId),
 		`scope not found: ${scopeId}`,
 	);
 	if (cap === "escalate" && s.kind !== "global")
@@ -132,13 +133,13 @@ const authorized = (
 	const r = row<RunRow>(
 		db
 			.prepare(
-				"SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?",
+				sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
 			)
 			.get(runId),
 		`run not found: ${runId}`,
 	);
 	const ok = db
-		.prepare(`SELECT 1 FROM ${table} WHERE agent_kind=? AND capability=?`)
+		.prepare(sql`SELECT 1 FROM ${table} WHERE agent_kind=? AND capability=?`)
 		.get(r.agent_kind, cap);
 	if (ok === undefined) fail("VALIDATION_ERROR", `${r.agent_kind} is not authorized for ${cap}`);
 	return r;
@@ -164,7 +165,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const canonical = rawPath === undefined ? null : resolve(rawPath);
 			const sid = kind === "global" ? "global" : `${kind}:${canonical}`;
 			db.prepare(
-				"INSERT INTO scopes(id,kind,canonical_path) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, canonical_path=excluded.canonical_path, updated_at=CURRENT_TIMESTAMP",
+				sql`INSERT INTO scopes(id,kind,canonical_path) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, canonical_path=excluded.canonical_path, updated_at=CURRENT_TIMESTAMP`,
 			).run(sid, kind, canonical);
 			out({ ok: true, scope: { id: sid, kind, canonical_path: canonical } });
 			return 0;
@@ -177,7 +178,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const cwd = req(rest, "--cwd");
 			const sess = req(rest, "--session-id");
 			db.prepare(
-				"INSERT INTO runs(id,agent_kind,mode,scope_id,cwd,session_id) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET agent_kind=excluded.agent_kind, mode=excluded.mode, scope_id=excluded.scope_id, cwd=excluded.cwd, session_id=excluded.session_id, updated_at=CURRENT_TIMESTAMP",
+				sql`INSERT INTO runs(id,agent_kind,mode,scope_id,cwd,session_id) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET agent_kind=excluded.agent_kind, mode=excluded.mode, scope_id=excluded.scope_id, cwd=excluded.cwd, session_id=excluded.session_id, updated_at=CURRENT_TIMESTAMP`,
 			).run(rid, ag, mo, scope, cwd, sess);
 			out({
 				ok: true,
@@ -197,7 +198,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const r = row<RunRow>(
 				db
 					.prepare(
-						"SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?",
+						sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
 					)
 					.get(c),
 				`run not found: ${c}`,
@@ -231,27 +232,26 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const tid = id("task");
 			db.transaction(() => {
 				db.prepare(
-					"INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)",
+					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
 				).run(tid, scope, cap, title, body(ctx, rest), runId);
 				for (const dep of depends) {
 					row<TaskRow>(
 						db
 							.prepare(
-								"SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?",
+								sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
 							)
 							.get(dep),
 						`dependency not found: ${dep}`,
 					);
 					if (
 						db
-							.prepare("SELECT new_task_id FROM task_supersessions WHERE old_task_id=?")
+							.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
 							.get(dep) !== undefined
 					)
 						fail("VALIDATION_ERROR", `dependency has been superseded: ${dep}`);
-					db.prepare("INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)").run(
-						tid,
-						dep,
-					);
+					db.prepare(
+						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
+					).run(tid, dep);
 				}
 				event(db, "task.created", {
 					task_id: tid,
@@ -272,7 +272,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const t = row<{ id: string }>(
 				db
 					.prepare(
-						"SELECT id FROM tasks t WHERE t.status='queued' AND t.scope_id=? AND t.capability=? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dep ON dep.id=td.depends_on_task_id WHERE td.task_id=t.id AND dep.status <> 'done') ORDER BY t.created_at ASC, t.id ASC LIMIT 1",
+						sql`SELECT id FROM tasks t WHERE t.status='queued' AND t.scope_id=? AND t.capability=? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dep ON dep.id=td.depends_on_task_id WHERE td.task_id=t.id AND dep.status <> 'done') ORDER BY t.created_at ASC, t.id ASC LIMIT 1`,
 					)
 					.get(scope, cap),
 				"no claimable work",
@@ -280,12 +280,12 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			db.transaction(() => {
 				const rr = db
 					.prepare(
-						"UPDATE runs SET task_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id IS NULL",
+						sql`UPDATE runs SET task_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id IS NULL`,
 					)
 					.run(t.id, runId);
 				if (rr.changes === 0) fail("VALIDATION_ERROR", "run already holds a task");
 				db.prepare(
-					"UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",
+					sql`UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`,
 				).run(t.id);
 				event(db, "task.claimed", {
 					task_id: t.id,
@@ -306,7 +306,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 				const tr = row<TaskRow>(
 					db
 						.prepare(
-							"SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?",
+							sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
 						)
 						.get(task),
 					`task not found: ${task}`,
@@ -314,7 +314,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 				if (tr.fencing_token !== Number(token)) fail("STALE_TOKEN", "stale fencing token");
 				if (tr.status === "claimed")
 					db.prepare(
-						"UPDATE tasks SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?",
+						sql`UPDATE tasks SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 					).run(task);
 				event(db, "task.heartbeat", {
 					task_id: task,
@@ -350,12 +350,12 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const r = db.transaction(() => {
 				const changes = db
 					.prepare(
-						"UPDATE tasks SET status=?, result_json=?, completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=? AND fencing_token=? AND status IN ('claimed','running')",
+						sql`UPDATE tasks SET status=?, result_json=?, completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=? AND fencing_token=? AND status IN ('claimed','running')`,
 					)
 					.run(st, res, taskId, token).changes;
 				if (changes === 0) fail("STALE_TOKEN_RACE", "stale token or task not active");
 				db.prepare(
-					"UPDATE runs SET task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id=?",
+					sql`UPDATE runs SET task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id=?`,
 				).run(runId, taskId);
 				event(db, b === "complete" ? "task.completed" : "task.failed", {
 					task_id: taskId,
@@ -365,7 +365,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 				return row<TaskRow>(
 					db
 						.prepare(
-							"SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?",
+							sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
 						)
 						.get(taskId),
 					`task not found: ${taskId}`,
@@ -379,14 +379,14 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const t = row<TaskRow>(
 				db
 					.prepare(
-						"SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?",
+						sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
 					)
 					.get(taskId),
 				`task not found: ${taskId}`,
 			);
 			const deps = db
 				.prepare(
-					"SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=? ORDER BY d.created_at,t.id",
+					sql`SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_task_id WHERE d.task_id=? ORDER BY d.created_at,t.id`,
 				)
 				.all(taskId);
 			const unresolved = (deps as { id: string; status: string }[])
@@ -394,7 +394,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 				.map((d) => d.id);
 			const dependents = db
 				.prepare(
-					"SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.task_id WHERE d.depends_on_task_id=? ORDER BY d.created_at,t.id",
+					sql`SELECT t.id,t.scope_id,t.status,t.title FROM task_dependencies d JOIN tasks t ON t.id=d.task_id WHERE d.depends_on_task_id=? ORDER BY d.created_at,t.id`,
 				)
 				.all(taskId);
 			out({
@@ -433,7 +433,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			out({
 				ok: true,
 				events: db
-					.prepare("SELECT * FROM events ORDER BY created_at DESC LIMIT ?")
+					.prepare(sql`SELECT * FROM events ORDER BY created_at DESC LIMIT ?`)
 					.all(Number(parseFlag(rest, "--limit") ?? 100)),
 			});
 			return 0;
@@ -447,7 +447,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const runId = req(rest, "--run");
 			const aid = id("artifact");
 			db.prepare(
-				"INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)",
+				sql`INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)`,
 			).run(
 				aid,
 				task,

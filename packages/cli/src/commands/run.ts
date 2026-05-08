@@ -4,6 +4,7 @@ import { IdService } from "../services/ids.ts";
 import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { withCommandObservability } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -66,7 +67,7 @@ export const runRegisterCommand = (
 		yield* db.withTransaction(
 			Effect.gen(function* () {
 				const insertedRows = yield* db.query(
-					`INSERT OR IGNORE INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
+					sql`INSERT OR IGNORE INTO runs (id, agent_kind, scope_id, cwd, session_id, parent_run_id, status)
            VALUES (?, ?, ?, ?, ?, ?, 'starting')
            RETURNING id`,
 					[
@@ -80,7 +81,7 @@ export const runRegisterCommand = (
 				);
 				if (insertedRows.length > 0) {
 					yield* db.run(
-						`INSERT INTO events (run_id, actor_run_id, type, payload_json)
+						sql`INSERT INTO events (run_id, actor_run_id, type, payload_json)
              VALUES (?, ?, 'run.registered', '{}')`,
 						[id, id],
 					);
@@ -88,7 +89,7 @@ export const runRegisterCommand = (
 			}),
 		);
 
-		const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [id]);
+		const rows = yield* db.query(sql`SELECT * FROM runs WHERE id = ?`, [id]);
 
 		yield* Effect.logDebug("run registered").pipe(Effect.annotateLogs({ runId: id, agentKind }));
 		yield* output.print(JSON.stringify({ ok: true, run: rows[0] }));
@@ -137,11 +138,11 @@ export const runEndCommand = (
 		// without a racy follow-up SELECT.
 		const exists = yield* db.withTransaction(
 			Effect.gen(function* () {
-				const check = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [runId]);
+				const check = yield* db.query(sql`SELECT id FROM runs WHERE id = ?`, [runId]);
 				if (check.length === 0) return false;
 
 				const updatedRows = yield* db.query(
-					`UPDATE runs
+					sql`UPDATE runs
            SET   status       = ?,
                  last_summary = ?,
                  ended_at     = datetime('now'),
@@ -153,7 +154,7 @@ export const runEndCommand = (
 				);
 				if (updatedRows.length > 0) {
 					yield* db.run(
-						`INSERT INTO events (run_id, actor_run_id, type, payload_json)
+						sql`INSERT INTO events (run_id, actor_run_id, type, payload_json)
              VALUES (?, ?, 'run.ended', ?)`,
 						[runId, runId, JSON.stringify({ status, summary: opts.summary ?? null })],
 					);
@@ -169,7 +170,7 @@ export const runEndCommand = (
 			return;
 		}
 
-		const rows = yield* db.query(`SELECT * FROM runs WHERE id = ?`, [runId]);
+		const rows = yield* db.query(sql`SELECT * FROM runs WHERE id = ?`, [runId]);
 
 		yield* Effect.logDebug("run ended").pipe(Effect.annotateLogs({ runId, status }));
 		yield* output.print(JSON.stringify({ ok: true, run: rows[0] }));

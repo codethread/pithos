@@ -5,6 +5,7 @@ import { IdService } from "../services/ids.ts";
 import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { withCommandObservability } from "../layers/metrics.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -67,14 +68,14 @@ export const artifactAddCommand = (
 		// Validate task and run exist before insert.
 		const db = yield* DbService;
 
-		const taskCheck = yield* db.query("SELECT id FROM tasks WHERE id = ?", [opts.task]);
+		const taskCheck = yield* db.query(sql`SELECT id FROM tasks WHERE id = ?`, [opts.task]);
 		if (taskCheck.length === 0) {
 			yield* Effect.fail(
 				new PithosError({ code: "NOT_FOUND", message: `Task not found: ${opts.task}` }),
 			);
 			return;
 		}
-		const runCheck = yield* db.query("SELECT id FROM runs WHERE id = ?", [opts.run]);
+		const runCheck = yield* db.query(sql`SELECT id FROM runs WHERE id = ?`, [opts.run]);
 		if (runCheck.length === 0) {
 			yield* Effect.fail(
 				new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
@@ -89,7 +90,7 @@ export const artifactAddCommand = (
 		const artifactRows = yield* db.withTransaction(
 			Effect.gen(function* () {
 				return yield* db.query(
-					`INSERT INTO artifacts (id, task_id, run_id, kind, title, body)
+					sql`INSERT INTO artifacts (id, task_id, run_id, kind, title, body)
            VALUES (?, ?, ?, ?, ?, ?)
            RETURNING *`,
 					[artifactId, opts.task, opts.run, opts.kind, opts.title, body],

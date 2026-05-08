@@ -6,6 +6,7 @@ import { OutputService } from "../services/output.ts";
 import { PithosError } from "../errors/errors.ts";
 import { withCommandObservability } from "../layers/metrics.ts";
 import { assertTaskGraphAcyclic } from "../domain/task-graph.ts";
+import { sql } from "../db/sql.ts";
 
 class TaskIdRow extends Schema.Class<TaskIdRow>("TaskIdRow")({
 	id: Schema.String,
@@ -147,7 +148,7 @@ export const enqueueCommand = (
 
 		yield* db.withTransaction(
 			Effect.gen(function* () {
-				const scopeRows = yield* db.query(`SELECT id FROM scopes WHERE id = ?`, [scope]);
+				const scopeRows = yield* db.query(sql`SELECT id FROM scopes WHERE id = ?`, [scope]);
 				if (scopeRows.length === 0) {
 					yield* Effect.fail(
 						new PithosError({ code: "NOT_FOUND", message: `Scope not found: ${scope}` }),
@@ -157,7 +158,7 @@ export const enqueueCommand = (
 				yield* decodeTaskIdRow(scopeRows[0]!);
 
 				if (opts.run) {
-					const runRows = yield* db.query(`SELECT id FROM runs WHERE id = ?`, [opts.run]);
+					const runRows = yield* db.query(sql`SELECT id FROM runs WHERE id = ?`, [opts.run]);
 					if (runRows.length === 0) {
 						yield* Effect.fail(
 							new PithosError({ code: "NOT_FOUND", message: `Run not found: ${opts.run}` }),
@@ -168,7 +169,7 @@ export const enqueueCommand = (
 				}
 
 				for (const dependencyId of dependsOnTaskIds) {
-					const dependencyRows = yield* db.query(`SELECT id FROM tasks WHERE id = ?`, [
+					const dependencyRows = yield* db.query(sql`SELECT id FROM tasks WHERE id = ?`, [
 						dependencyId,
 					]);
 					if (dependencyRows.length === 0) {
@@ -183,7 +184,7 @@ export const enqueueCommand = (
 					yield* decodeTaskIdRow(dependencyRows[0]!);
 
 					const supersededRows = yield* db.query(
-						`SELECT ts.old_task_id, ts.new_task_id, t.scope_id, t.status, t.title
+						sql`SELECT ts.old_task_id, ts.new_task_id, t.scope_id, t.status, t.title
              FROM task_supersessions ts
              JOIN tasks t ON t.id = ts.new_task_id
              WHERE ts.old_task_id = ?`,
@@ -204,7 +205,7 @@ export const enqueueCommand = (
 					}
 				}
 				yield* db.run(
-					`INSERT INTO tasks
+					sql`INSERT INTO tasks
              (id, scope_id, capability, status, title, body, created_by_run_id)
            VALUES (?, ?, ?, 'queued', ?, ?, ?)`,
 					[id, scope, capability, title, body, opts.run ?? null],
@@ -212,7 +213,7 @@ export const enqueueCommand = (
 
 				for (const dependencyId of dependsOnTaskIds) {
 					yield* db.run(
-						`INSERT INTO task_dependencies (task_id, depends_on_task_id)
+						sql`INSERT INTO task_dependencies (task_id, depends_on_task_id)
              VALUES (?, ?)`,
 						[id, dependencyId],
 					);
@@ -228,14 +229,14 @@ export const enqueueCommand = (
 				} satisfies TaskCreatedEventPayload;
 
 				yield* db.run(
-					`INSERT INTO events (task_id, actor_run_id, type, payload_json)
+					sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
            VALUES (?, ?, 'task.created', ?)`,
 					[id, opts.run ?? null, JSON.stringify(taskCreatedEventPayload)],
 				);
 			}),
 		);
 
-		const rows = yield* db.query(`SELECT * FROM tasks WHERE id = ?`, [id]);
+		const rows = yield* db.query(sql`SELECT * FROM tasks WHERE id = ?`, [id]);
 
 		yield* output.print(JSON.stringify({ ok: true, task: rows[0] }));
 	}).pipe(Effect.withLogSpan("pithos.enqueue"), withCommandObservability("enqueue"));

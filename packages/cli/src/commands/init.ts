@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Help
@@ -50,7 +51,7 @@ export const initCommand: Effect.Effect<void, PithosError, DbService | OutputSer
 
 		// Ensure the built-in global scope exists.
 		yield* db.run(
-			`INSERT OR IGNORE INTO scopes (id, kind, name) VALUES ('global', 'global', 'global')`,
+			sql`INSERT OR IGNORE INTO scopes (id, kind, name) VALUES ('global', 'global', 'global')`,
 		);
 
 		yield* Effect.logDebug("database initialized");

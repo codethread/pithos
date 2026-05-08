@@ -3,6 +3,7 @@ import { TaskDependencyRow } from "../db/rows.ts";
 import type { TaskRow } from "../db/rows.ts";
 import { PithosError } from "../errors/errors.ts";
 import { DbService } from "../services/db.ts";
+import { sql } from "../db/sql.ts";
 
 export interface DependencyEdge {
 	readonly taskId: string;
@@ -242,7 +243,7 @@ export const assertTaskGraphAcyclic: Effect.Effect<void, PithosError, DbService>
 	function* () {
 		const db = yield* DbService;
 		const rows = yield* db.query(
-			`SELECT task_id, depends_on_task_id, created_at
+			sql`SELECT task_id, depends_on_task_id, created_at
        FROM task_dependencies
        ORDER BY task_id ASC, depends_on_task_id ASC`,
 		);
@@ -274,7 +275,7 @@ export const loadDirectDependencies = (
 	Effect.gen(function* () {
 		const db = yield* DbService;
 		const rows = yield* db.query(
-			`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
+			sql`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
        FROM task_dependencies td
        JOIN tasks t ON t.id = td.depends_on_task_id
        WHERE td.task_id = ?
@@ -293,7 +294,7 @@ export const loadDirectDependents = (
 	Effect.gen(function* () {
 		const db = yield* DbService;
 		const rows = yield* db.query(
-			`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
+			sql`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
        FROM task_dependencies td
        JOIN tasks t ON t.id = td.task_id
        WHERE td.depends_on_task_id = ?
@@ -306,7 +307,7 @@ export const loadDirectDependents = (
 		);
 	});
 
-export const LOAD_UNRESOLVED_DEPENDENCIES_SQL = `SELECT t.id, t.scope_id, t.status, t.title, t.created_at
+export const LOAD_UNRESOLVED_DEPENDENCIES_SQL = sql`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
        FROM task_dependencies td
        JOIN tasks t ON t.id = td.depends_on_task_id
        WHERE td.task_id = ?
@@ -338,7 +339,7 @@ export const loadSupersedesSummary = (
 	Effect.gen(function* () {
 		const db = yield* DbService;
 		const rows = yield* db.query(
-			`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
+			sql`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
        FROM task_supersessions ts
        JOIN tasks t ON t.id = ts.old_task_id
        WHERE ts.new_task_id = ?`,
@@ -359,7 +360,7 @@ export const loadSupersededBySummary = (
 	Effect.gen(function* () {
 		const db = yield* DbService;
 		const rows = yield* db.query(
-			`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
+			sql`SELECT t.id, t.scope_id, t.status, t.title, t.created_at
        FROM task_supersessions ts
        JOIN tasks t ON t.id = ts.new_task_id
        WHERE ts.old_task_id = ?`,
@@ -432,7 +433,7 @@ const loadTaskGraphNodes = (
 		const db = yield* DbService;
 		const placeholders = makeSqlPlaceholders(taskIds.length);
 		const rows = yield* db.query(
-			`SELECT id, scope_id, capability, status, title, created_at
+			sql`SELECT id, scope_id, capability, status, title, created_at
        FROM tasks
        WHERE id IN (${placeholders})
        ORDER BY created_at ASC, id ASC`,
@@ -476,7 +477,7 @@ const loadTaskGraphEdges = (
 		const params = [...taskIds, ...taskIds];
 
 		const dependencyRows = yield* db.query(
-			`SELECT td.task_id AS from_task_id, td.depends_on_task_id AS to_task_id, dep.status AS blocker_status
+			sql`SELECT td.task_id AS from_task_id, td.depends_on_task_id AS to_task_id, dep.status AS blocker_status
        FROM task_dependencies td
        JOIN tasks dep ON dep.id = td.depends_on_task_id
        WHERE td.task_id IN (${placeholders})
@@ -484,7 +485,7 @@ const loadTaskGraphEdges = (
 			params,
 		);
 		const supersessionRows = yield* db.query(
-			`SELECT ts.new_task_id AS from_task_id, ts.old_task_id AS to_task_id
+			sql`SELECT ts.new_task_id AS from_task_id, ts.old_task_id AS to_task_id
        FROM task_supersessions ts
        WHERE ts.new_task_id IN (${placeholders})
          AND ts.old_task_id IN (${placeholders})`,
@@ -659,7 +660,7 @@ export const loadTaskGraph = (
 ): Effect.Effect<TaskGraph, PithosError, DbService> =>
 	Effect.gen(function* () {
 		const db = yield* DbService;
-		const seedRows = yield* db.query(`SELECT id FROM tasks WHERE id = ?`, [seedTaskId]);
+		const seedRows = yield* db.query(sql`SELECT id FROM tasks WHERE id = ?`, [seedTaskId]);
 
 		if (seedRows.length === 0) {
 			yield* Effect.fail(
@@ -680,7 +681,7 @@ export const loadScopeTaskGraph = (
 ): Effect.Effect<TaskGraph, PithosError, DbService> =>
 	Effect.gen(function* () {
 		const db = yield* DbService;
-		const scopeRows = yield* db.query(`SELECT id FROM scopes WHERE id = ?`, [scopeId]);
+		const scopeRows = yield* db.query(sql`SELECT id FROM scopes WHERE id = ?`, [scopeId]);
 
 		if (scopeRows.length === 0) {
 			yield* Effect.fail(
@@ -694,7 +695,7 @@ export const loadScopeTaskGraph = (
 		yield* decodeIdRow(scopeRows[0]!);
 
 		const seedTaskIds = yield* loadIdRows(
-			`SELECT id
+			sql`SELECT id
        FROM tasks
        WHERE scope_id = ?
          AND status <> 'cancelled'
@@ -707,7 +708,7 @@ export const loadScopeTaskGraph = (
 
 export const loadCurrentTaskGraph = (): Effect.Effect<TaskGraph, PithosError, DbService> =>
 	loadIdRows(
-		`SELECT id
+		sql`SELECT id
      FROM tasks
      WHERE status <> 'cancelled'
      ORDER BY created_at ASC, id ASC`,

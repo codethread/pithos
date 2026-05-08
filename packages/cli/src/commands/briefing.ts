@@ -5,6 +5,7 @@ import { PithosError } from "../errors/errors.ts";
 import { withCommandObservability } from "../layers/metrics.ts";
 import { TaskRow, RunRow, ArtifactRow } from "../db/rows.ts";
 import { loadUnresolvedDependencies, type TaskRelationshipSummary } from "../domain/task-graph.ts";
+import { sql } from "../db/sql.ts";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -24,11 +25,11 @@ export interface BriefingOptions {
 // ---------------------------------------------------------------------------
 
 export const BRIEFING_SQL = {
-	TASKS: `SELECT * FROM tasks WHERE status NOT IN ('cancelled') ORDER BY created_at ASC, id ASC`,
+	TASKS: sql`SELECT * FROM tasks WHERE status NOT IN ('cancelled') ORDER BY created_at ASC, id ASC`,
 	/** Stale runs: already marked stale OR active with heartbeat older than 15 minutes. */
-	STALE_RUNS: `SELECT * FROM runs WHERE status = 'stale' OR (status IN ('starting', 'running', 'idle') AND ((last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) < datetime('now', '-15 minutes')) OR (last_heartbeat_at IS NULL AND datetime(created_at) < datetime('now', '-15 minutes')))) ORDER BY updated_at DESC`,
-	ARTIFACTS: `SELECT * FROM artifacts WHERE kind IN ('worker-completion', 'design-brief', 'question') ORDER BY created_at DESC LIMIT 50`,
-	WATERMARK: `SELECT MAX(id) AS max_id FROM events`,
+	STALE_RUNS: sql`SELECT * FROM runs WHERE status = 'stale' OR (status IN ('starting', 'running', 'idle') AND ((last_heartbeat_at IS NOT NULL AND datetime(last_heartbeat_at) < datetime('now', '-15 minutes')) OR (last_heartbeat_at IS NULL AND datetime(created_at) < datetime('now', '-15 minutes')))) ORDER BY updated_at DESC`,
+	ARTIFACTS: sql`SELECT * FROM artifacts WHERE kind IN ('worker-completion', 'design-brief', 'question') ORDER BY created_at DESC LIMIT 50`,
+	WATERMARK: sql`SELECT MAX(id) AS max_id FROM events`,
 } as const;
 
 // ---------------------------------------------------------------------------

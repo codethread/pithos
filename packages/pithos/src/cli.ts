@@ -1,22 +1,66 @@
+import process from "node:process";
+import { inspect } from "node:util";
 import { Args, Command, Options } from "@effect/cli";
 import { Effect, Option } from "effect";
 import type { Config } from "./config.js";
 import { makeEngine } from "./engine.js";
 import { exitCodeFor, PithosError } from "./errors.js";
+import type { Mode, ScopeKind } from "./db.js";
 import type { Services } from "./services.js";
 
 export interface CliContext {
-	readonly config: Config;
+	readonly config: Config | (() => Config);
 	readonly services: Services;
 }
+
+type CommandInput =
+	| { readonly command: "init"; readonly fresh: boolean }
+	| {
+			readonly command: "scope.upsert";
+			readonly kind: ScopeKind;
+			readonly path: string | undefined;
+	  }
+	| {
+			readonly command: "run.upsert";
+			readonly agent: string;
+			readonly mode: Mode;
+			readonly scope: string;
+			readonly cwd: string;
+			readonly sessionId: string;
+			readonly runId: string | undefined;
+	  }
+	| { readonly command: "run.inspect"; readonly runId: string }
+	| { readonly command: "events.tail"; readonly limit: number | undefined };
 
 const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
 const json = (value: unknown): string => `${JSON.stringify(value)}\n`;
 
-const writeResult = (ctx: CliContext, run: () => unknown) =>
+const resolveConfig = (config: Config | (() => Config)): Config =>
+	typeof config === "function" ? config() : config;
+
+const runCommand = (ctx: CliContext, input: CommandInput) =>
 	Effect.sync(() => {
 		try {
-			ctx.services.output.write(json(run()));
+			const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
+			switch (input.command) {
+				case "init":
+					ctx.services.output.write(json(engine.init({ fresh: input.fresh })));
+					return;
+				case "scope.upsert":
+					ctx.services.output.write(
+						json(engine.scopeUpsert({ kind: input.kind, path: input.path })),
+					);
+					return;
+				case "run.upsert":
+					ctx.services.output.write(json(engine.runUpsert(input)));
+					return;
+				case "run.inspect":
+					ctx.services.output.write(json(engine.runInspect({ runId: input.runId })));
+					return;
+				case "events.tail":
+					ctx.services.output.write(json(engine.eventsTail({ limit: input.limit })));
+					return;
+			}
 		} catch (error) {
 			if (error instanceof PithosError) {
 				ctx.services.output.writeError(
@@ -25,22 +69,17 @@ const writeResult = (ctx: CliContext, run: () => unknown) =>
 				process.exitCode = exitCodeFor(error.code);
 				return;
 			}
-			throw error;
+			const message = error instanceof Error ? error.message : inspect(error);
+			ctx.services.output.writeError(
+				json({ ok: false, error: { code: "INTERNAL_ERROR", message } }),
+			);
+			process.exitCode = 1;
 		}
 	});
 
-const notImplemented = (ctx: CliContext, command: string) =>
-	writeResult(ctx, () => {
-		throw new PithosError({
-			code: "VALIDATION_ERROR",
-			message: `${command} is not implemented in pithos-next yet`,
-		});
-	});
-
 export const makePithosCommand = (ctx: CliContext) => {
-	const engine = makeEngine(ctx);
 	const init = Command.make("init", { fresh: Options.boolean("fresh") }, ({ fresh }) =>
-		writeResult(ctx, () => engine.init({ fresh })),
+		runCommand(ctx, { command: "init", fresh }),
 	);
 	const scopeUpsert = Command.make(
 		"upsert",
@@ -48,13 +87,13 @@ export const makePithosCommand = (ctx: CliContext) => {
 			kind: Options.choice("kind", ["global", "repo", "worktree"] as const),
 			path: Options.text("path").pipe(Options.optional),
 		},
-		({ kind, path }) => writeResult(ctx, () => engine.scopeUpsert({ kind, path: opt(path) })),
+		({ kind, path }) => runCommand(ctx, { command: "scope.upsert", kind, path: opt(path) }),
 	);
 	const scope = Command.make("scope").pipe(Command.withSubcommands([scopeUpsert]));
 	const runUpsert = Command.make(
 		"upsert",
 		{
-			agent: Options.choice("agent", ["pdx", "pandora", "toil", "greed", "war"] as const),
+			agent: Options.text("agent"),
 			mode: Options.choice("mode", ["afk", "hitl"] as const),
 			scope: Options.text("scope"),
 			cwd: Options.text("cwd"),
@@ -62,155 +101,27 @@ export const makePithosCommand = (ctx: CliContext) => {
 			runId: Options.text("run").pipe(Options.optional),
 		},
 		(o) =>
-			writeResult(ctx, () =>
-				engine.runUpsert({
-					agent: o.agent,
-					mode: o.mode,
-					scope: o.scope,
-					cwd: o.cwd,
-					sessionId: o.sessionId,
-					runId: opt(o.runId),
-				}),
-			),
+			runCommand(ctx, {
+				command: "run.upsert",
+				agent: o.agent,
+				mode: o.mode,
+				scope: o.scope,
+				cwd: o.cwd,
+				sessionId: o.sessionId,
+				runId: opt(o.runId),
+			}),
 	);
-	const runInspect = Command.make("inspect", { id: Args.text({ name: "run-id" }) }, () =>
-		notImplemented(ctx, "run inspect"),
+	const runInspect = Command.make("inspect", { id: Args.text({ name: "run-id" }) }, ({ id }) =>
+		runCommand(ctx, { command: "run.inspect", runId: id }),
 	);
 	const runParent = Command.make("run").pipe(Command.withSubcommands([runUpsert, runInspect]));
-	const enqueue = Command.make(
-		"enqueue",
-		{
-			scope: Options.text("scope"),
-			capability: Options.choice("capability", [
-				"triage",
-				"design",
-				"execute",
-				"escalate",
-			] as const),
-			title: Options.text("title"),
-			body: Options.text("body").pipe(Options.optional),
-			bodyFile: Options.text("body-file").pipe(Options.optional),
-			runId: Options.text("run").pipe(Options.optional),
-			dependsOn: Options.text("depends-on").pipe(Options.repeated),
-		},
-		() => notImplemented(ctx, "task enqueue"),
-	);
-	const claim = Command.make(
-		"claim",
-		{
-			runId: Options.text("run"),
-			scope: Options.text("scope"),
-			capability: Options.choice("capability", [
-				"triage",
-				"design",
-				"execute",
-				"escalate",
-			] as const),
-		},
-		(o) =>
-			writeResult(ctx, () =>
-				engine.claim({ runId: o.runId, scope: o.scope, capability: o.capability }),
-			),
-	);
-	const heartbeat = Command.make(
-		"heartbeat",
-		{
-			runId: Options.text("run"),
-			task: Options.text("task").pipe(Options.optional),
-			token: Options.integer("token").pipe(Options.optional),
-		},
-		() => notImplemented(ctx, "task heartbeat"),
-	);
-	const complete = Command.make(
-		"complete",
-		{
-			id: Args.text({ name: "task-id" }),
-			runId: Options.text("run"),
-			token: Options.integer("token"),
-			resultFile: Options.text("result-file").pipe(Options.optional),
-		},
-		() => notImplemented(ctx, "task complete"),
-	);
-	const fail = Command.make(
-		"fail",
-		{
-			id: Args.text({ name: "task-id" }),
-			runId: Options.text("run"),
-			token: Options.integer("token"),
-			reason: Options.text("reason"),
-		},
-		() => notImplemented(ctx, "task fail"),
-	);
-	const inspect = Command.make("inspect", { id: Args.text({ name: "task-id" }) }, () =>
-		notImplemented(ctx, "task inspect"),
-	);
-	const supersede = Command.make(
-		"supersede",
-		{
-			id: Args.text({ name: "task-id" }),
-			runId: Options.text("run"),
-			reason: Options.text("reason"),
-		},
-		() => notImplemented(ctx, "task supersede"),
-	);
-	const cancel = Command.make(
-		"cancel",
-		{
-			id: Args.text({ name: "task-id" }),
-			runId: Options.text("run"),
-			reason: Options.text("reason"),
-		},
-		() => notImplemented(ctx, "task cancel"),
-	);
-	const artifactAdd = Command.make(
-		"add",
-		{
-			task: Options.text("task"),
-			runId: Options.text("run"),
-			kind: Options.text("kind"),
-			title: Options.text("title"),
-			bodyFile: Options.text("body-file").pipe(Options.optional),
-		},
-		() => notImplemented(ctx, "task artifact add"),
-	);
-	const artifact = Command.make("artifact").pipe(Command.withSubcommands([artifactAdd]));
-	const task = Command.make("task").pipe(
-		Command.withSubcommands([
-			enqueue,
-			claim,
-			heartbeat,
-			complete,
-			fail,
-			supersede,
-			cancel,
-			inspect,
-			artifact,
-		]),
-	);
-	const graphInspect = Command.make(
-		"inspect",
-		{
-			task: Options.text("task").pipe(Options.optional),
-			scope: Options.text("scope").pipe(Options.optional),
-			all: Options.boolean("all"),
-			flat: Options.boolean("flat"),
-			dump: Options.boolean("dump"),
-		},
-		() => notImplemented(ctx, "graph inspect"),
-	);
-	const graph = Command.make("graph").pipe(Command.withSubcommands([graphInspect]));
 	const eventsTail = Command.make(
 		"tail",
 		{ limit: Options.integer("limit").pipe(Options.optional) },
-		() => notImplemented(ctx, "events tail"),
+		({ limit }) => runCommand(ctx, { command: "events.tail", limit: opt(limit) }),
 	);
 	const events = Command.make("events").pipe(Command.withSubcommands([eventsTail]));
-	const briefing = Command.make(
-		"briefing",
-		{ agent: Options.text("agent").pipe(Options.optional) },
-		() => notImplemented(ctx, "briefing"),
-	);
-	return Command.make("pithos").pipe(
-		Command.withSubcommands([init, scope, runParent, task, graph, events, briefing]),
+	return Command.make("pithos-next").pipe(
+		Command.withSubcommands([init, scope, runParent, events]),
 	);
 };

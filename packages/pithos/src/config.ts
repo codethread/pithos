@@ -15,9 +15,10 @@ export interface EnvReader {
 }
 
 export const loadConfig = (env: EnvReader): Config => {
+	const rawRunId = env.get("PITHOS_RUN_ID");
 	const raw = {
 		dbPath: env.get("PITHOS_DB"),
-		runId: env.get("PITHOS_RUN_ID"),
+		runId: rawRunId === "" ? undefined : rawRunId,
 	};
 	const result = Schema.decodeUnknownEither(ConfigSchema)(raw);
 	return Either.match(result, {

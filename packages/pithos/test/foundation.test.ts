@@ -98,6 +98,103 @@ describe("pithos foundation", () => {
 		expect(seeded).toEqual(contract);
 	});
 
+	it("scope and run commands return minimum output contracts", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		const repo = engine.scopeUpsert({ kind: "repo", path: "/tmp/pithos-repo" });
+		expect(repo.scope).toEqual({
+			id: "repo:/tmp/pithos-repo",
+			kind: "repo",
+			canonical_path: "/tmp/pithos-repo",
+		});
+		const upserted = engine.runUpsert({
+			agent: "war",
+			mode: "afk",
+			scope: repo.scope.id,
+			cwd: "/tmp/pithos-repo",
+			sessionId: "session_war",
+			runId: "run_war",
+		});
+		expect(upserted.run).toMatchObject({
+			id: "run_war",
+			agent: "war",
+			mode: "afk",
+			scope_id: repo.scope.id,
+			status: "live",
+			task_id: null,
+			session_id: "session_war",
+		});
+		expect(upserted.run.created_at).toEqual(expect.any(String));
+		expect(upserted.run.updated_at).toEqual(expect.any(String));
+		expect(engine.runInspect({ runId: "run_war" })).toEqual(upserted);
+	});
+
+	it("run upsert rejects empty durable run fields before writing", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		expect(() =>
+			engine.runUpsert({
+				agent: "war",
+				mode: "afk",
+				scope: "global",
+				cwd: "/tmp",
+				sessionId: "",
+				runId: "run_empty_session",
+			}),
+		).toThrow(PithosError);
+		const db = new Database(dbPath);
+		expect(db.prepare("SELECT COUNT(*) FROM runs").pluck().get()).toBe(0);
+		db.close();
+	});
+
+	it("scope upsert rejects empty repo/worktree paths", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		expect(() => engine.scopeUpsert({ kind: "repo", path: "" })).toThrow(PithosError);
+	});
+
+	it("run upsert rejects unknown scopes as PithosError", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		expect(() =>
+			engine.runUpsert({
+				agent: "war",
+				mode: "afk",
+				scope: "repo:/missing",
+				cwd: "/tmp",
+				sessionId: "session",
+				runId: "run_missing_scope",
+			}),
+		).toThrow(PithosError);
+	});
+
+	it("events tail returns durable event rows deterministically with limit handling", () => {
+		const dbPath = tempDb();
+		const db = initEngine(dbPath, true);
+		db.prepare("INSERT INTO events (id, type, payload_json, created_at) VALUES (?, ?, ?, ?)").run(
+			"event_a",
+			"run.heartbeat",
+			JSON.stringify({ n: 1 }),
+			"2026-05-08T00:00:00.000Z",
+		);
+		db.prepare("INSERT INTO events (id, type, payload_json, created_at) VALUES (?, ?, ?, ?)").run(
+			"event_b",
+			"run.heartbeat",
+			JSON.stringify({ n: 2 }),
+			"2026-05-08T00:00:01.000Z",
+		);
+		db.close();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		expect(engine.eventsTail({ limit: 1 }).events).toEqual([
+			expect.objectContaining({ id: "event_b", type: "run.heartbeat", payload: { n: 2 } }),
+		]);
+		expect(() => engine.eventsTail({ limit: 0 })).toThrow(PithosError);
+	});
+
 	it("empty claims use the no-work engine contract", () => {
 		const dbPath = tempDb();
 		const engine = makeEngine({ config: { dbPath }, services: services() });
@@ -118,5 +215,10 @@ describe("pithos foundation", () => {
 	it("row decoders and config decoding fail loudly", () => {
 		expect(() => decodeRow(RunRowSchema, { id: "run_bad" }, "bad run")).toThrow(PithosError);
 		expect(() => loadConfig({ get: () => undefined })).toThrow(PithosError);
+		expect(
+			loadConfig({
+				get: (name) => (name === "PITHOS_DB" ? "/tmp/pithos.db" : ""),
+			}),
+		).toEqual({ dbPath: "/tmp/pithos.db" });
 	});
 });

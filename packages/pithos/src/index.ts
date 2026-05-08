@@ -11,6 +11,7 @@ export {
 	type SpawnableAgentKind,
 	type SystemActor,
 } from "./builtins.js";
+export { makePithosCommand, type CliContext } from "./cli.js";
 export { makeEngine, type Engine, type EngineContext } from "./engine.js";
 export { loadConfig, ConfigSchema, type Config, type EnvReader } from "./config.js";
 export { migrate, openDb, type Db, type Mode, type ScopeKind, type TaskStatus } from "./db.js";

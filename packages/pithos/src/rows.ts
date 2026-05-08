@@ -6,7 +6,7 @@ const NullableString = Schema.NullOr(Schema.String);
 
 export const RunRowSchema = Schema.Struct({
 	id: NonEmptyString,
-	agent_kind: Schema.Literal("pdx", "pandora", "toil", "greed", "war"),
+	agent_kind: NonEmptyString,
 	mode: Schema.Literal("afk", "hitl"),
 	scope_id: NonEmptyString,
 	cwd: Schema.optional(Schema.String),

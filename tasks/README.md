@@ -9,7 +9,7 @@ Central dependency map for implementation slices. Individual task files describe
   - **Status:** complete
   - **Blocked by:** none
 - [ ] [task-001b — Slice 1b: Nested CLI shell + scope/run foundations](./task-001b.md)
-  - **Status:** pending
+  - **Status:** complete
   - **Blocked by:** [task-001a](./task-001a.md)
 - [ ] [task-001c — Slice 1c: Task write lifecycle, authorization, fencing](./task-001c.md)
   - **Status:** pending

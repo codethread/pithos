@@ -1,15 +1,7 @@
 import { resolve } from "node:path";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
-import {
-	migrate,
-	openDb,
-	sql,
-	type AgentKind,
-	type Capability,
-	type Mode,
-	type ScopeKind,
-} from "./db.js";
+import { migrate, openDb, sql, type Capability, type Mode, type ScopeKind } from "./db.js";
 import { fail } from "./errors.js";
 import { decodeRow, RunRowSchema, ScopeRowSchema, type RunRow } from "./rows.js";
 import type { Services } from "./services.js";
@@ -33,13 +25,21 @@ export interface Engine {
 		};
 	};
 	readonly runUpsert: (input: {
-		readonly agent: AgentKind;
+		readonly agent: string;
 		readonly mode: Mode;
 		readonly scope: string;
 		readonly cwd: string;
 		readonly sessionId: string;
 		readonly runId: string | undefined;
-	}) => { readonly ok: true; readonly run: Record<string, unknown> };
+	}) => { readonly ok: true; readonly run: RunOutput };
+	readonly runInspect: (input: { readonly runId: string }) => {
+		readonly ok: true;
+		readonly run: RunOutput;
+	};
+	readonly eventsTail: (input: { readonly limit: number | undefined }) => {
+		readonly ok: true;
+		readonly events: readonly EventOutput[];
+	};
 	readonly claim: (input: {
 		readonly runId: string;
 		readonly scope: string;
@@ -49,6 +49,40 @@ export interface Engine {
 		readonly task: { readonly id: string; readonly status: "claimed"; readonly token: number };
 	};
 }
+
+export interface RunOutput {
+	readonly id: string;
+	readonly agent: string;
+	readonly mode: Mode;
+	readonly scope_id: string;
+	readonly status: string;
+	readonly task_id: string | null;
+	readonly session_id: string;
+	readonly created_at: string;
+	readonly updated_at: string;
+}
+
+export interface EventOutput {
+	readonly id: string;
+	readonly type: string;
+	readonly task_id: string | null;
+	readonly run_id: string | null;
+	readonly actor_run_id: string | null;
+	readonly payload: unknown;
+	readonly created_at: string;
+}
+
+const toRunOutput = (row: RunRow): RunOutput => ({
+	id: row.id,
+	agent: row.agent_kind,
+	mode: row.mode,
+	scope_id: row.scope_id,
+	status: row.status,
+	task_id: row.task_id,
+	session_id: row.session_id,
+	created_at: row.created_at,
+	updated_at: row.updated_at,
+});
 
 const eventPayload = sql`
 INSERT INTO events(
@@ -93,6 +127,11 @@ WHERE id = ?
   AND status = 'queued'
 RETURNING id, fencing_token
 `;
+
+const requireNonEmpty = (value: string, name: string): string => {
+	if (value.length === 0) fail("VALIDATION_ERROR", `${name} must be non-empty`);
+	return value;
+};
 
 const upsertScope = sql`
 INSERT INTO scopes(
@@ -203,7 +242,9 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			}
 
 			const rawPath =
-				kind === "global" ? undefined : (path ?? fail("VALIDATION_ERROR", "missing --path"));
+				kind === "global"
+					? undefined
+					: requireNonEmpty(path ?? fail("VALIDATION_ERROR", "missing --path"), "--path");
 			const canonical = rawPath === undefined ? null : resolve(rawPath);
 			const sid = kind === "global" ? "global" : `${kind}:${canonical}`;
 
@@ -212,19 +253,79 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		}),
 	runUpsert: ({ agent, mode, scope, cwd, sessionId, runId }) =>
 		withDb(ctx, (db) => {
-			const rid = runId ?? ctx.services.ids.make("run");
-			db.prepare(upsertRun).run(rid, agent, mode, scope, cwd, sessionId);
+			const agentExists = db
+				.prepare(sql`SELECT 1 FROM agent_kinds WHERE agent_kind = ?`)
+				.get(agent);
+			if (agentExists === undefined) fail("VALIDATION_ERROR", `unknown agent kind: ${agent}`);
+
+			const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id = ?`).get(scope);
+			if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
+
+			const rid = requireNonEmpty(runId ?? ctx.services.ids.make("run"), "--run");
+			db.prepare(upsertRun).run(
+				rid,
+				agent,
+				mode,
+				scope,
+				requireNonEmpty(cwd, "--cwd"),
+				requireNonEmpty(sessionId, "--session-id"),
+			);
+			const row = decodeRow(
+				RunRowSchema,
+				db
+					.prepare(
+						sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
+					)
+					.get(rid),
+				`run not found after upsert: ${rid}`,
+			);
+			return { ok: true, run: toRunOutput(row) };
+		}),
+	runInspect: ({ runId }) =>
+		withDb(ctx, (db) => {
+			const row = decodeRow(
+				RunRowSchema,
+				db
+					.prepare(
+						sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
+					)
+					.get(runId),
+				`run not found: ${runId}`,
+			);
+			return { ok: true, run: toRunOutput(row) };
+		}),
+	eventsTail: ({ limit }) =>
+		withDb(ctx, (db) => {
+			if (limit !== undefined && limit < 1) fail("VALIDATION_ERROR", "--limit must be positive");
+			const rows = db
+				.prepare(
+					sql`
+					SELECT id,type,task_id,run_id,actor_run_id,payload_json,created_at
+					FROM events
+					ORDER BY created_at DESC, id DESC
+					LIMIT ?
+					`,
+				)
+				.all(limit ?? 100) as {
+				readonly id: string;
+				readonly type: string;
+				readonly task_id: string | null;
+				readonly run_id: string | null;
+				readonly actor_run_id: string | null;
+				readonly payload_json: string;
+				readonly created_at: string;
+			}[];
 			return {
 				ok: true,
-				run: {
-					id: rid,
-					agent,
-					mode,
-					scope_id: scope,
-					status: "live",
-					task_id: null,
-					session_id: sessionId,
-				},
+				events: rows.reverse().map((row) => ({
+					id: row.id,
+					type: row.type,
+					task_id: row.task_id,
+					run_id: row.run_id,
+					actor_run_id: row.actor_run_id,
+					payload: JSON.parse(row.payload_json) as unknown,
+					created_at: row.created_at,
+				})),
 			};
 		}),
 	claim: ({ runId, scope, capability }) =>

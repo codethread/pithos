@@ -33,14 +33,14 @@ export const migrate = (db: Db): void => {
 	db.pragma("foreign_keys = ON");
 	db.exec(sql`
 CREATE TABLE IF NOT EXISTS scopes (
-	id TEXT PRIMARY KEY,
+	id TEXT PRIMARY KEY CHECK (length(id) > 0),
 	kind TEXT NOT NULL CHECK (kind IN ('global', 'repo', 'worktree')),
 	canonical_path TEXT,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CHECK (
 		(kind = 'global' AND canonical_path IS NULL)
-		OR (kind <> 'global')
+		OR (kind <> 'global' AND canonical_path IS NOT NULL AND length(canonical_path) > 0)
 	)
 );
 
@@ -69,12 +69,12 @@ CREATE TABLE IF NOT EXISTS agent_enqueues (
 );
 
 CREATE TABLE IF NOT EXISTS runs (
-	id TEXT PRIMARY KEY,
+	id TEXT PRIMARY KEY CHECK (length(id) > 0),
 	agent_kind TEXT NOT NULL REFERENCES agent_kinds(agent_kind),
 	mode TEXT NOT NULL CHECK (mode IN ('afk', 'hitl')),
 	scope_id TEXT NOT NULL REFERENCES scopes(id),
-	cwd TEXT NOT NULL,
-	session_id TEXT NOT NULL,
+	cwd TEXT NOT NULL CHECK (length(cwd) > 0),
+	session_id TEXT NOT NULL CHECK (length(session_id) > 0),
 	status TEXT NOT NULL CHECK (status IN ('live', 'ended', 'failed', 'cancelled', 'timed_out')) DEFAULT 'live',
 	task_id TEXT,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

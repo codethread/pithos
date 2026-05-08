@@ -112,6 +112,9 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 
 - This codebase uses effect.ts heavily, the source for Effect is at `~/dev/vendor/effect`
 - Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness — see `packages/cli/src` for the pattern.
+- Runtime application code must not pluck process environment variables or filesystem state directly at arbitrary call sites. Parse expected environment into a typed Config service at the boundary, using Schema, then pass/use that service throughout.
+- Runtime filesystem/process IO must sit behind Effect services or project service interfaces with live and test implementations. Prefer `@effect/platform`/`@effect/platform-node` where it fits; add a small project service when it does not.
+- Raw Node modules such as `node:fs`, `node:process`, and `node:child_process` are acceptable in build scripts and live service implementations only, not in domain logic or command handlers.
 
 ## Docs
 

@@ -1,0 +1,27 @@
+{
+  "name": "@pithos/pithos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": { "pithos-next": "./bin/pithos-next" },
+  "scripts": {
+    "clean": "rimraf dist bin/pithos-next bin/pithos-next-dev *.tsbuildinfo",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs --dev --run --"
+  },
+  "dependencies": {
+    "@effect/cli": "0.75.1",
+    "@effect/platform-node": "^0.106.0",
+    "better-sqlite3": "^12.9.0",
+    "effect": "^3.21.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0"
+  }
+}

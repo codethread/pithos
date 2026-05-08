@@ -66,6 +66,8 @@ Canonical SQL/CLI patterns — referenced by tasks 002/003.
 - **CLI argument parsing:** `@effect/cli` is in the workspace and supports nested subcommands via `Command.withSubcommands(...)`. `PITHOS_RUN_ID` env-var resolution happens at the command-arg layer; conflict between env and `--run` flag fails with `VALIDATION_ERROR`.
 - **Discriminated unions for parsed args:** parsed CLI args are tagged variants, never wide optional bags (CLAUDE.md rule 3).
 
+**Blocked note:** This slice needs to be broken down smaller before continuing: it combines package architecture, schema/seeding, nested CLI, authorization invariants, graph/read surfaces, and a broad test matrix into one unit. The in-progress work established the required direction that Pithos must expose an importable core library for pdx with the public CLI as an @effect/cli wrapper, but the full slice contract remains too large to complete honestly as a single unit.
+
 ## Acceptance criteria
 
 - [ ] New `packages/pithos/` workspace builds; tests green

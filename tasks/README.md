@@ -3,7 +3,7 @@
 Central dependency map for implementation slices. Individual task files describe scope and acceptance only; blockers live here.
 
 - [ ] [task-001 — Slice 1: Pithos foundation: schema, seeds, nested CLI, authorization](./task-001.md)
-  - **Status:** pending
+  - **Status:** in_progress
   - **Blocked by:** none
 - [ ] [task-002 — Slice 2: Run lifecycle transitions: cleanup, interrupt, timeout](./task-002.md)
   - **Status:** pending

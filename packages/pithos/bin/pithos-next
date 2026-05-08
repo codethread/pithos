@@ -19163,8 +19163,8 @@ var require_client_h2 = __commonJS({
       this[kSocket][kError] = err;
       this[kClient][kOnError](err);
     }
-    function onHttp2FrameError(type2, code2, id3) {
-      if (id3 === 0) {
+    function onHttp2FrameError(type2, code2, id2) {
+      if (id2 === 0) {
         const err = new InformationalError(`HTTP/2: "frameError" received - type ${type2}, code ${code2}`);
         this[kSocket][kError] = err;
         this[kClient][kOnError](err);
@@ -24715,8 +24715,8 @@ var require_snapshot_utils = __commonJS({
         match: new Set(matchHeaders.map((header) => caseSensitive ? header : header.toLowerCase()))
       };
     }
-    var crypto2 = runtimeFeatures.has("crypto") ? __require("node:crypto") : null;
-    var hashId = crypto2?.hash ? (value6) => crypto2.hash("sha256", value6, "base64url") : (value6) => Buffer.from(value6).toString("base64url");
+    var crypto = runtimeFeatures.has("crypto") ? __require("node:crypto") : null;
+    var hashId = crypto?.hash ? (value6) => crypto.hash("sha256", value6, "base64url") : (value6) => Buffer.from(value6).toString("base64url");
     function isUndiciHeaders(headers) {
       return Array.isArray(headers) && (headers.length & 1) === 0;
     }
@@ -30774,10 +30774,10 @@ var require_subresource_integrity = __commonJS({
     var assert3 = __require("node:assert");
     var { runtimeFeatures } = require_runtime_features();
     var validSRIHashAlgorithmTokenSet = /* @__PURE__ */ new Map([["sha256", 0], ["sha384", 1], ["sha512", 2]]);
-    var crypto2;
+    var crypto;
     if (runtimeFeatures.has("crypto")) {
-      crypto2 = __require("node:crypto");
-      const cryptoHashes = crypto2.getHashes();
+      crypto = __require("node:crypto");
+      const cryptoHashes = crypto.getHashes();
       if (cryptoHashes.length === 0) {
         validSRIHashAlgorithmTokenSet.clear();
       }
@@ -30867,7 +30867,7 @@ var require_subresource_integrity = __commonJS({
       return result;
     }
     var applyAlgorithmToBytes = (algorithm, bytes) => {
-      return crypto2.hash(algorithm, bytes, "base64");
+      return crypto.hash(algorithm, bytes, "base64");
     };
     function caseSensitiveMatch(actualValue, expectedValue) {
       let actualValueLength = actualValue.length;
@@ -33817,7 +33817,7 @@ var require_connection = __commonJS({
     var { WebsocketFrameSend } = require_frame();
     var assert3 = __require("node:assert");
     var { runtimeFeatures } = require_runtime_features();
-    var crypto2 = runtimeFeatures.has("crypto") ? __require("node:crypto") : null;
+    var crypto = runtimeFeatures.has("crypto") ? __require("node:crypto") : null;
     var warningEmitted = false;
     function establishWebSocketConnection(url2, protocols, client, handler, options3) {
       const requestURL = url2;
@@ -33837,7 +33837,7 @@ var require_connection = __commonJS({
         const headersList = getHeadersList(new Headers(options3.headers));
         request2.headersList = headersList;
       }
-      const keyValue = crypto2.randomBytes(16).toString("base64");
+      const keyValue = crypto.randomBytes(16).toString("base64");
       request2.headersList.append("sec-websocket-key", keyValue, true);
       request2.headersList.append("sec-websocket-version", "13", true);
       for (const protocol of protocols) {
@@ -33877,7 +33877,7 @@ var require_connection = __commonJS({
             return;
           }
           const secWSAccept = response.headersList.get("Sec-WebSocket-Accept");
-          const digest = crypto2.hash("sha1", keyValue + uid, "base64");
+          const digest = crypto.hash("sha1", keyValue + uid, "base64");
           if (secWSAccept !== digest) {
             failWebsocketConnection(handler, 1002, "Incorrect hash received in Sec-WebSocket-Accept header.");
             return;
@@ -36321,15 +36321,15 @@ var bind = (map36, flatMap20) => dual(3, (self, name, f) => flatMap20(self, (a) 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/GlobalValue.js
 var globalStoreId = `effect/GlobalValue`;
 var globalStore;
-var globalValue = (id3, compute) => {
+var globalValue = (id2, compute) => {
   if (!globalStore) {
     globalThis[globalStoreId] ??= /* @__PURE__ */ new Map();
     globalStore = globalThis[globalStoreId];
   }
-  if (!globalStore.has(id3)) {
-    globalStore.set(id3, compute());
+  if (!globalStore.has(id2)) {
+    globalStore.set(id2, compute());
   }
-  return globalStore.get(id3);
+  return globalStore.get(id2);
 };
 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/Predicate.js
@@ -38072,6 +38072,31 @@ var InvalidData2 = InvalidData;
 var isConfigError2 = isConfigError;
 var isMissingDataOnly2 = isMissingDataOnly;
 
+// ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/Context.js
+var Context_exports = {};
+__export(Context_exports, {
+  GenericTag: () => GenericTag,
+  Reference: () => Reference2,
+  ReferenceTypeId: () => ReferenceTypeId2,
+  Tag: () => Tag2,
+  TagTypeId: () => TagTypeId2,
+  add: () => add2,
+  empty: () => empty4,
+  get: () => get3,
+  getOption: () => getOption2,
+  getOrElse: () => getOrElse4,
+  isContext: () => isContext2,
+  isReference: () => isReference2,
+  isTag: () => isTag2,
+  make: () => make6,
+  merge: () => merge3,
+  mergeAll: () => mergeAll2,
+  omit: () => omit2,
+  pick: () => pick2,
+  unsafeGet: () => unsafeGet3,
+  unsafeMake: () => unsafeMake
+});
+
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/internal/context.js
 var TagTypeId = /* @__PURE__ */ Symbol.for("effect/Context/Tag");
 var ReferenceTypeId = /* @__PURE__ */ Symbol.for("effect/Context/Reference");
@@ -38123,7 +38148,7 @@ var makeGenericTag = (key) => {
   tag5.key = key;
   return tag5;
 };
-var Tag = (id3) => () => {
+var Tag = (id2) => () => {
   const limit = Error.stackTraceLimit;
   Error.stackTraceLimit = 2;
   const creationError = new Error();
@@ -38131,7 +38156,7 @@ var Tag = (id3) => () => {
   function TagClass() {
   }
   Object.setPrototypeOf(TagClass, TagProto);
-  TagClass.key = id3;
+  TagClass.key = id2;
   Object.defineProperty(TagClass, "stack", {
     get() {
       return creationError.stack;
@@ -38139,7 +38164,7 @@ var Tag = (id3) => () => {
   });
   return TagClass;
 };
-var Reference = () => (id3, options3) => {
+var Reference = () => (id2, options3) => {
   const limit = Error.stackTraceLimit;
   Error.stackTraceLimit = 2;
   const creationError = new Error();
@@ -38147,7 +38172,7 @@ var Reference = () => (id3, options3) => {
   function ReferenceClass() {
   }
   Object.setPrototypeOf(ReferenceClass, ReferenceProto);
-  ReferenceClass.key = id3;
+  ReferenceClass.key = id2;
   ReferenceClass.defaultValue = options3.defaultValue;
   Object.defineProperty(ReferenceClass, "stack", {
     get() {
@@ -38247,6 +38272,12 @@ var unsafeGet2 = /* @__PURE__ */ dual(2, (self, tag5) => {
   return self.unsafeMap.get(tag5.key);
 });
 var get2 = unsafeGet2;
+var getOrElse3 = /* @__PURE__ */ dual(3, (self, tag5, orElse18) => {
+  if (!self.unsafeMap.has(tag5.key)) {
+    return isReference(tag5) ? getDefaultValue(tag5) : orElse18();
+  }
+  return self.unsafeMap.get(tag5.key);
+});
 var getOption = /* @__PURE__ */ dual(2, (self, tag5) => {
   if (!self.unsafeMap.has(tag5.key)) {
     return isReference(tag5) ? some(getDefaultValue(tag5)) : none;
@@ -38269,6 +38300,16 @@ var mergeAll = (...ctxs) => {
   }
   return makeContext(map36);
 };
+var pick = (...tags2) => (self) => {
+  const tagSet = new Set(tags2.map((_) => _.key));
+  const newEnv = /* @__PURE__ */ new Map();
+  for (const [tag5, s] of self.unsafeMap.entries()) {
+    if (tagSet.has(tag5)) {
+      newEnv.set(tag5, s);
+    }
+  }
+  return makeContext(newEnv);
+};
 var omit = (...tags2) => (self) => {
   const newEnv = new Map(self.unsafeMap);
   for (const tag5 of tags2) {
@@ -38278,17 +38319,23 @@ var omit = (...tags2) => (self) => {
 };
 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/Context.js
+var TagTypeId2 = TagTypeId;
+var ReferenceTypeId2 = ReferenceTypeId;
 var GenericTag = makeGenericTag;
+var unsafeMake = makeContext;
 var isContext2 = isContext;
 var isTag2 = isTag;
+var isReference2 = isReference;
 var empty4 = empty3;
 var make6 = make5;
 var add2 = add;
 var get3 = get2;
+var getOrElse4 = getOrElse3;
 var unsafeGet3 = unsafeGet2;
 var getOption2 = getOption;
 var merge3 = merge2;
 var mergeAll2 = mergeAll;
+var pick2 = pick;
 var omit2 = omit;
 var Tag2 = Tag;
 var Reference2 = Reference;
@@ -39700,8 +39747,8 @@ var Runtime = class {
   startTimeMillis;
   [FiberIdTypeId] = FiberIdTypeId;
   _tag = OP_RUNTIME;
-  constructor(id3, startTimeMillis) {
-    this.id = id3;
+  constructor(id2, startTimeMillis) {
+    this.id = id2;
     this.startTimeMillis = startTimeMillis;
   }
   [symbol]() {
@@ -39757,8 +39804,8 @@ var Composite = class {
   }
 };
 var none3 = /* @__PURE__ */ new None();
-var runtime = (id3, startTimeMillis) => {
-  return new Runtime(id3, startTimeMillis);
+var runtime = (id2, startTimeMillis) => {
+  return new Runtime(id2, startTimeMillis);
 };
 var composite = (left3, right3) => {
   return new Composite(left3, right3);
@@ -39790,17 +39837,17 @@ var ids = (self) => {
   }
 };
 var _fiberCounter = /* @__PURE__ */ globalValue(/* @__PURE__ */ Symbol.for("effect/Fiber/Id/_fiberCounter"), () => make13(0));
-var make14 = (id3, startTimeSeconds) => {
-  return new Runtime(id3, startTimeSeconds);
+var make14 = (id2, startTimeSeconds) => {
+  return new Runtime(id2, startTimeSeconds);
 };
 var threadName = (self) => {
   const identifiers = Array.from(ids(self)).map((n) => `#${n}`).join(",");
   return identifiers;
 };
-var unsafeMake = () => {
-  const id3 = get6(_fiberCounter);
-  pipe(_fiberCounter, set2(id3 + 1));
-  return new Runtime(id3, Date.now());
+var unsafeMake2 = () => {
+  const id2 = get6(_fiberCounter);
+  pipe(_fiberCounter, set2(id2 + 1));
+  return new Runtime(id2, Date.now());
 };
 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/FiberId.js
@@ -39813,7 +39860,7 @@ var combineAll2 = combineAll;
 var ids2 = ids;
 var make15 = make14;
 var threadName2 = threadName;
-var unsafeMake2 = unsafeMake;
+var unsafeMake3 = unsafeMake2;
 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/HashMap.js
 var isHashMap2 = isHashMap;
@@ -42048,7 +42095,7 @@ var causeSquashWith = /* @__PURE__ */ dual(2, (self, f) => {
     case "None": {
       return pipe(defects(self), head2, match2({
         onNone: () => {
-          const interrupts = fromIterable2(interruptors(self)).flatMap((fiberId3) => fromIterable2(ids2(fiberId3)).map((id3) => `#${id3}`));
+          const interrupts = fromIterable2(interruptors(self)).flatMap((fiberId3) => fromIterable2(ids2(fiberId3)).map((id2) => `#${id2}`));
           return new InterruptedException(interrupts ? `Interrupted by fibers: ${interrupts.join(", ")}` : void 0);
         },
         onSome: identity
@@ -42279,7 +42326,7 @@ var deferredUnsafeMake = (fiberId3) => {
   };
   return _deferred;
 };
-var deferredMake = () => flatMap8(fiberId, (id3) => deferredMakeAs(id3));
+var deferredMake = () => flatMap8(fiberId, (id2) => deferredMakeAs(id2));
 var deferredMakeAs = (fiberId3) => sync(() => deferredUnsafeMake(fiberId3));
 var deferredAwait = (self) => asyncInterrupt((resume2) => {
   const state = get6(self.state);
@@ -42714,7 +42761,7 @@ var parsePrimitive = (text11, path4, primitive2, delimiter, split3) => {
   return pipe(splitPathString(text11, delimiter), forEachSequential((char5) => primitive2.parse(char5.trim())), mapError(prefixed(path4)));
 };
 var transpose = (array8) => {
-  return Object.keys(array8[0]).map((column3) => array8.map((row2) => row2[column3]));
+  return Object.keys(array8[0]).map((column3) => array8.map((row) => row[column3]));
 };
 var indicesFrom = (quotedIndices) => pipe(forEachSequential(quotedIndices, parseQuotedIndex), mapBoth2({
   onFailure: () => empty2(),
@@ -43084,11 +43131,11 @@ var parallel3 = parallel2;
 var parallelN2 = parallelN;
 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/internal/fiberRefs.js
-function unsafeMake3(fiberRefLocals) {
+function unsafeMake4(fiberRefLocals) {
   return new FiberRefsImpl(fiberRefLocals);
 }
 function empty19() {
-  return unsafeMake3(/* @__PURE__ */ new Map());
+  return unsafeMake4(/* @__PURE__ */ new Map());
 }
 var FiberRefsSym = /* @__PURE__ */ Symbol.for("effect/FiberRefs");
 var FiberRefsImpl = class {
@@ -44201,8 +44248,8 @@ var RefImpl = class extends Class2 {
     });
   }
 };
-var unsafeMake4 = (value6) => new RefImpl(make13(value6));
-var make24 = (value6) => sync(() => unsafeMake4(value6));
+var unsafeMake5 = (value6) => new RefImpl(make13(value6));
+var make24 = (value6) => sync(() => unsafeMake5(value6));
 var get10 = (self) => self.get;
 var set4 = /* @__PURE__ */ dual(2, (self, value6) => self.modify(() => [void 0, value6]));
 var getAndSet = /* @__PURE__ */ dual(2, (self, value6) => self.modify((a) => [a, value6]));
@@ -45165,7 +45212,7 @@ var Local = class {
     }));
   }
 };
-var unsafeMake5 = (fiber) => {
+var unsafeMake6 = (fiber) => {
   return new Local(fiber.id(), fiber);
 };
 var globalScope = /* @__PURE__ */ globalValue(/* @__PURE__ */ Symbol.for("effect/FiberScope/Global"), () => new Global());
@@ -46249,7 +46296,7 @@ var metricPairVariance = {
   /* c8 ignore next */
   _Type: (_) => _
 };
-var unsafeMake6 = (metricKey, metricState) => {
+var unsafeMake7 = (metricKey, metricState) => {
   return {
     [MetricPairTypeId]: metricPairVariance,
     metricKey,
@@ -46269,7 +46316,7 @@ var MetricRegistryImpl = class {
   snapshot() {
     const result = [];
     for (const [key, hook] of this.map) {
-      result.push(unsafeMake6(key, hook.get()));
+      result.push(unsafeMake7(key, hook.get()));
     }
     return result;
   }
@@ -47806,7 +47853,7 @@ var FiberRuntime = class extends Class2 {
    * Returns the current `FiberScope` for the fiber.
    */
   scope() {
-    return unsafeMake5(this);
+    return unsafeMake6(this);
   }
   /**
    * Retrieves the immediate children of the fiber.
@@ -49071,7 +49118,7 @@ var unsafeForkUnstarted = (effect3, parentFiber, parentRuntimeFlags, overrideSco
   return childFiber;
 };
 var unsafeMakeChildFiber = (effect3, parentFiber, parentRuntimeFlags, overrideScope = null) => {
-  const childId = unsafeMake2();
+  const childId = unsafeMake3();
   const parentFiberRefs = parentFiber.getFiberRefs();
   const childFiberRefs = forkAs(parentFiberRefs, childId);
   const childFiber = new FiberRuntime(childId, childFiberRefs, parentRuntimeFlags);
@@ -49338,7 +49385,7 @@ var fiberAll = (fibers) => {
       return join2(this);
     },
     [FiberTypeId]: fiberVariance2,
-    id: () => fromIterable2(fibers).reduce((id3, fiber) => combine3(id3, fiber.id()), none4),
+    id: () => fromIterable2(fibers).reduce((id2, fiber) => combine3(id2, fiber.id()), none4),
     await: exit(forEachParUnbounded(fibers, (fiber) => flatten5(fiber.await), false)),
     children: map10(forEachParUnbounded(fibers, (fiber) => fiber.children, false), flatten2),
     inheritAll: forEachSequentialDiscard(fibers, (fiber) => fiber.inheritAll),
@@ -49423,7 +49470,7 @@ var ensuring = /* @__PURE__ */ dual(2, (self, finalizer2) => uninterruptibleMask
   }),
   onSuccess: (a) => as2(finalizer2, a)
 })));
-var invokeWithInterrupt = (self, entries2, onInterrupt3) => fiberIdWith((id3) => ensuring(flatMap8(forkDaemon(interruptible2(self)), (processing) => async_((cb) => {
+var invokeWithInterrupt = (self, entries2, onInterrupt3) => fiberIdWith((id2) => ensuring(flatMap8(forkDaemon(interruptible2(self)), (processing) => async_((cb) => {
   const counts = entries2.map((_) => _.listeners.count);
   const checkDone = () => {
     if (counts.every((count4) => count4 === 0)) {
@@ -49465,7 +49512,7 @@ var invokeWithInterrupt = (self, entries2, onInterrupt3) => fiberIdWith((id3) =>
     }
     return [];
   });
-  return forEachSequentialDiscard(residual, (entry) => complete(entry.request, exitInterrupt(id3)));
+  return forEachSequentialDiscard(residual, (entry) => complete(entry.request, exitInterrupt(id2)));
 })));
 var makeSpanScoped = (name, options3) => {
   options3 = addSpanStackTrace(options3);
@@ -49945,7 +49992,7 @@ var SynchronizedImpl = class extends Class2 {
 };
 var makeSynchronized = (value6) => sync(() => unsafeMakeSynchronized(value6));
 var unsafeMakeSynchronized = (value6) => {
-  const ref = unsafeMake4(value6);
+  const ref = unsafeMake5(value6);
   const sem = unsafeMakeSemaphore(1);
   return new SynchronizedImpl(ref, sem.withPermits(1));
 };
@@ -49994,7 +50041,7 @@ var makeDual = (f) => function() {
   return f.apply(this, arguments);
 };
 var unsafeFork3 = /* @__PURE__ */ makeDual((runtime5, self, options3) => {
-  const fiberId3 = unsafeMake2();
+  const fiberId3 = unsafeMake3();
   const fiberRefUpdates = [[currentContext, [[fiberId3, runtime5.context]]]];
   if (options3?.scheduler) {
     fiberRefUpdates.push([currentScheduler, [[fiberId3, options3.scheduler]]]);
@@ -50009,7 +50056,7 @@ var unsafeFork3 = /* @__PURE__ */ makeDual((runtime5, self, options3) => {
   const fiberRuntime = new FiberRuntime(fiberId3, fiberRefs3, runtime5.runtimeFlags);
   let effect3 = self;
   if (options3?.scope) {
-    effect3 = flatMap8(fork2(options3.scope, sequential2), (closeableScope) => zipRight2(scopeAddFinalizer(closeableScope, fiberIdWith((id3) => equals(id3, fiberRuntime.id()) ? void_3 : interruptAsFiber(fiberRuntime, id3))), onExit(self, (exit4) => close(closeableScope, exit4))));
+    effect3 = flatMap8(fork2(options3.scope, sequential2), (closeableScope) => zipRight2(scopeAddFinalizer(closeableScope, fiberIdWith((id2) => equals(id2, fiberRuntime.id()) ? void_3 : interruptAsFiber(fiberRuntime, id2))), onExit(self, (exit4) => close(closeableScope, exit4))));
   }
   const supervisor = fiberRuntime.currentSupervisor;
   if (supervisor !== none8) {
@@ -50031,7 +50078,7 @@ var unsafeRunCallback = /* @__PURE__ */ makeDual((runtime5, effect3, options3 = 
       options3.onExit(exit4);
     });
   }
-  return (id3, cancelOptions) => unsafeRunCallback(runtime5)(pipe(fiberRuntime, interruptAs(id3 ?? none4)), {
+  return (id2, cancelOptions) => unsafeRunCallback(runtime5)(pipe(fiberRuntime, interruptAs(id2 ?? none4)), {
     ...cancelOptions,
     onExit: cancelOptions?.onExit ? (exit4) => cancelOptions.onExit(flatten6(exit4)) : void 0
   });
@@ -51207,7 +51254,7 @@ var unsafeFromDate = (date9) => {
   }
   return makeUtc(epochMillis);
 };
-var unsafeMake7 = (input) => {
+var unsafeMake8 = (input) => {
   if (isDateTime(input)) {
     return input;
   } else if (input instanceof Date) {
@@ -51228,7 +51275,7 @@ var unsafeMakeZoned = (input, options3) => {
   if (options3?.timeZone === void 0 && isDateTime(input) && isZoned(input)) {
     return input;
   }
-  const self = unsafeMake7(input);
+  const self = unsafeMake8(input);
   if (self.epochMillis < minEpochMillis || self.epochMillis > maxEpochMillis) {
     throw new RangeError(`Epoch millis out of range: ${self.epochMillis}`);
   }
@@ -51561,7 +51608,7 @@ var ScheduleDriverImpl = class {
       }
     });
   }
-  iterationMeta = /* @__PURE__ */ unsafeMake4(defaultIterationMetadata);
+  iterationMeta = /* @__PURE__ */ unsafeMake5(defaultIterationMetadata);
   get reset() {
     return set4(this.ref, [none2(), this.schedule.initial]).pipe(zipLeft2(set4(this.iterationMeta, defaultIterationMetadata)));
   }
@@ -51794,7 +51841,7 @@ var failCause6 = deferredFailCause;
 var interrupt5 = deferredInterrupt;
 var isDone5 = deferredIsDone;
 var succeed6 = deferredSucceed;
-var unsafeMake8 = deferredUnsafeMake;
+var unsafeMake9 = deferredUnsafeMake;
 var unsafeDone = deferredUnsafeDone;
 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/MutableList.js
@@ -52183,7 +52230,7 @@ var CacheImpl = class {
       let deferred = void 0;
       let value6 = getOrUndefined2(get12(this.cacheState.map, k));
       if (value6 === void 0) {
-        deferred = unsafeMake8(this.fiberId);
+        deferred = unsafeMake9(this.fiberId);
         mapKey = makeMapKey(k);
         if (has5(this.cacheState.map, k)) {
           value6 = getOrUndefined2(get12(this.cacheState.map, k));
@@ -52228,7 +52275,7 @@ var CacheImpl = class {
   refresh(key) {
     return clockWith3((clock3) => suspend(() => {
       const k = key;
-      const deferred = unsafeMake8(this.fiberId);
+      const deferred = unsafeMake9(this.fiberId);
       let value6 = getOrUndefined2(get12(this.cacheState.map, k));
       if (value6 === void 0) {
         if (has5(this.cacheState.map, k)) {
@@ -52411,7 +52458,7 @@ var currentCache = /* @__PURE__ */ globalValue(/* @__PURE__ */ Symbol.for("effec
   handle
 })), () => seconds(60))));
 var currentCacheEnabled = /* @__PURE__ */ globalValue(/* @__PURE__ */ Symbol.for("effect/FiberRef/currentCacheEnabled"), () => fiberRefUnsafeMake(false));
-var fromRequest = (request2, dataSource) => flatMap8(isEffect(dataSource) ? dataSource : succeed(dataSource), (ds) => fiberIdWith((id3) => {
+var fromRequest = (request2, dataSource) => flatMap8(isEffect(dataSource) ? dataSource : succeed(dataSource), (ds) => fiberIdWith((id2) => {
   const proxy = new Proxy(request2, {});
   return fiberRefGetWith(currentCacheEnabled, (cacheEnabled) => {
     if (cacheEnabled) {
@@ -52433,7 +52480,7 @@ var fromRequest = (request2, dataSource) => flatMap8(isEffect(dataSource) ? data
               request: proxy,
               result: orNew.right.handle,
               listeners: orNew.right.listeners,
-              ownerId: id3,
+              ownerId: id2,
               state: {
                 completed: false
               }
@@ -52452,7 +52499,7 @@ var fromRequest = (request2, dataSource) => flatMap8(isEffect(dataSource) ? data
       request: proxy,
       result: ref,
       listeners,
-      ownerId: id3,
+      ownerId: id2,
       state: {
         completed: false
       }
@@ -52846,7 +52893,7 @@ var makeTagProxy = (TagClass) => {
     }
   });
 };
-var Tag3 = (id3) => () => {
+var Tag3 = (id2) => () => {
   const limit = Error.stackTraceLimit;
   Error.stackTraceLimit = 2;
   const creationError = new Error();
@@ -52854,7 +52901,7 @@ var Tag3 = (id3) => () => {
   function TagClass() {
   }
   Object.setPrototypeOf(TagClass, TagProto);
-  TagClass.key = id3;
+  TagClass.key = id2;
   Object.defineProperty(TagClass, "use", {
     get() {
       return (body2) => andThen4(this, body2);
@@ -52869,7 +52916,7 @@ var Tag3 = (id3) => () => {
 };
 var Service = function() {
   return function() {
-    const [id3, maker] = arguments;
+    const [id2, maker] = arguments;
     const proxy = "accessors" in maker ? maker["accessors"] : false;
     const limit = Error.stackTraceLimit;
     Error.stackTraceLimit = 2;
@@ -52894,7 +52941,7 @@ var Service = function() {
         return service3;
       }
     };
-    TagClass.prototype._tag = id3;
+    TagClass.prototype._tag = id2;
     Object.defineProperty(TagClass, "make", {
       get() {
         return (service3) => new this(service3);
@@ -52905,7 +52952,7 @@ var Service = function() {
         return (body2) => andThen4(this, body2);
       }
     });
-    TagClass.key = id3;
+    TagClass.key = id2;
     Object.assign(TagClass, TagProto);
     Object.defineProperty(TagClass, "stack", {
       get() {
@@ -54531,10 +54578,10 @@ var record = (key, value6) => {
     indexSignatures
   };
 };
-var pick2 = (ast, keys5) => {
+var pick3 = (ast, keys5) => {
   const annotation = getSurrogateAnnotation(ast);
   if (isSome2(annotation)) {
-    return pick2(annotation.value, keys5);
+    return pick3(annotation.value, keys5);
   }
   switch (ast._tag) {
     case "TypeLiteral": {
@@ -54559,13 +54606,13 @@ var pick2 = (ast, keys5) => {
     case "Union":
       return new TypeLiteral(keys5.map((name) => getPropertyKeyIndexedAccess(ast, name)), []);
     case "Suspend":
-      return pick2(ast.f(), keys5);
+      return pick3(ast.f(), keys5);
     case "Refinement":
-      return pick2(ast.from, keys5);
+      return pick3(ast.from, keys5);
     case "Transformation": {
       switch (ast.transformation._tag) {
         case "ComposeTransformation":
-          return new Transformation(pick2(ast.from, keys5), pick2(ast.to, keys5), composeTransformation);
+          return new Transformation(pick3(ast.from, keys5), pick3(ast.to, keys5), composeTransformation);
         case "TypeLiteralTransformation": {
           const ts = [];
           const fromKeys = [];
@@ -54578,7 +54625,7 @@ var pick2 = (ast, keys5) => {
               fromKeys.push(k);
             }
           }
-          return isNonEmptyReadonlyArray(ts) ? new Transformation(pick2(ast.from, fromKeys), pick2(ast.to, keys5), new TypeLiteralTransformation(ts)) : pick2(ast.from, fromKeys);
+          return isNonEmptyReadonlyArray(ts) ? new Transformation(pick3(ast.from, fromKeys), pick3(ast.to, keys5), new TypeLiteralTransformation(ts)) : pick3(ast.from, fromKeys);
         }
       }
     }
@@ -54593,7 +54640,7 @@ var omit3 = (ast, keys5) => {
     }
     return new TypeLiteral([], indexSignatures);
   }
-  return pick2(ast, getPropertyKeys(ast).filter((name) => !keys5.includes(name)));
+  return pick3(ast, getPropertyKeys(ast).filter((name) => !keys5.includes(name)));
 };
 var orUndefined = (ast) => Union.make([ast, undefinedKeyword]);
 var partial = (ast, options3) => {
@@ -54673,12 +54720,12 @@ var mutable = (ast) => {
 };
 var pickAnnotations = (annotationIds) => (annotated) => {
   let out = void 0;
-  for (const id3 of annotationIds) {
-    if (Object.prototype.hasOwnProperty.call(annotated.annotations, id3)) {
+  for (const id2 of annotationIds) {
+    if (Object.prototype.hasOwnProperty.call(annotated.annotations, id2)) {
       if (out === void 0) {
         out = {};
       }
-      out[id3] = annotated.annotations[id3];
+      out[id2] = annotated.annotations[id2];
     }
   }
   return out;
@@ -54687,8 +54734,8 @@ var omitAnnotations = (annotationIds) => (annotated) => {
   const out = {
     ...annotated.annotations
   };
-  for (const id3 of annotationIds) {
-    delete out[id3];
+  for (const id2 of annotationIds) {
+    delete out[id2];
   }
   return out;
 };
@@ -56556,10 +56603,10 @@ var bounded2 = (requestedCapacity) => pipe(sync(() => bounded(requestedCapacity)
 var dropping = (requestedCapacity) => pipe(sync(() => bounded(requestedCapacity)), flatMap8((queue) => make42(backingQueueFromMutableQueue(queue), droppingStrategy())));
 var sliding = (requestedCapacity) => pipe(sync(() => bounded(requestedCapacity)), flatMap8((queue) => make42(backingQueueFromMutableQueue(queue), slidingStrategy())));
 var unbounded2 = () => pipe(sync(() => unbounded()), flatMap8((queue) => make42(backingQueueFromMutableQueue(queue), droppingStrategy())));
-var unsafeMake9 = (queue, takers, shutdownHook, shutdownFlag, strategy) => {
+var unsafeMake10 = (queue, takers, shutdownHook, shutdownFlag, strategy) => {
   return new QueueImpl(queue, takers, shutdownHook, shutdownFlag, strategy);
 };
-var make42 = (queue, strategy) => pipe(deferredMake(), map10((deferred) => unsafeMake9(queue, unbounded(), deferred, make13(false), strategy)));
+var make42 = (queue, strategy) => pipe(deferredMake(), map10((deferred) => unsafeMake10(queue, unbounded(), deferred, make13(false), strategy)));
 var BackingQueueFromMutableQueue = class {
   mutable;
   [BackingQueueTypeId] = backingQueueVariance;
@@ -59211,7 +59258,7 @@ __export(Schema_exports, {
   partial: () => partial2,
   partialWith: () => partialWith,
   pattern: () => pattern,
-  pick: () => pick4,
+  pick: () => pick5,
   pickLiteral: () => pickLiteral,
   pluck: () => pluck,
   positive: () => positive,
@@ -59615,7 +59662,7 @@ var isUtc2 = isUtc;
 var isZoned2 = isZoned;
 var Equivalence4 = Equivalence2;
 var unsafeFromDate2 = unsafeFromDate;
-var unsafeMake10 = unsafeMake7;
+var unsafeMake11 = unsafeMake8;
 var unsafeMakeZoned2 = unsafeMakeZoned;
 var makeZonedFromString2 = makeZonedFromString;
 var zoneUnsafeMakeNamed2 = zoneUnsafeMakeNamed;
@@ -61570,15 +61617,15 @@ var RunExecution = class _RunExecution {
     this.currentLevelExecutionTrees.push(currentTree);
     return currentTree;
   }
-  fail(value6, id3, failure) {
+  fail(value6, id2, failure) {
     if (this.verbosity >= VerbosityLevel.Verbose) {
       const currentTree = this.appendExecutionTree(ExecutionStatus.Failure, value6);
       this.currentLevelExecutionTrees = currentTree.children;
     }
     if (this.pathToFailure == null)
-      this.pathToFailure = `${id3}`;
+      this.pathToFailure = `${id2}`;
     else
-      this.pathToFailure += `:${id3}`;
+      this.pathToFailure += `:${id2}`;
     this.value = value6;
     this.failure = failure;
   }
@@ -61801,8 +61848,8 @@ var IntegerArbitrary = class _IntegerArbitrary extends Arbitrary {
     if (ranges.length === 1) {
       return ranges[0];
     }
-    const id3 = mrng.nextInt(-2 * (ranges.length - 1), ranges.length - 2);
-    return id3 < 0 ? ranges[0] : ranges[id3 + 1];
+    const id2 = mrng.nextInt(-2 * (ranges.length - 1), ranges.length - 2);
+    return id2 < 0 ? ranges[0] : ranges[id2 + 1];
   }
   isLastChanceTry(current, context9) {
     if (current > 0)
@@ -62688,7 +62735,7 @@ var value2 = value;
 var getEquivalence7 = (isEquivalent) => make((x, y) => isEquivalent(value2(x), value2(y)));
 
 // ../../node_modules/.pnpm/effect@3.21.2/node_modules/effect/dist/esm/Struct.js
-var pick3 = /* @__PURE__ */ dual((args2) => isObject(args2[0]), (s, ...keys5) => {
+var pick4 = /* @__PURE__ */ dual((args2) => isObject(args2[0]), (s, ...keys5) => {
   const out = {};
   for (const k of keys5) {
     if (k in s) {
@@ -62810,8 +62857,8 @@ var toASTAnnotations = (annotations3) => {
   };
   for (const key in builtInAnnotations) {
     if (key in annotations3) {
-      const id3 = builtInAnnotations[key];
-      out[id3] = annotations3[key];
+      const id2 = builtInAnnotations[key];
+      out[id2] = annotations3[key];
       delete out[key];
     }
   }
@@ -63531,7 +63578,7 @@ function makeTypeLiteralClass(fields, records, ast = getDefaultTypeLiteralAST(fi
       return getDisableValidationMakeOption(options3) ? propsWithDefaults : validateSync(this)(propsWithDefaults);
     };
     static pick(...keys5) {
-      return Struct(pick3(fields, ...keys5));
+      return Struct(pick4(fields, ...keys5));
     }
     static omit(...keys5) {
       return Struct(omit4(fields, ...keys5));
@@ -63559,12 +63606,12 @@ function makeRecordClass(key, value6, ast) {
   };
 }
 var Record = (options3) => makeRecordClass(options3.key, options3.value);
-var pick4 = (...keys5) => (self) => make53(pick2(self.ast, keys5));
+var pick5 = (...keys5) => (self) => make53(pick3(self.ast, keys5));
 var omit5 = (...keys5) => (self) => make53(omit3(self.ast, keys5));
 var pluck = /* @__PURE__ */ dual(2, (schema, key) => {
   const ps = getPropertyKeyIndexedAccess(typeAST(schema.ast), key);
   const value6 = make53(ps.isOptional ? orUndefined(ps.type) : ps.type);
-  const out = transform2(schema.pipe(pick4(key)), value6, {
+  const out = transform2(schema.pipe(pick5(key)), value6, {
     strict: true,
     decode: (i) => i[key],
     encode: (a) => ps.isOptional && a === void 0 ? {} : {
@@ -64651,26 +64698,26 @@ var Uint8Array$ = class extends (/* @__PURE__ */ transform2(Array$(Uint8).annota
   identifier: "Uint8Array"
 })) {
 };
-var makeUint8ArrayTransformation = (id3, decode7, encode5) => transformOrFail(String$.annotations({
+var makeUint8ArrayTransformation = (id2, decode7, encode5) => transformOrFail(String$.annotations({
   description: "a string to be decoded into a Uint8Array"
 }), Uint8ArrayFromSelf, {
   strict: true,
   decode: (i, _, ast) => mapLeft(decode7(i), (decodeException) => new Type2(ast, i, decodeException.message)),
   encode: (a) => succeed9(encode5(a))
 }).annotations({
-  identifier: id3
+  identifier: id2
 });
 var Uint8ArrayFromBase64 = /* @__PURE__ */ makeUint8ArrayTransformation("Uint8ArrayFromBase64", decodeBase64, encodeBase64);
 var Uint8ArrayFromBase64Url = /* @__PURE__ */ makeUint8ArrayTransformation("Uint8ArrayFromBase64Url", decodeBase64Url, encodeBase64Url);
 var Uint8ArrayFromHex = /* @__PURE__ */ makeUint8ArrayTransformation("Uint8ArrayFromHex", decodeHex, encodeHex);
-var makeEncodingTransformation = (id3, decode7, encode5) => transformOrFail(String$.annotations({
-  description: `A string that is interpreted as being ${id3}-encoded and will be decoded into a UTF-8 string`
+var makeEncodingTransformation = (id2, decode7, encode5) => transformOrFail(String$.annotations({
+  description: `A string that is interpreted as being ${id2}-encoded and will be decoded into a UTF-8 string`
 }), String$, {
   strict: true,
   decode: (i, _, ast) => mapLeft(decode7(i), (decodeException) => new Type2(ast, i, decodeException.message)),
   encode: (a) => succeed9(encode5(a))
 }).annotations({
-  identifier: `StringFrom${id3}`
+  identifier: `StringFrom${id2}`
 });
 var StringFromBase64 = /* @__PURE__ */ makeEncodingTransformation("Base64", decodeBase64String, encodeBase64);
 var StringFromBase64Url = /* @__PURE__ */ makeEncodingTransformation("Base64Url", decodeBase64UrlString, encodeBase64Url);
@@ -64881,7 +64928,7 @@ var DateTimeUtcFromSelf = class extends (/* @__PURE__ */ declare((u) => isDateTi
 })) {
 };
 var decodeDateTimeUtc = (input, ast) => _try({
-  try: () => unsafeMake10(input),
+  try: () => unsafeMake11(input),
   catch: () => new Type2(ast, input, `Unable to decode ${formatUnknown(input)} into a DateTime.Utc`)
 });
 var DateTimeUtcFromNumber = class extends (/* @__PURE__ */ transformOrFail(Number$.annotations({
@@ -67005,25 +67052,25 @@ var cyanBright = /* @__PURE__ */ brightColor(cyan);
 var beep = /* @__PURE__ */ make57({
   commands: /* @__PURE__ */ of(BEL)
 });
-var cursorTo = (column3, row2) => {
-  if (row2 === void 0) {
+var cursorTo = (column3, row) => {
+  if (row === void 0) {
     const command3 = `${ESC}${Math.max(column3 + 1, 0)}G`;
     return make57({
       commands: of(command3)
     });
   }
-  const command2 = `${ESC}${row2 + 1}${SEP}${Math.max(column3 + 1, 0)}H`;
+  const command2 = `${ESC}${row + 1}${SEP}${Math.max(column3 + 1, 0)}H`;
   return make57({
     commands: of(command2)
   });
 };
-var cursorMove = (column3, row2 = 0) => {
+var cursorMove = (column3, row = 0) => {
   let command2 = "";
-  if (row2 < 0) {
-    command2 += `${ESC}${-row2}A`;
+  if (row < 0) {
+    command2 += `${ESC}${-row}A`;
   }
-  if (row2 > 0) {
-    command2 += `${ESC}${row2}B`;
+  if (row > 0) {
+    command2 += `${ESC}${row}B`;
   }
   if (column3 > 0) {
     command2 += `${ESC}${column3}C`;
@@ -67920,8 +67967,8 @@ var annotate2 = annotate;
 
 // ../../node_modules/.pnpm/@effect+printer-ansi@0.49.0_@effect+typeclass@0.40.0_effect@3.21.2__effect@3.21.2/node_modules/@effect/printer-ansi/dist/esm/internal/ansiDoc.js
 var beep2 = /* @__PURE__ */ annotate2(empty36, beep);
-var cursorTo2 = (column3, row2) => annotate2(empty36, cursorTo(column3, row2));
-var cursorMove2 = (column3, row2) => annotate2(empty36, cursorMove(column3, row2));
+var cursorTo2 = (column3, row) => annotate2(empty36, cursorTo(column3, row));
+var cursorMove2 = (column3, row) => annotate2(empty36, cursorMove(column3, row));
 var cursorDown2 = (lines3 = 1) => annotate2(empty36, cursorDown(lines3));
 var cursorLeft2 = /* @__PURE__ */ annotate2(empty36, cursorLeft);
 var cursorSavePosition2 = /* @__PURE__ */ annotate2(empty36, cursorSavePosition);
@@ -71983,10 +72030,10 @@ var levensteinDistance = (first3, second, config3) => {
   for (let y = 0; y <= columnCount; y++) {
     matrix[0][y] = y;
   }
-  for (let row2 = 1; row2 <= rowCount; row2++) {
+  for (let row = 1; row <= rowCount; row++) {
     for (let col = 1; col <= columnCount; col++) {
-      const cost = normalFirst.charAt(row2 - 1) === normalSecond.charAt(col - 1) ? 0 : 1;
-      matrix[row2][col] = Math.min(matrix[row2][col - 1] + 1, Math.min(matrix[row2 - 1][col] + 1, matrix[row2 - 1][col - 1] + cost));
+      const cost = normalFirst.charAt(row - 1) === normalSecond.charAt(col - 1) ? 0 : 1;
+      matrix[row][col] = Math.min(matrix[row][col - 1] + 1, Math.min(matrix[row - 1][col] + 1, matrix[row - 1][col - 1] + cost));
     }
   }
   return matrix[rowCount][columnCount];
@@ -73460,7 +73507,7 @@ var withSubcommands = /* @__PURE__ */ dual(2, (self, subcommands) => {
   const op = Object.create(proto23);
   op._tag = "Subcommands";
   op.parent = self;
-  op.children = map3(subcommands, ([id3, command2]) => map35(command2, (a) => [id3, a]));
+  op.children = map3(subcommands, ([id2, command2]) => map35(command2, (a) => [id2, a]));
   return op;
 });
 var wizard6 = /* @__PURE__ */ dual(3, (self, prefix, config3) => wizardInternal4(self, prefix, config3));
@@ -74852,7 +74899,7 @@ var Proto3 = {
     return pipeArguments(this, arguments);
   }
 };
-var unsafeMake11 = (backing, deferred) => {
+var unsafeMake12 = (backing, deferred) => {
   const self = Object.create(Proto3);
   self.state = {
     _tag: "Open",
@@ -74861,7 +74908,7 @@ var unsafeMake11 = (backing, deferred) => {
   self.deferred = deferred;
   return self;
 };
-var make67 = () => acquireRelease2(map17(make40(), (deferred) => unsafeMake11(/* @__PURE__ */ new Set(), deferred)), (set8) => withFiberRuntime2((parent) => {
+var make67 = () => acquireRelease2(map17(make40(), (deferred) => unsafeMake12(/* @__PURE__ */ new Set(), deferred)), (set8) => withFiberRuntime2((parent) => {
   const state = set8.state;
   if (state._tag === "Closed") return _void;
   set8.state = {
@@ -74987,13 +75034,13 @@ var makeManager = /* @__PURE__ */ gen4(function* () {
       initialMessage
     }) {
       return gen4(function* () {
-        const id3 = idCounter++;
+        const id2 = idCounter++;
         let requestIdCounter = 0;
         const requestMap = /* @__PURE__ */ new Map();
         const collector = unsafeMakeCollector();
         const wrappedEncode = encode5 ? (message) => zipRight4(collector.clear, provideService2(encode5(message), Collector, collector)) : succeed8;
         const readyLatch = yield* make40();
-        const backing = yield* platform.spawn(id3);
+        const backing = yield* platform.spawn(id2);
         yield* backing.run((message) => {
           if (message[0] === 0) {
             return complete2(readyLatch, _void);
@@ -75035,20 +75082,20 @@ var makeManager = /* @__PURE__ */ gen4(function* () {
         const executeAcquire = (request2, makeMailbox) => withFiberRuntime2((fiber) => {
           const context9 = fiber.getFiberRef(currentContext2);
           const span4 = getOption2(context9, ParentSpan).pipe(filter((span5) => span5._tag === "Span"));
-          const id4 = requestIdCounter++;
+          const id3 = requestIdCounter++;
           return makeMailbox.pipe(tap4((mailbox) => {
-            requestMap.set(id4, mailbox);
-            return wrappedEncode(request2).pipe(tap4((payload) => backing.send([id4, 0, payload, span4._tag === "Some" ? [span4.value.traceId, span4.value.spanId, span4.value.sampled] : void 0], collector.unsafeRead())), catchAllCause3((cause3) => isMailbox(mailbox) ? mailbox.failCause(cause3) : failCause6(mailbox, cause3)));
+            requestMap.set(id3, mailbox);
+            return wrappedEncode(request2).pipe(tap4((payload) => backing.send([id3, 0, payload, span4._tag === "Some" ? [span4.value.traceId, span4.value.spanId, span4.value.sampled] : void 0], collector.unsafeRead())), catchAllCause3((cause3) => isMailbox(mailbox) ? mailbox.failCause(cause3) : failCause6(mailbox, cause3)));
           }), map17((mailbox) => ({
-            id: id4,
+            id: id3,
             mailbox
           })));
         });
         const executeRelease = ({
-          id: id4
+          id: id3
         }, exit4) => {
-          const release = sync4(() => requestMap.delete(id4));
-          return isFailure2(exit4) ? zipRight4(orDie3(backing.send([id4, 1])), release) : release;
+          const release = sync4(() => requestMap.delete(id3));
+          return isFailure2(exit4) ? zipRight4(orDie3(backing.send([id3, 1])), release) : release;
         };
         const execute2 = (request2) => fromChannel4(acquireUseRelease4(executeAcquire(request2, make66()), ({
           mailbox
@@ -75064,7 +75111,7 @@ var makeManager = /* @__PURE__ */ gen4(function* () {
           })));
         }
         return {
-          id: id3,
+          id: id2,
           execute: execute2,
           executeEffect
         };
@@ -75075,7 +75122,7 @@ var makeManager = /* @__PURE__ */ gen4(function* () {
 var layerManager = /* @__PURE__ */ effect(WorkerManager, makeManager);
 var makePlatform = () => (options3) => PlatformWorker.of({
   [PlatformWorkerTypeId]: PlatformWorkerTypeId,
-  spawn(id3) {
+  spawn(id2) {
     return gen4(function* () {
       const spawn2 = yield* Spawner;
       let currentPort;
@@ -75083,7 +75130,7 @@ var makePlatform = () => (options3) => PlatformWorker.of({
       const run10 = (handler) => uninterruptibleMask3((restore) => gen4(function* () {
         const scope5 = yield* scope3;
         const port2 = yield* options3.setup({
-          worker: spawn2(id3),
+          worker: spawn2(id2),
           scope: scope5
         });
         currentPort = port2;
@@ -76177,17 +76224,98 @@ var runMain3 = runMain2;
 import process3 from "node:process";
 
 // src/cli.ts
-import crypto from "node:crypto";
 import { resolve as resolve3 } from "node:path";
 
 // src/db.ts
 import Database from "better-sqlite3";
 
+// src/builtins.ts
+var BUILTIN_AGENT_KINDS = ["pdx", "pandora", "toil", "greed", "war"];
+var BUILTIN_CAPABILITIES = ["triage", "design", "execute", "escalate"];
+var BUILTIN_AGENT_CLAIMS = {
+  pandora: ["escalate"],
+  toil: ["triage"],
+  greed: ["design"],
+  war: ["execute"]
+};
+var BUILTIN_AGENT_ENQUEUES = {
+  pdx: ["escalate"],
+  pandora: ["triage", "design", "escalate"],
+  toil: ["triage", "design", "execute", "escalate"],
+  greed: ["triage", "design", "escalate"],
+  war: ["escalate"]
+};
+
 // src/errors.ts
 var PithosError = class extends Data_exports.TaggedError("PithosError") {
 };
+var exitCodeFor = (code2) => {
+  switch (code2) {
+    case "USER_ERROR":
+    case "INTERNAL_ERROR":
+      return 1;
+    case "VALIDATION_ERROR":
+      return 2;
+    case "NOT_FOUND":
+      return 3;
+    case "STALE_TOKEN":
+    case "STALE_TOKEN_RACE":
+      return 4;
+    case "NO_CLAIMABLE_WORK":
+      return 5;
+  }
+};
 var fail20 = (code2, message) => {
   throw new PithosError({ code: code2, message });
+};
+
+// src/rows.ts
+var NonEmptyString2 = Schema_exports.String.pipe(Schema_exports.minLength(1));
+var NullableString = Schema_exports.NullOr(Schema_exports.String);
+var RunRowSchema = Schema_exports.Struct({
+  id: NonEmptyString2,
+  agent_kind: Schema_exports.Literal("pdx", "pandora", "toil", "greed", "war"),
+  mode: Schema_exports.Literal("afk", "hitl"),
+  scope_id: NonEmptyString2,
+  cwd: Schema_exports.optional(Schema_exports.String),
+  status: Schema_exports.Literal("live", "ended", "failed", "cancelled", "timed_out"),
+  task_id: NullableString,
+  session_id: NonEmptyString2,
+  created_at: NonEmptyString2,
+  updated_at: NonEmptyString2
+});
+var TaskRowSchema = Schema_exports.Struct({
+  id: NonEmptyString2,
+  scope_id: NonEmptyString2,
+  capability: Schema_exports.Literal("triage", "design", "execute", "escalate"),
+  title: Schema_exports.String,
+  body: Schema_exports.String,
+  status: Schema_exports.Literal(
+    "queued",
+    "claimed",
+    "running",
+    "done",
+    "failed",
+    "dead_letter",
+    "cancelled"
+  ),
+  fencing_token: Schema_exports.Number,
+  attempts: Schema_exports.Number,
+  max_attempts: Schema_exports.Number,
+  created_at: NonEmptyString2
+});
+var ScopeRowSchema = Schema_exports.Struct({
+  id: NonEmptyString2,
+  kind: Schema_exports.Literal("global", "repo", "worktree"),
+  canonical_path: NullableString
+});
+var decodeRow = (schema, value6, message) => {
+  if (value6 === void 0) fail20("NOT_FOUND", message);
+  const result = Schema_exports.decodeUnknownEither(schema)(value6);
+  return Either_exports.match(result, {
+    onLeft: () => fail20("INTERNAL_ERROR", `malformed database row: ${message}`),
+    onRight: (row) => row
+  });
 };
 
 // src/db.ts
@@ -76316,41 +76444,23 @@ CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
 };
 var seed = (db) => {
   db.prepare(sql`INSERT OR IGNORE INTO scopes (id, kind) VALUES ('global', 'global')`).run();
-  for (const agent2 of ["pdx", "pandora", "toil", "greed", "war"])
+  for (const agent2 of BUILTIN_AGENT_KINDS)
     db.prepare(sql`INSERT OR IGNORE INTO agent_kinds (agent_kind) VALUES (?)`).run(agent2);
-  for (const cap of ["triage", "design", "execute", "escalate"])
+  for (const cap of BUILTIN_CAPABILITIES)
     db.prepare(sql`INSERT OR IGNORE INTO capabilities (capability) VALUES (?)`).run(cap);
-  for (const [a, c] of [
-    ["pandora", "escalate"],
-    ["toil", "triage"],
-    ["greed", "design"],
-    ["war", "execute"]
-  ])
-    db.prepare(sql`INSERT OR IGNORE INTO agent_claims (agent_kind, capability) VALUES (?, ?)`).run(
-      a,
-      c
-    );
-  for (const [a, caps] of Object.entries({
-    pdx: ["escalate"],
-    pandora: ["triage", "design", "escalate"],
-    toil: ["triage", "design", "execute", "escalate"],
-    greed: ["triage", "design", "escalate"],
-    war: ["escalate"]
-  }))
+  for (const [a, caps] of Object.entries(BUILTIN_AGENT_CLAIMS))
+    for (const c of caps)
+      db.prepare(
+        sql`INSERT OR IGNORE INTO agent_claims (agent_kind, capability) VALUES (?, ?)`
+      ).run(a, c);
+  for (const [a, caps] of Object.entries(BUILTIN_AGENT_ENQUEUES))
     for (const c of caps)
       db.prepare(
         sql`INSERT OR IGNORE INTO agent_enqueues (agent_kind, capability) VALUES (?, ?)`
       ).run(a, c);
 };
-var row = (value6, message) => {
-  if (value6 === void 0) fail20("NOT_FOUND", message);
-  if (value6 === null || typeof value6 !== "object")
-    fail20("INTERNAL_ERROR", `invalid database row: ${message}`);
-  return value6;
-};
 
 // src/cli.ts
-var id2 = (prefix) => `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
 var json2 = (value6) => `${JSON.stringify(value6)}
 `;
 var parseFlag = (args2, name) => {
@@ -76381,11 +76491,11 @@ var body = (ctx, args2) => {
 var capability = (value6) => ["triage", "design", "execute", "escalate"].includes(value6) ? value6 : fail20("VALIDATION_ERROR", `invalid capability: ${value6}`);
 var mode = (value6) => value6 === "afk" || value6 === "hitl" ? value6 : fail20("VALIDATION_ERROR", `invalid mode: ${value6}`);
 var agent = (value6) => ["pdx", "pandora", "toil", "greed", "war"].includes(value6) ? value6 : fail20("VALIDATION_ERROR", `invalid agent: ${value6}`);
-var event = (db, type2, payload) => {
+var event = (ctx, db, type2, payload) => {
   db.prepare(
     sql`INSERT INTO events(id,type,task_id,run_id,actor_run_id,payload_json) VALUES (?,?,?,?,?,?)`
   ).run(
-    id2("event"),
+    ctx.services.ids.make("event"),
     type2,
     payload.task_id ?? null,
     payload.run_id ?? null,
@@ -76394,7 +76504,8 @@ var event = (db, type2, payload) => {
   );
 };
 var enforceCapScope = (db, scopeId, cap) => {
-  const s = row(
+  const s = decodeRow(
+    ScopeRowSchema,
     db.prepare(sql`SELECT id,kind,canonical_path FROM scopes WHERE id=?`).get(scopeId),
     `scope not found: ${scopeId}`
   );
@@ -76407,7 +76518,8 @@ var enforceCapScope = (db, scopeId, cap) => {
     );
 };
 var authorized = (db, table2, runId, cap) => {
-  const r = row(
+  const r = decodeRow(
+    RunRowSchema,
     db.prepare(
       sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`
     ).get(runId),
@@ -76419,15 +76531,16 @@ var authorized = (db, table2, runId, cap) => {
 };
 var runCli = (ctx, argv) => {
   try {
-    const db = openDb(ctx.config.dbPath);
     const out = (v) => ctx.services.output.write(json2(v));
     const [a, b, c, ...rest] = argv;
     if (a === "init") {
       if (rest.includes("--fresh")) ctx.services.fs.removeFile(ctx.config.dbPath);
-      migrate(db);
+      const db2 = openDb(ctx.config.dbPath);
+      migrate(db2);
       out({ ok: true });
       return 0;
     }
+    const db = openDb(ctx.config.dbPath);
     migrate(db);
     if (a === "scope" && b === "upsert") {
       const kind = req(rest, "--kind");
@@ -76443,7 +76556,7 @@ var runCli = (ctx, argv) => {
       return 0;
     }
     if (a === "run" && b === "upsert") {
-      const rid = parseFlag(rest, "--run") ?? id2("run");
+      const rid = parseFlag(rest, "--run") ?? ctx.services.ids.make("run");
       const ag = agent(req(rest, "--agent"));
       const mo = mode(req(rest, "--mode"));
       const scope5 = req(rest, "--scope");
@@ -76467,7 +76580,8 @@ var runCli = (ctx, argv) => {
       return 0;
     }
     if (a === "run" && b === "inspect") {
-      const r = row(
+      const r = decodeRow(
+        RunRowSchema,
         db.prepare(
           sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`
         ).get(c),
@@ -76499,13 +76613,14 @@ var runCli = (ctx, argv) => {
         fail20("VALIDATION_ERROR", "duplicate --depends-on");
       enforceCapScope(db, scope5, cap);
       authorized(db, "agent_enqueues", runId, cap);
-      const tid = id2("task");
+      const tid = ctx.services.ids.make("task");
       db.transaction(() => {
         db.prepare(
           sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`
         ).run(tid, scope5, cap, title, body(ctx, rest), runId);
         for (const dep of depends) {
-          row(
+          decodeRow(
+            TaskRowSchema,
             db.prepare(
               sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`
             ).get(dep),
@@ -76517,7 +76632,7 @@ var runCli = (ctx, argv) => {
             sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`
           ).run(tid, dep);
         }
-        event(db, "task.created", {
+        event(ctx, db, "task.created", {
           task_id: tid,
           actor_run_id: runId,
           payload: { scope_id: scope5, capability: cap, title, depends_on_task_ids: depends }
@@ -76533,27 +76648,27 @@ var runCli = (ctx, argv) => {
       const r = authorized(db, "agent_claims", runId, cap);
       if (r.scope_id !== scope5)
         fail20("VALIDATION_ERROR", `claim scope ${scope5} does not match run scope ${r.scope_id}`);
-      const t = row(
-        db.prepare(
+      const claimed = db.transaction(() => {
+        const candidate = db.prepare(
           sql`SELECT id FROM tasks t WHERE t.status='queued' AND t.scope_id=? AND t.capability=? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dep ON dep.id=td.depends_on_task_id WHERE td.task_id=t.id AND dep.status <> 'done') ORDER BY t.created_at ASC, t.id ASC LIMIT 1`
-        ).get(scope5, cap),
-        "no claimable work"
-      );
-      db.transaction(() => {
+        ).get(scope5, cap);
+        const task = candidate ?? fail20("NO_CLAIMABLE_WORK", "no claimable work");
         const rr = db.prepare(
           sql`UPDATE runs SET task_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id IS NULL`
-        ).run(t.id, runId);
+        ).run(task.id, runId);
         if (rr.changes === 0) fail20("VALIDATION_ERROR", "run already holds a task");
-        db.prepare(
-          sql`UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`
-        ).run(t.id);
-        event(db, "task.claimed", {
-          task_id: t.id,
+        const updated = db.prepare(
+          sql`UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued' RETURNING id, fencing_token`
+        ).get(task.id);
+        const claimedTask = updated ?? fail20("STALE_TOKEN_RACE", "claim candidate changed before update");
+        event(ctx, db, "task.claimed", {
+          task_id: claimedTask.id,
           actor_run_id: runId,
-          payload: { run_id: runId, fencing_token: 1 }
+          payload: { run_id: runId, fencing_token: claimedTask.fencing_token }
         });
+        return claimedTask;
       })();
-      out({ ok: true, task: { id: t.id, status: "claimed", token: 1 } });
+      out({ ok: true, task: { id: claimed.id, status: "claimed", token: claimed.fencing_token } });
       return 0;
     }
     if (a === "task" && b === "heartbeat") {
@@ -76563,7 +76678,8 @@ var runCli = (ctx, argv) => {
       if (task === void 0 !== (token === void 0))
         fail20("VALIDATION_ERROR", "--task and --token must be supplied together");
       if (task !== void 0) {
-        const tr = row(
+        const tr = decodeRow(
+          TaskRowSchema,
           db.prepare(
             sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`
           ).get(task),
@@ -76574,7 +76690,7 @@ var runCli = (ctx, argv) => {
           db.prepare(
             sql`UPDATE tasks SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?`
           ).run(task);
-        event(db, "task.heartbeat", {
+        event(ctx, db, "task.heartbeat", {
           task_id: task,
           actor_run_id: runId,
           payload: {
@@ -76590,7 +76706,7 @@ var runCli = (ctx, argv) => {
         });
         return 0;
       }
-      event(db, "run.heartbeat", { run_id: runId, payload: { status: "live" } });
+      event(ctx, db, "run.heartbeat", { run_id: runId, payload: { status: "live" } });
       out({ ok: true });
       return 0;
     }
@@ -76608,12 +76724,13 @@ var runCli = (ctx, argv) => {
         db.prepare(
           sql`UPDATE runs SET task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id=?`
         ).run(runId, taskId);
-        event(db, b === "complete" ? "task.completed" : "task.failed", {
+        event(ctx, db, b === "complete" ? "task.completed" : "task.failed", {
           task_id: taskId,
           actor_run_id: runId,
           payload: { run_id: runId, fencing_token: token }
         });
-        return row(
+        return decodeRow(
+          TaskRowSchema,
           db.prepare(
             sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`
           ).get(taskId),
@@ -76625,7 +76742,8 @@ var runCli = (ctx, argv) => {
     }
     if (a === "task" && b === "inspect") {
       const taskId = c ?? fail20("VALIDATION_ERROR", "missing task id");
-      const t = row(
+      const t = decodeRow(
+        TaskRowSchema,
         db.prepare(
           sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`
         ).get(taskId),
@@ -76681,7 +76799,7 @@ var runCli = (ctx, argv) => {
     if (a === "task" && b === "artifact" && c === "add") {
       const task = req(rest, "--task");
       const runId = req(rest, "--run");
-      const aid = id2("artifact");
+      const aid = ctx.services.ids.make("artifact");
       db.prepare(
         sql`INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)`
       ).run(
@@ -76706,7 +76824,7 @@ var runCli = (ctx, argv) => {
       ctx.services.output.writeError(
         json2({ ok: false, error: { code: error4.code, message: error4.message } })
       );
-      return error4.code === "NO_CLAIMABLE_WORK" ? 5 : 1;
+      return exitCodeFor(error4.code);
     }
     throw error4;
   }
@@ -76765,7 +76883,7 @@ var makePithosCommand = (ctx) => {
   const runInspect = Command_exports.make(
     "inspect",
     { id: Args_exports.text({ name: "run-id" }) },
-    ({ id: id3 }) => run9(ctx, ["run", "inspect", id3])
+    ({ id: id2 }) => run9(ctx, ["run", "inspect", id2])
   );
   const runParent = Command_exports.make("run").pipe(Command_exports.withSubcommands([runUpsert, runInspect]));
   const enqueue = Command_exports.make(
@@ -76883,7 +77001,7 @@ var makePithosCommand = (ctx) => {
   const inspect = Command_exports.make(
     "inspect",
     { id: Args_exports.text({ name: "task-id" }) },
-    ({ id: id3 }) => run9(ctx, ["task", "inspect", id3])
+    ({ id: id2 }) => run9(ctx, ["task", "inspect", id2])
   );
   const supersede = Command_exports.make(
     "supersede",
@@ -76979,25 +77097,29 @@ var makePithosCommand = (ctx) => {
 };
 
 // src/config.ts
+var RequiredEnvString = Schema_exports.String.pipe(Schema_exports.minLength(1));
 var ConfigSchema = Schema_exports.Struct({
-  dbPath: Schema_exports.String,
-  runId: Schema_exports.optional(Schema_exports.String)
+  dbPath: RequiredEnvString,
+  runId: Schema_exports.optional(RequiredEnvString)
 });
 var loadConfig = (env2) => {
   const raw = {
-    dbPath: env2.get("PITHOS_DB") ?? "./pithos.db",
+    dbPath: env2.get("PITHOS_DB"),
     runId: env2.get("PITHOS_RUN_ID")
   };
   const result = Schema_exports.decodeUnknownEither(ConfigSchema)(raw);
   return Either_exports.match(result, {
-    onLeft: () => fail20("VALIDATION_ERROR", "invalid process configuration"),
+    onLeft: () => fail20("VALIDATION_ERROR", "invalid process configuration: PITHOS_DB is required"),
     onRight: (config3) => config3
   });
 };
 
 // src/services.ts
+import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import process2 from "node:process";
+var PithosServices = class extends Context_exports.Tag("PithosServices")() {
+};
 var liveServices2 = {
   fs: {
     readText: (path4) => readFileSync(path4, "utf8"),
@@ -77006,8 +77128,15 @@ var liveServices2 = {
   output: {
     write: (text11) => process2.stdout.write(text11),
     writeError: (text11) => process2.stderr.write(text11)
+  },
+  ids: {
+    make: (prefix) => `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 16)}`
+  },
+  clock: {
+    nowIso: () => (/* @__PURE__ */ new Date()).toISOString()
   }
 };
+var LiveServicesLayer = Layer_exports.succeed(PithosServices, liveServices2);
 
 // src/main.ts
 var config2 = loadConfig({ get: (name) => process3.env[name] });

@@ -6,7 +6,7 @@ Central dependency map for implementation slices. Individual task files describe
   - **Status:** split_required
   - **Blocked by:** [task-001a](./task-001a.md), [task-001b](./task-001b.md), [task-001c](./task-001c.md), [task-001d](./task-001d.md), [task-001e](./task-001e.md)
 - [ ] [task-001a — Slice 1a: Pithos core architecture, config, schema, seeds](./task-001a.md)
-  - **Status:** pending
+  - **Status:** complete
   - **Blocked by:** none
 - [ ] [task-001b — Slice 1b: Nested CLI shell + scope/run foundations](./task-001b.md)
   - **Status:** pending

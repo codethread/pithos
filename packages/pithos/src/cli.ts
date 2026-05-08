@@ -1,57 +1,24 @@
-import crypto from "node:crypto";
 import { resolve } from "node:path";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import {
 	migrate,
 	openDb,
-	row,
 	sql,
 	type AgentKind,
 	type Capability,
 	type Mode,
 	type ScopeKind,
-	type TaskStatus,
 } from "./db.js";
-import { fail, PithosError } from "./errors.js";
+import { exitCodeFor, fail, PithosError } from "./errors.js";
+import { decodeRow, RunRowSchema, ScopeRowSchema, TaskRowSchema, type RunRow } from "./rows.js";
 import type { Services } from "./services.js";
 
-const id = (prefix: string): string =>
-	`${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
 const json = (value: unknown): string => `${JSON.stringify(value)}\n`;
 
 interface Ctx {
 	readonly config: Config;
 	readonly services: Services;
-}
-
-interface RunRow {
-	id: string;
-	agent_kind: AgentKind;
-	mode: Mode;
-	scope_id: string;
-	status: string;
-	task_id: string | null;
-	session_id: string;
-	created_at: string;
-	updated_at: string;
-}
-interface TaskRow {
-	id: string;
-	scope_id: string;
-	capability: Capability;
-	title: string;
-	body: string;
-	status: TaskStatus;
-	fencing_token: number;
-	attempts: number;
-	max_attempts: number;
-	created_at: string;
-}
-interface ScopeRow {
-	id: string;
-	kind: ScopeKind;
-	canonical_path: string | null;
 }
 
 const parseFlag = (args: readonly string[], name: string): string | undefined => {
@@ -93,6 +60,7 @@ const agent = (value: string): AgentKind =>
 		: fail("VALIDATION_ERROR", `invalid agent: ${value}`);
 
 const event = (
+	ctx: Ctx,
 	db: Db,
 	type: string,
 	payload: { task_id?: string; run_id?: string; actor_run_id?: string; payload: unknown },
@@ -100,7 +68,7 @@ const event = (
 	db.prepare(
 		sql`INSERT INTO events(id,type,task_id,run_id,actor_run_id,payload_json) VALUES (?,?,?,?,?,?)`,
 	).run(
-		id("event"),
+		ctx.services.ids.make("event"),
 		type,
 		payload.task_id ?? null,
 		payload.run_id ?? null,
@@ -109,7 +77,8 @@ const event = (
 	);
 };
 const enforceCapScope = (db: Db, scopeId: string, cap: Capability): void => {
-	const s = row<ScopeRow>(
+	const s = decodeRow(
+		ScopeRowSchema,
 		db.prepare(sql`SELECT id,kind,canonical_path FROM scopes WHERE id=?`).get(scopeId),
 		`scope not found: ${scopeId}`,
 	);
@@ -130,7 +99,8 @@ const authorized = (
 	runId: string,
 	cap: Capability,
 ): RunRow => {
-	const r = row<RunRow>(
+	const r = decodeRow(
+		RunRowSchema,
 		db
 			.prepare(
 				sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
@@ -147,15 +117,16 @@ const authorized = (
 
 export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 	try {
-		const db = openDb(ctx.config.dbPath);
 		const out = (v: unknown) => ctx.services.output.write(json(v));
 		const [a, b, c, ...rest] = argv;
 		if (a === "init") {
 			if (rest.includes("--fresh")) ctx.services.fs.removeFile(ctx.config.dbPath);
+			const db = openDb(ctx.config.dbPath);
 			migrate(db);
 			out({ ok: true });
 			return 0;
 		}
+		const db = openDb(ctx.config.dbPath);
 		migrate(db);
 		if (a === "scope" && b === "upsert") {
 			const kind = req(rest, "--kind") as ScopeKind;
@@ -171,7 +142,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			return 0;
 		}
 		if (a === "run" && b === "upsert") {
-			const rid = parseFlag(rest, "--run") ?? id("run");
+			const rid = parseFlag(rest, "--run") ?? ctx.services.ids.make("run");
 			const ag = agent(req(rest, "--agent"));
 			const mo = mode(req(rest, "--mode"));
 			const scope = req(rest, "--scope");
@@ -195,7 +166,8 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			return 0;
 		}
 		if (a === "run" && b === "inspect") {
-			const r = row<RunRow>(
+			const r = decodeRow(
+				RunRowSchema,
 				db
 					.prepare(
 						sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
@@ -229,13 +201,14 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 				fail("VALIDATION_ERROR", "duplicate --depends-on");
 			enforceCapScope(db, scope, cap);
 			authorized(db, "agent_enqueues", runId, cap);
-			const tid = id("task");
+			const tid = ctx.services.ids.make("task");
 			db.transaction(() => {
 				db.prepare(
 					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
 				).run(tid, scope, cap, title, body(ctx, rest), runId);
 				for (const dep of depends) {
-					row<TaskRow>(
+					decodeRow(
+						TaskRowSchema,
 						db
 							.prepare(
 								sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
@@ -253,7 +226,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
 					).run(tid, dep);
 				}
-				event(db, "task.created", {
+				event(ctx, db, "task.created", {
 					task_id: tid,
 					actor_run_id: runId,
 					payload: { scope_id: scope, capability: cap, title, depends_on_task_ids: depends },
@@ -269,31 +242,34 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			const r = authorized(db, "agent_claims", runId, cap);
 			if (r.scope_id !== scope)
 				fail("VALIDATION_ERROR", `claim scope ${scope} does not match run scope ${r.scope_id}`);
-			const t = row<{ id: string }>(
-				db
+			const claimed = db.transaction(() => {
+				const candidate = db
 					.prepare(
 						sql`SELECT id FROM tasks t WHERE t.status='queued' AND t.scope_id=? AND t.capability=? AND NOT EXISTS (SELECT 1 FROM task_dependencies td JOIN tasks dep ON dep.id=td.depends_on_task_id WHERE td.task_id=t.id AND dep.status <> 'done') ORDER BY t.created_at ASC, t.id ASC LIMIT 1`,
 					)
-					.get(scope, cap),
-				"no claimable work",
-			);
-			db.transaction(() => {
+					.get(scope, cap) as { id: string } | undefined;
+				const task = candidate ?? fail("NO_CLAIMABLE_WORK", "no claimable work");
 				const rr = db
 					.prepare(
 						sql`UPDATE runs SET task_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id IS NULL`,
 					)
-					.run(t.id, runId);
+					.run(task.id, runId);
 				if (rr.changes === 0) fail("VALIDATION_ERROR", "run already holds a task");
-				db.prepare(
-					sql`UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`,
-				).run(t.id);
-				event(db, "task.claimed", {
-					task_id: t.id,
+				const updated = db
+					.prepare(
+						sql`UPDATE tasks SET status='claimed', attempts=attempts+1, fencing_token=fencing_token+1, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued' RETURNING id, fencing_token`,
+					)
+					.get(task.id) as { id: string; fencing_token: number } | undefined;
+				const claimedTask =
+					updated ?? fail("STALE_TOKEN_RACE", "claim candidate changed before update");
+				event(ctx, db, "task.claimed", {
+					task_id: claimedTask.id,
 					actor_run_id: runId,
-					payload: { run_id: runId, fencing_token: 1 },
+					payload: { run_id: runId, fencing_token: claimedTask.fencing_token },
 				});
+				return claimedTask;
 			})();
-			out({ ok: true, task: { id: t.id, status: "claimed", token: 1 } });
+			out({ ok: true, task: { id: claimed.id, status: "claimed", token: claimed.fencing_token } });
 			return 0;
 		}
 		if (a === "task" && b === "heartbeat") {
@@ -303,7 +279,8 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			if ((task === undefined) !== (token === undefined))
 				fail("VALIDATION_ERROR", "--task and --token must be supplied together");
 			if (task !== undefined) {
-				const tr = row<TaskRow>(
+				const tr = decodeRow(
+					TaskRowSchema,
 					db
 						.prepare(
 							sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
@@ -316,7 +293,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 					db.prepare(
 						sql`UPDATE tasks SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 					).run(task);
-				event(db, "task.heartbeat", {
+				event(ctx, db, "task.heartbeat", {
 					task_id: task,
 					actor_run_id: runId,
 					payload: {
@@ -332,7 +309,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 				});
 				return 0;
 			}
-			event(db, "run.heartbeat", { run_id: runId, payload: { status: "live" } });
+			event(ctx, db, "run.heartbeat", { run_id: runId, payload: { status: "live" } });
 			out({ ok: true });
 			return 0;
 		}
@@ -357,12 +334,13 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 				db.prepare(
 					sql`UPDATE runs SET task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND task_id=?`,
 				).run(runId, taskId);
-				event(db, b === "complete" ? "task.completed" : "task.failed", {
+				event(ctx, db, b === "complete" ? "task.completed" : "task.failed", {
 					task_id: taskId,
 					actor_run_id: runId,
 					payload: { run_id: runId, fencing_token: token },
 				});
-				return row<TaskRow>(
+				return decodeRow(
+					TaskRowSchema,
 					db
 						.prepare(
 							sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
@@ -376,7 +354,8 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 		}
 		if (a === "task" && b === "inspect") {
 			const taskId = c ?? fail("VALIDATION_ERROR", "missing task id");
-			const t = row<TaskRow>(
+			const t = decodeRow(
+				TaskRowSchema,
 				db
 					.prepare(
 						sql`SELECT id,scope_id,capability,title,body,status,fencing_token,attempts,max_attempts,created_at FROM tasks WHERE id=?`,
@@ -445,7 +424,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 		if (a === "task" && b === "artifact" && c === "add") {
 			const task = req(rest, "--task");
 			const runId = req(rest, "--run");
-			const aid = id("artifact");
+			const aid = ctx.services.ids.make("artifact");
 			db.prepare(
 				sql`INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)`,
 			).run(
@@ -472,7 +451,7 @@ export const runCli = (ctx: Ctx, argv: readonly string[]): number => {
 			ctx.services.output.writeError(
 				json({ ok: false, error: { code: error.code, message: error.message } }),
 			);
-			return error.code === "NO_CLAIMABLE_WORK" ? 5 : 1;
+			return exitCodeFor(error.code);
 		}
 		throw error;
 	}

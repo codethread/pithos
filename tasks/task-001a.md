@@ -46,6 +46,10 @@ Reshape `packages/pithos/` into the foundation that later `pdx` code can import 
 - Graph rendering/briefing.
 - Run cleanup/interrupt/timeout; those remain task 2.
 
+## Slice notes
+
+- Review flagged existing task-claim and token-mutation race/ownership hardening. Those paths are outside this slice's foundation/schema/seed scope and should be handled with the task lifecycle/fencing slice rather than expanded here.
+
 ## Acceptance criteria
 
 - [ ] `packages/pithos/` builds and typechecks as a package.

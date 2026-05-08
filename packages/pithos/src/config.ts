@@ -1,9 +1,11 @@
 import { Either, Schema } from "effect";
 import { fail } from "./errors.js";
 
+const RequiredEnvString = Schema.String.pipe(Schema.minLength(1));
+
 export const ConfigSchema = Schema.Struct({
-	dbPath: Schema.String,
-	runId: Schema.optional(Schema.String),
+	dbPath: RequiredEnvString,
+	runId: Schema.optional(RequiredEnvString),
 });
 
 export type Config = typeof ConfigSchema.Type;
@@ -14,12 +16,12 @@ export interface EnvReader {
 
 export const loadConfig = (env: EnvReader): Config => {
 	const raw = {
-		dbPath: env.get("PITHOS_DB") ?? "./pithos.db",
+		dbPath: env.get("PITHOS_DB"),
 		runId: env.get("PITHOS_RUN_ID"),
 	};
 	const result = Schema.decodeUnknownEither(ConfigSchema)(raw);
 	return Either.match(result, {
-		onLeft: () => fail("VALIDATION_ERROR", "invalid process configuration"),
+		onLeft: () => fail("VALIDATION_ERROR", "invalid process configuration: PITHOS_DB is required"),
 		onRight: (config) => config,
 	});
 };

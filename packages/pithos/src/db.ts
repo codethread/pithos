@@ -1,11 +1,19 @@
 import Database from "better-sqlite3";
+import {
+	BUILTIN_AGENT_CLAIMS,
+	BUILTIN_AGENT_ENQUEUES,
+	BUILTIN_AGENT_KINDS,
+	BUILTIN_CAPABILITIES,
+	type AgentKind,
+	type Capability,
+} from "./builtins.js";
 import { fail } from "./errors.js";
+import { decodeRow } from "./rows.js";
 
 export type Db = Database.Database;
 export type ScopeKind = "global" | "repo" | "worktree";
 export type Mode = "afk" | "hitl";
-export type AgentKind = "pdx" | "pandora" | "toil" | "greed" | "war";
-export type Capability = "triage" | "design" | "execute" | "escalate";
+export type { AgentKind, Capability };
 export type TaskStatus =
 	| "queued"
 	| "claimed"
@@ -144,27 +152,16 @@ CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
 
 const seed = (db: Db): void => {
 	db.prepare(sql`INSERT OR IGNORE INTO scopes (id, kind) VALUES ('global', 'global')`).run();
-	for (const agent of ["pdx", "pandora", "toil", "greed", "war"])
+	for (const agent of BUILTIN_AGENT_KINDS)
 		db.prepare(sql`INSERT OR IGNORE INTO agent_kinds (agent_kind) VALUES (?)`).run(agent);
-	for (const cap of ["triage", "design", "execute", "escalate"])
+	for (const cap of BUILTIN_CAPABILITIES)
 		db.prepare(sql`INSERT OR IGNORE INTO capabilities (capability) VALUES (?)`).run(cap);
-	for (const [a, c] of [
-		["pandora", "escalate"],
-		["toil", "triage"],
-		["greed", "design"],
-		["war", "execute"],
-	])
-		db.prepare(sql`INSERT OR IGNORE INTO agent_claims (agent_kind, capability) VALUES (?, ?)`).run(
-			a,
-			c,
-		);
-	for (const [a, caps] of Object.entries({
-		pdx: ["escalate"],
-		pandora: ["triage", "design", "escalate"],
-		toil: ["triage", "design", "execute", "escalate"],
-		greed: ["triage", "design", "escalate"],
-		war: ["escalate"],
-	}))
+	for (const [a, caps] of Object.entries(BUILTIN_AGENT_CLAIMS))
+		for (const c of caps)
+			db.prepare(
+				sql`INSERT OR IGNORE INTO agent_claims (agent_kind, capability) VALUES (?, ?)`,
+			).run(a, c);
+	for (const [a, caps] of Object.entries(BUILTIN_AGENT_ENQUEUES))
 		for (const c of caps)
 			db.prepare(
 				sql`INSERT OR IGNORE INTO agent_enqueues (agent_kind, capability) VALUES (?, ?)`,
@@ -177,3 +174,5 @@ export const row = <T extends object>(value: unknown, message: string): T => {
 		fail("INTERNAL_ERROR", `invalid database row: ${message}`);
 	return value as T;
 };
+
+export { decodeRow };

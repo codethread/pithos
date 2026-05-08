@@ -8,7 +8,7 @@ Root rules (`../../AGENTS.md`) apply in full — fail loudly, tagged errors, str
 
 - Bin: `pithos-next`
 - Entrypoint: `src/main.ts` → `@effect/cli` wiring under `src/cli/`
-- Nested command surface only: `init`, `scope upsert`, `run upsert|inspect`, `task ...`, `graph inspect`, `events tail`, `briefing`
+- Nested command surface only: `init`, `scope upsert`, `run upsert|cleanup|interrupt|timeout|inspect`, `task ...`, `graph inspect`, `events tail`, `briefing`
 - Storage: SQLite via `better-sqlite3` and `@effect/sql-sqlite-node`
 - Default DB path: `~/.pandora/pithos-next.sqlite` unless `PITHOS_DB` is set
 

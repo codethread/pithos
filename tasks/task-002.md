@@ -64,12 +64,12 @@ SQL transaction + fenced-UPDATE patterns are canonical in task-001 §Implementat
 
 ## Acceptance criteria
 
-- [ ] All three commands implement spec §7 transition tables
-- [ ] Fencing increments verified on every active-task path
-- [ ] `run interrupt --task` DB-lookup behavior tested including zero-rows rejection
-- [ ] `run timeout` rejects when task held
-- [ ] Events emitted with required minimum payload
-- [ ] Race-loss path rolls back transaction with `STALE_TOKEN_RACE` (or equivalent) tagged error
+- [x] All three commands implement spec §7 transition tables
+- [x] Fencing increments verified on every active-task path
+- [x] `run interrupt --task` DB-lookup behavior tested including zero-rows rejection
+- [x] `run timeout` rejects when task held
+- [x] Events emitted with required minimum payload
+- [x] Race-loss path rolls back transaction with `STALE_TOKEN_RACE` (or equivalent) tagged error
 
 ## Blocked by
 

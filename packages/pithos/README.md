@@ -20,7 +20,7 @@ packages/pithos/bin/pithos-next --help
 
 - `pithos-next init [--fresh]`
 - `pithos-next scope upsert`
-- `pithos-next run upsert|inspect`
+- `pithos-next run upsert|cleanup|interrupt|timeout|inspect`
 - `pithos-next task enqueue|claim|heartbeat|complete|fail|supersede|cancel|inspect`
 - `pithos-next task artifact add`
 - `pithos-next graph inspect`

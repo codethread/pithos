@@ -663,6 +663,330 @@ describe("pithos-next task flow contracts", () => {
     expect(secondHeartbeat.task.status).toBe("running")
   })
 
+  it("reclaims active work on run cleanup before max attempts and emits minimum events", async () => {
+    const tempDir = makeTempDir()
+    tempDirs.push(tempDir)
+    const env = makeEnv(tempDir)
+    await initFresh(env)
+    const repoScope = await upsertRepoScope(env, tempDir)
+    const { globalRuns } = await setupRuns(env, tempDir, repoScope)
+
+    const task = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "cleanup reclaim",
+      body: "body",
+    })
+    const claim = await runOkJson<TaskJson>(
+      [
+        "task",
+        "claim",
+        "--run",
+        globalRuns.toil!,
+        "--scope",
+        "global",
+        "--capability",
+        "triage",
+      ],
+      env,
+    )
+    await runOkJson(
+      [
+        "task",
+        "heartbeat",
+        "--run",
+        globalRuns.toil!,
+        "--task",
+        task.id,
+        "--token",
+        String(claim.task.fencing_token),
+      ],
+      env,
+    )
+
+    const cleanup = await runOkJson<RunJson>(
+      ["run", "cleanup", "--run", globalRuns.toil!, "--reason", "process exited"],
+      env,
+    )
+    expect(cleanup.run).toMatchObject({
+      id: globalRuns.toil!,
+      status: "failed",
+      task_id: null,
+    })
+
+    const taskInspect = await runOkJson<{
+      ok: true
+      task: { id: string; status: string; fencing_token: number }
+    }>(["task", "inspect", task.id], env)
+    expect(taskInspect.task).toMatchObject({
+      id: task.id,
+      status: "queued",
+      fencing_token: claim.task.fencing_token + 1,
+    })
+
+    const eventsTail = await runOkJson<{
+      ok: true
+      events: { type: string; payload_json: string }[]
+    }>(["events", "tail", "--limit", "20"], env)
+    const reclaimedEvent = eventsTail.events.find((event) => event.type === "task.reclaimed")
+    expect(reclaimedEvent).toBeDefined()
+    expect(JSON.parse(reclaimedEvent!.payload_json)).toMatchObject({
+      previous_run_id: globalRuns.toil!,
+      reason: "process exited",
+      attempts: 1,
+      max_attempts: 3,
+      previous_fencing_token: claim.task.fencing_token,
+      new_fencing_token: claim.task.fencing_token + 1,
+    })
+    const cleanupEvent = eventsTail.events.find((event) => event.type === "run.cleanup")
+    expect(cleanupEvent).toBeDefined()
+    expect(JSON.parse(cleanupEvent!.payload_json)).toMatchObject({
+      reason: "process exited",
+      previous_status: "running",
+      status: "failed",
+      task_id: task.id,
+    })
+  })
+
+  it("dead-letters active work on run cleanup at max attempts", async () => {
+    const tempDir = makeTempDir()
+    tempDirs.push(tempDir)
+    const env = makeEnv(tempDir)
+    await initFresh(env)
+    const repoScope = await upsertRepoScope(env, tempDir)
+    const { globalRuns } = await setupRuns(env, tempDir, repoScope)
+
+    let claim: TaskJson | null = null
+    let task: TaskJson["task"] | null = null
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const runId = `toil_cleanup_${attempt}`
+      task = task ?? (await enqueueTask(env, {
+        runId: globalRuns.toil!,
+        scope: "global",
+        capability: "triage",
+        title: "cleanup dead letter",
+        body: "body",
+      }))
+
+      await upsertRun(env, {
+        agent: "toil",
+        scope: "global",
+        cwd: tempDir,
+        runId,
+      })
+      claim = await runOkJson<TaskJson>(
+        [
+          "task",
+          "claim",
+          "--run",
+          runId,
+          "--scope",
+          "global",
+          "--capability",
+          "triage",
+        ],
+        env,
+      )
+      await runOkJson(
+        [
+          "run",
+          "cleanup",
+          "--run",
+          runId,
+          "--reason",
+          `cleanup-${attempt}`,
+        ],
+        env,
+      )
+    }
+
+    const taskInspect = await runOkJson<{
+      ok: true
+      task: { id: string; status: string; fencing_token: number }
+    }>(["task", "inspect", task!.id], env)
+    expect(taskInspect.task).toMatchObject({
+      id: task!.id,
+      status: "dead_letter",
+      fencing_token: claim!.task.fencing_token + 1,
+    })
+
+    const eventsTail = await runOkJson<{
+      ok: true
+      events: { type: string; payload_json: string }[]
+    }>(["events", "tail", "--limit", "40"], env)
+    const deadLetterEvent = [...eventsTail.events].reverse().find((event) => event.type === "task.dead_lettered")
+    expect(deadLetterEvent).toBeDefined()
+    expect(JSON.parse(deadLetterEvent!.payload_json)).toMatchObject({
+      previous_run_id: "toil_cleanup_3",
+      reason: "cleanup-3",
+      attempts: 3,
+      max_attempts: 3,
+      previous_fencing_token: claim!.task.fencing_token,
+      new_fencing_token: claim!.task.fencing_token + 1,
+    })
+  })
+
+  it("interrupts active work by task lookup and rejects non-held task interrupts", async () => {
+    const tempDir = makeTempDir()
+    tempDirs.push(tempDir)
+    const env = makeEnv(tempDir)
+    await initFresh(env)
+    const repoScope = await upsertRepoScope(env, tempDir)
+    const { globalRuns } = await setupRuns(env, tempDir, repoScope)
+
+    const task = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: "global",
+      capability: "triage",
+      title: "interrupt target",
+      body: "body",
+    })
+
+    const notHeld = await runCli(
+      BIN,
+      ["run", "interrupt", "--task", task.id, "--reason", "not held"],
+      env,
+    )
+    expect(notHeld.exitCode).toBe(1)
+    expect(notHeld.stderr).toContain("Use pithos task cancel")
+
+    const claim = await runOkJson<TaskJson>(
+      [
+        "task",
+        "claim",
+        "--run",
+        globalRuns.toil!,
+        "--scope",
+        "global",
+        "--capability",
+        "triage",
+      ],
+      env,
+    )
+
+    const interrupted = await runOkJson<RunJson>(
+      ["run", "interrupt", "--task", task.id, "--reason", "operator kill"],
+      env,
+    )
+    expect(interrupted.run).toMatchObject({
+      id: globalRuns.toil!,
+      status: "failed",
+      task_id: null,
+    })
+
+    const taskInspect = await runOkJson<{
+      ok: true
+      task: { id: string; status: string; fencing_token: number }
+    }>(["task", "inspect", task.id], env)
+    expect(taskInspect.task).toMatchObject({
+      id: task.id,
+      status: "failed",
+      fencing_token: claim.task.fencing_token + 1,
+    })
+
+    const eventsTail = await runOkJson<{
+      ok: true
+      events: { type: string; payload_json: string }[]
+    }>(["events", "tail", "--limit", "20"], env)
+    const interruptedEvent = eventsTail.events.find((event) => event.type === "task.interrupted")
+    expect(interruptedEvent).toBeDefined()
+    expect(JSON.parse(interruptedEvent!.payload_json)).toMatchObject({
+      run_id: globalRuns.toil!,
+      reason: "operator kill",
+      previous_status: "claimed",
+      previous_fencing_token: claim.task.fencing_token,
+      new_fencing_token: claim.task.fencing_token + 1,
+    })
+  })
+
+  it("cleans up idle runs, cancels idle interrupts, and times out no-claim runs", async () => {
+    const tempDir = makeTempDir()
+    tempDirs.push(tempDir)
+    const env = makeEnv(tempDir)
+    await initFresh(env)
+    const repoScope = await upsertRepoScope(env, tempDir)
+    const { globalRuns } = await setupRuns(env, tempDir, repoScope)
+
+    const cleanup = await runOkJson<RunJson>(
+      ["run", "cleanup", "--run", globalRuns.toil!, "--reason", "idle cleanup"],
+      env,
+    )
+    expect(cleanup.run).toMatchObject({ id: globalRuns.toil!, status: "ended", task_id: null })
+
+    await upsertRun(env, { agent: "greed", scope: "global", cwd: tempDir, runId: globalRuns.greed! })
+    const idleInterrupt = await runOkJson<RunJson>(
+      ["run", "interrupt", "--run", globalRuns.greed!, "--reason", "close idle run"],
+      env,
+    )
+    expect(idleInterrupt.run).toMatchObject({ id: globalRuns.greed!, status: "cancelled", task_id: null })
+
+    const timeoutRun = await upsertRun(env, {
+      agent: "war",
+      scope: repoScope,
+      cwd: join(tempDir, "repo"),
+      runId: "war_timeout_repo",
+    })
+    const timeout = await runOkJson<RunJson>(
+      ["run", "timeout", "--run", timeoutRun.id, "--reason", "no claim in 30s"],
+      env,
+    )
+    expect(timeout.run).toMatchObject({ id: timeoutRun.id, status: "timed_out", task_id: null })
+
+    const pandoraTimeout = await runCli(
+      BIN,
+      ["run", "timeout", "--run", globalRuns.pandora!, "--reason", "should reject"],
+      env,
+    )
+    expect(pandoraTimeout.exitCode).toBe(2)
+    expect(pandoraTimeout.stderr).toContain("run timeout excludes pandora")
+
+    const heldTask = await enqueueTask(env, {
+      runId: globalRuns.toil!,
+      scope: repoScope,
+      capability: "execute",
+      title: "held timeout reject",
+      body: "body",
+    })
+    const warRun = await upsertRun(env, {
+      agent: "war",
+      scope: repoScope,
+      cwd: join(tempDir, "repo"),
+      runId: "war_held_repo",
+    })
+    await runOkJson<TaskJson>(
+      ["task", "claim", "--run", warRun.id, "--scope", repoScope, "--capability", "execute"],
+      env,
+    )
+    const timeoutHeld = await runCli(
+      BIN,
+      ["run", "timeout", "--run", warRun.id, "--reason", "should reject"],
+      env,
+    )
+    expect(timeoutHeld.exitCode).toBe(2)
+    expect(timeoutHeld.stderr).toContain(`Run ${warRun.id} still holds task ${heldTask.id}`)
+
+    const eventsTail = await runOkJson<{
+      ok: true
+      events: { type: string; payload_json: string }[]
+    }>(["events", "tail", "--limit", "40"], env)
+    expect(JSON.parse(eventsTail.events.find((event) => event.type === "run.interrupted")!.payload_json)).toMatchObject({
+      reason: "close idle run",
+      previous_status: "starting",
+      status: "cancelled",
+    })
+    expect(JSON.parse(eventsTail.events.find((event) => event.type === "run.cleanup")!.payload_json)).toMatchObject({
+      reason: "idle cleanup",
+      previous_status: "starting",
+      status: "ended",
+    })
+    expect(JSON.parse(eventsTail.events.find((event) => event.type === "run.timed_out")!.payload_json)).toMatchObject({
+      reason: "no claim in 30s",
+      previous_status: "starting",
+      status: "timed_out",
+    })
+  })
+
   it("supports enqueue → claim → heartbeat → artifact → complete round-trip and output contracts", async () => {
     const tempDir = makeTempDir()
     tempDirs.push(tempDir)

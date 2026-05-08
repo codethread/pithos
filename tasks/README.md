@@ -17,7 +17,8 @@ Read these before choosing work:
 - scout the codebase (and grep with hack) to get the topology
 - focus on delivering an MVP with adherence to the spec
 - ensure before signing off work, you run `pnpm verify` to run all checks
-- ensure code passes `review` from an agent (give them this task file and indicate which you completed
+- ensure code passes `review` from an agent
+  - ensure they have references to this task file, the task you are completing, and are instructed to read all the specs to ensure alignment of the new code
 - action feedback you believe is correct and repeat
 - Do not weaken tests or contracts to make validation pass.
 - Fail loudly. Preserve DB integrity. Keep outputs deterministic.
@@ -35,46 +36,31 @@ Tasks with no unblocked dependencies — pick any.
 
 ---
 
-## Blocked on foundation
+## Completed
 
-These depend on task-001 (schema + CLI) and sometimes task-002 (run lifecycle).
-
-- [ ] **[2 — Run lifecycle transitions](task-002.md):** cleanup, interrupt, timeout
-  - ↳ Blocked by: task-001
-- [ ] **[5 — pdx skeleton](task-005.md):** open / close / status / logs + system run
-  - ↳ Blocked by: task-001, task-002
-- [ ] **[10 — Orphan discovery](task-010.md):** reap stale HITL/AFK sessions on `pdx open`
-  - ↳ Blocked by: task-002, task-005
+- [x] **[2 — Run lifecycle transitions](task-002.md):** cleanup, interrupt, timeout
 
 ---
 
-## Blocked on slices 1–2
+## Ready after slice 2
 
 - [ ] **[3 — Task graph tightening + DEMO GATE 1](task-003.md):** supersede preconditions, consolidated events, demo walkthrough
-  - ↳ Blocked by: task-001, task-002
+- [ ] **[5 — pdx skeleton](task-005.md):** open / close / status / logs + system run
 
 ---
 
-## Blocked on slices 2, 4, 5
+## Still blocked
 
 - [ ] **[6 — Pandora singleton + death detection + DEMO GATE 2](task-006.md):** reconcile loop, Pandora lifecycle, respawn
-  - ↳ Blocked by: task-002, task-004, task-005
-
----
-
-## Blocked on slices 2, 5, 10
-
+  - ↳ Blocked by: task-004, task-005
 - [ ] **[7 — pdx kill flow](task-007.md):** interrupt → escalate → kill → retry
-  - ↳ Blocked by: task-002, task-006
-
----
-
-## Blocked on slices 2, 6
-
+  - ↳ Blocked by: task-006
 - [ ] **[8 — Agent spawning](task-008.md):** caps, no-claim timeout, pidfiles
-  - ↳ Blocked by: task-002, task-006
+  - ↳ Blocked by: task-006
 - [ ] **[9 — Wakeup transport + Pandora marker](task-009.md):** escalate transition → tmux wakeup
   - ↳ Blocked by: task-006
+- [ ] **[10 — Orphan discovery](task-010.md):** reap stale HITL/AFK sessions on `pdx open`
+  - ↳ Blocked by: task-005
 
 ---
 

@@ -2,6 +2,8 @@ import { Effect, Schema } from "effect"
 import type { RunRow } from "../db/rows.ts"
 import { PithosError } from "../errors/errors.ts"
 
+export const TERMINAL_RUN_STATUSES = new Set(["ended", "failed", "cancelled", "timed_out"])
+
 const NonEmptyString = Schema.NonEmptyString
 
 const decodeRunIdValue = (

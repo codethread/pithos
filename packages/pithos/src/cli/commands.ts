@@ -15,7 +15,12 @@ import {
   inspectRunCommand,
   inspectTaskCommand,
 } from "../commands/inspect.ts"
-import { runUpsertCommand } from "../commands/run.ts"
+import {
+  runCleanupCommand,
+  runInterruptCommand,
+  runTimeoutCommand,
+  runUpsertCommand,
+} from "../commands/run.ts"
 import { scopeUpsertCommand } from "../commands/scope.ts"
 import { supersedeCommand } from "../commands/supersede.ts"
 import { tailCommand } from "../commands/tail.ts"
@@ -144,9 +149,74 @@ const runInspect = Command.make(
   ),
 )
 
+const runCleanup = Command.make(
+  "cleanup",
+  {
+    run: Options.text("run").pipe(Options.withDescription("Run id to clean up")),
+    reason: Options.text("reason").pipe(Options.withDescription("Cleanup reason")),
+  },
+  ({ run, reason }) => runCleanupCommand({ run, reason }),
+).pipe(
+  Command.withDescription(
+    desc(
+      "Finalize natural lifecycle cleanup after execution is confirmed gone",
+      "pithos-next run cleanup",
+      ["pithos-next run cleanup --run run_war --reason 'daemon_start'"],
+      "0 success | 2 validation error | 3 not found | 4 stale token",
+    ),
+  ),
+)
+
+const runInterrupt = Command.make(
+  "interrupt",
+  {
+    run: Options.text("run").pipe(
+      Options.optional,
+      Options.withDescription("Run id to interrupt"),
+    ),
+    task: Options.text("task").pipe(
+      Options.optional,
+      Options.withDescription("Held task id whose owning run should be interrupted"),
+    ),
+    reason: Options.text("reason").pipe(Options.withDescription("Interruption reason")),
+  },
+  ({ run, task, reason }) =>
+    runInterruptCommand({ run: opt(run), task: opt(task), reason }),
+).pipe(
+  Command.withDescription(
+    desc(
+      "Interrupt a run or the live run holding a task",
+      "pithos-next run interrupt",
+      [
+        "pithos-next run interrupt --run run_war --reason 'wrong repo'",
+        "pithos-next run interrupt --task task_abc --reason 'operator kill'",
+      ],
+      "0 success | 1 user error | 2 validation error | 3 not found | 4 stale token",
+    ),
+  ),
+)
+
+const runTimeout = Command.make(
+  "timeout",
+  {
+    run: Options.text("run").pipe(Options.withDescription("Run id to time out")),
+    reason: Options.text("reason").pipe(Options.withDescription("Timeout reason")),
+  },
+  ({ run, reason }) => runTimeoutCommand({ run, reason }),
+).pipe(
+  Command.withDescription(
+    desc(
+      "Mark a no-claim run as timed out",
+      "pithos-next run timeout",
+      ["pithos-next run timeout --run run_toil --reason 'no claim in 30s'"],
+      "0 success | 2 validation error | 3 not found",
+    ),
+  ),
+)
+
 const run = Command.make("run").pipe(
   Command.withDescription("Manage runs"),
-  Command.withSubcommands([runUpsert, runInspect]),
+  Command.withSubcommands([runUpsert, runCleanup, runInterrupt, runTimeout, runInspect]),
 )
 
 const taskEnqueue = Command.make(

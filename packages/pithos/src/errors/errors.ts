@@ -5,6 +5,7 @@ export type ErrorCode =
   | "VALIDATION_ERROR"
   | "NOT_FOUND"
   | "STALE_TOKEN"
+  | "STALE_TOKEN_RACE"
   | "NO_CLAIMABLE_WORK"
   | "INTERNAL_ERROR"
 
@@ -22,6 +23,7 @@ export const exitCodeFor = (code: ErrorCode): number => {
     case "NOT_FOUND":
       return 3
     case "STALE_TOKEN":
+    case "STALE_TOKEN_RACE":
       return 4
     case "NO_CLAIMABLE_WORK":
       return 5

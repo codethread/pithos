@@ -5,6 +5,7 @@ import {
   assertRunCanClaimCapability,
   decodeCapability,
 } from "../domain/auth.ts"
+import { TERMINAL_RUN_STATUSES } from "../domain/run.ts"
 import { PithosError } from "../errors/errors.ts"
 import { tasksClaimedCounter, withCommandObservability } from "../layers/metrics.ts"
 import { DbService } from "../services/db.ts"
@@ -15,8 +16,6 @@ export interface ClaimOptions {
   readonly scope: string | undefined
   readonly capability: string | undefined
 }
-
-const TERMINAL_RUN_STATUSES = new Set(["ended", "failed", "cancelled", "timed_out"])
 
 export const claimCommand = (
   opts: ClaimOptions,

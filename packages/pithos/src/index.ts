@@ -4,10 +4,14 @@ export {
 	BUILTIN_AGENT_ENQUEUES,
 	BUILTIN_AGENT_KINDS,
 	BUILTIN_CAPABILITIES,
+	BUILTIN_SPAWNABLE_AGENT_KINDS,
+	BUILTIN_SYSTEM_ACTORS,
 	type AgentKind,
 	type Capability,
+	type SpawnableAgentKind,
+	type SystemActor,
 } from "./builtins.js";
-export { runCli } from "./cli.js";
+export { makeEngine, type Engine, type EngineContext } from "./engine.js";
 export { loadConfig, ConfigSchema, type Config, type EnvReader } from "./config.js";
 export { migrate, openDb, type Db, type Mode, type ScopeKind, type TaskStatus } from "./db.js";
 export {

@@ -9,7 +9,7 @@ import {
 	RunRowSchema,
 	decodeRow,
 	loadConfig,
-	runCli,
+	makeEngine,
 	type Services,
 } from "../src/index.js";
 
@@ -28,19 +28,14 @@ const services = (): Services & { stdout: string[]; stderr: string[] } => {
 	};
 };
 
-const init = (dbPath: string, fresh = false) => {
-	const svc = services();
-	const code = runCli({ config: { dbPath }, services: svc }, [
-		"init",
-		...(fresh ? ["--fresh"] : []),
-	]);
-	expect(code).toBe(0);
+const initEngine = (dbPath: string, fresh = false) => {
+	makeEngine({ config: { dbPath }, services: services() }).init({ fresh });
 	return new Database(dbPath);
 };
 
 describe("pithos foundation", () => {
 	it("fresh init creates schema, seeds, and partial run task index", () => {
-		const db = init(tempDb(), true);
+		const db = initEngine(tempDb(), true);
 		expect(db.prepare("SELECT id FROM scopes").pluck().all()).toEqual(["global"]);
 		expect(
 			db.prepare("SELECT agent_kind FROM agent_kinds ORDER BY agent_kind").pluck().all(),
@@ -83,15 +78,15 @@ describe("pithos foundation", () => {
 
 	it("non-fresh init is idempotent", () => {
 		const dbPath = tempDb();
-		init(dbPath, true).close();
-		init(dbPath).close();
+		initEngine(dbPath, true).close();
+		initEngine(dbPath).close();
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT COUNT(*) FROM agent_kinds").pluck().get()).toBe(5);
 		expect(db.prepare("SELECT COUNT(*) FROM agent_enqueues").pluck().get()).toBe(12);
 	});
 
 	it("exported built-in contract matches seeded rows", () => {
-		const db = init(tempDb(), true);
+		const db = initEngine(tempDb(), true);
 		const seeded = db
 			.prepare("SELECT agent_kind, capability FROM agent_enqueues ORDER BY 1,2")
 			.all();
@@ -103,43 +98,21 @@ describe("pithos foundation", () => {
 		expect(seeded).toEqual(contract);
 	});
 
-	it("empty claims use the no-work contract", () => {
+	it("empty claims use the no-work engine contract", () => {
 		const dbPath = tempDb();
-		init(dbPath, true).close();
-		const svc = services();
-		expect(
-			runCli({ config: { dbPath }, services: svc }, [
-				"run",
-				"upsert",
-				"_",
-				"--agent",
-				"toil",
-				"--mode",
-				"afk",
-				"--scope",
-				"global",
-				"--cwd",
-				"/tmp",
-				"--session-id",
-				"session",
-				"--run",
-				"run_toil",
-			]),
-		).toBe(0);
-		expect(
-			runCli({ config: { dbPath }, services: svc }, [
-				"task",
-				"claim",
-				"_",
-				"--run",
-				"run_toil",
-				"--scope",
-				"global",
-				"--capability",
-				"triage",
-			]),
-		).toBe(5);
-		expect(svc.stderr.at(-1)).toContain('"code":"NO_CLAIMABLE_WORK"');
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		engine.runUpsert({
+			agent: "toil",
+			mode: "afk",
+			scope: "global",
+			cwd: "/tmp",
+			sessionId: "session",
+			runId: "run_toil",
+		});
+		expect(() =>
+			engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }),
+		).toThrow(PithosError);
 	});
 
 	it("row decoders and config decoding fail loudly", () => {

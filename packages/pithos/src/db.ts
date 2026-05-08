@@ -14,6 +14,7 @@ export type Db = Database.Database;
 export type ScopeKind = "global" | "repo" | "worktree";
 export type Mode = "afk" | "hitl";
 export type { AgentKind, Capability };
+
 export type TaskStatus =
 	| "queued"
 	| "claimed"
@@ -86,7 +87,17 @@ CREATE TABLE IF NOT EXISTS tasks (
 	capability TEXT NOT NULL REFERENCES capabilities(capability),
 	title TEXT NOT NULL,
 	body TEXT NOT NULL,
-	status TEXT NOT NULL CHECK (status IN ('queued', 'claimed', 'running', 'done', 'failed', 'dead_letter', 'cancelled')) DEFAULT 'queued',
+	status TEXT NOT NULL CHECK (
+		status IN (
+			'queued',
+			'claimed',
+			'running',
+			'done',
+			'failed',
+			'dead_letter',
+			'cancelled'
+		)
+	) DEFAULT 'queued',
 	fencing_token INTEGER NOT NULL DEFAULT 0,
 	attempts INTEGER NOT NULL DEFAULT 0,
 	max_attempts INTEGER NOT NULL DEFAULT 3,
@@ -152,20 +163,30 @@ CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
 
 const seed = (db: Db): void => {
 	db.prepare(sql`INSERT OR IGNORE INTO scopes (id, kind) VALUES ('global', 'global')`).run();
-	for (const agent of BUILTIN_AGENT_KINDS)
+
+	for (const agent of BUILTIN_AGENT_KINDS) {
 		db.prepare(sql`INSERT OR IGNORE INTO agent_kinds (agent_kind) VALUES (?)`).run(agent);
-	for (const cap of BUILTIN_CAPABILITIES)
+	}
+
+	for (const cap of BUILTIN_CAPABILITIES) {
 		db.prepare(sql`INSERT OR IGNORE INTO capabilities (capability) VALUES (?)`).run(cap);
-	for (const [a, caps] of Object.entries(BUILTIN_AGENT_CLAIMS))
-		for (const c of caps)
+	}
+
+	for (const [a, caps] of Object.entries(BUILTIN_AGENT_CLAIMS)) {
+		for (const c of caps) {
 			db.prepare(
 				sql`INSERT OR IGNORE INTO agent_claims (agent_kind, capability) VALUES (?, ?)`,
 			).run(a, c);
-	for (const [a, caps] of Object.entries(BUILTIN_AGENT_ENQUEUES))
-		for (const c of caps)
+		}
+	}
+
+	for (const [a, caps] of Object.entries(BUILTIN_AGENT_ENQUEUES)) {
+		for (const c of caps) {
 			db.prepare(
 				sql`INSERT OR IGNORE INTO agent_enqueues (agent_kind, capability) VALUES (?, ?)`,
 			).run(a, c);
+		}
+	}
 };
 
 export const row = <T extends object>(value: unknown, message: string): T => {

@@ -2,7 +2,7 @@ import { CliConfig, Command } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
 import process from "node:process";
-import { makePithosCommand } from "./cli-tree.js";
+import { makePithosCommand } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { liveServices } from "./services.js";
 

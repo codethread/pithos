@@ -104,7 +104,3 @@ Defer: full template-text golden snapshots (template wording is iterated through
 - [ ] `envy.md.tmpl` removed; no remaining references to envy/worker/implement/watch anywhere in `packages/spawner/` (templates and source)
 - [ ] Mode mismatch rejection tested
 - [ ] `pandora-spawn preview` outputs valid `RenderedAgent` JSON for each agent
-
-## Blocked by
-
-- Slice 1 (task-001)

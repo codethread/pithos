@@ -43,7 +43,3 @@ This entire slice is the test focus. Earlier slices' tests should not be retroac
 - [ ] Error-message wording locked for the most-grepped error codes
 - [ ] Performance smoke runs in CI without timing out
 - [ ] `pnpm verify` green
-
-## Blocked by
-
-- Slice 11 (task-011)

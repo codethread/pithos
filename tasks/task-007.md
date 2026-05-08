@@ -53,8 +53,3 @@ Builds on task-005 §Implementation primitives (Tmux service, Unix socket IPC) a
 - [ ] Escalate task authored by pdx system run, scope=global, body references original
 - [ ] Retry-until-gone behavior verified across reconcile ticks
 - [ ] Each retry emits a structured supervisor log line
-
-## Blocked by
-
-- Slice 2 (task-002)
-- Slice 6 (task-006)

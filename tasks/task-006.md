@@ -68,9 +68,3 @@ Defer: tmux integration robustness beyond happy path; reconcile-tick scheduling 
 - [ ] `pdx open` prints `tmux attach -t pdx--pandora` on success
 - [ ] `pdx close` tears down in spec §4 order
 - [ ] Demo script committed and Adam + agent successfully walk through (human-verified, not CI-checkable; record confirmation as a comment on this issue)
-
-## Blocked by
-
-- Slice 2 (task-002) — Pandora death triggers `pithos run cleanup`
-- Slice 4 (task-004)
-- Slice 5 (task-005)

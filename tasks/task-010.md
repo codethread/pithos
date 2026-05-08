@@ -53,8 +53,3 @@ Builds on task-005 §Implementation primitives (Tmux service, FileSystem) and ta
 - [ ] Live-pid pidfile orphans are killed and cleaned up
 - [ ] Stale pidfile orphans are cleaned up without a failed kill attempt
 - [ ] `pdx open` succeeds cleanly after a previous unclean shutdown
-
-## Blocked by
-
-- Slice 2 (task-002) — orphan cleanup calls `pithos run cleanup`
-- Slice 5 (task-005)

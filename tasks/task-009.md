@@ -48,7 +48,3 @@ Builds on task-005 §Implementation primitives (Tmux service) and task-006 §Imp
 - [ ] Marker is exactly `# wakeup: claimable escalate` followed by Enter
 - [ ] No spam under steady state
 - [ ] `pandora.md.tmpl` documents the marker and instructs Pandora to claim on recognition
-
-## Blocked by
-
-- Slice 6 (task-006)

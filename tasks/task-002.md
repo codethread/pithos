@@ -70,7 +70,3 @@ SQL transaction + fenced-UPDATE patterns are canonical in task-001 §Implementat
 - [ ] `run timeout` rejects when task held
 - [ ] Events emitted with required minimum payload
 - [ ] Race-loss path rolls back transaction with `STALE_TOKEN_RACE` (or equivalent) tagged error
-
-## Blocked by
-
-- Slice 1 (task-001)

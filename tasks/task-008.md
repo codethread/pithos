@@ -70,8 +70,3 @@ Builds on task-006 §Implementation primitives (registry, reconcile, Schedule).
 - [ ] No-claim timeout transitions non-Pandora idle spawnable entries to `timed_out`; Pandora and pdx excluded
 - [ ] AFK pidfile lifecycle correct
 - [ ] cwd derivation correct per scope kind
-
-## Blocked by
-
-- Slice 2 (task-002)
-- Slice 6 (task-006)

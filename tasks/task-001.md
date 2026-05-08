@@ -76,7 +76,3 @@ Canonical SQL/CLI patterns — referenced by tasks 002/003.
 - [ ] Heartbeat shape matches spec; atomic `--task`/`--token` enforced
 - [ ] `PITHOS_RUN_ID` resolution and conflict detection tested
 - [ ] Old `packages/cli/` and existing `pithos` bin unchanged and still functional against old DB
-
-## Blocked by
-
-None — can start immediately.

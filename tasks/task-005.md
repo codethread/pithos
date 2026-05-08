@@ -85,8 +85,3 @@ Canonical daemon-shape primitives — referenced by tasks 006/007/009/010.
 - [ ] `pdx status` JSON has required top-level keys; `daemon.running=false` on no-daemon
 - [ ] Supervisor log lines validated against minimum schema
 - [ ] `pdx open` / `pdx close` exit codes and error wording are loud
-
-## Blocked by
-
-- Slice 1 (task-001)
-- Slice 2 (task-002) — `pdx close` cleans up the pdx system run via `pithos run cleanup`

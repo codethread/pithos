@@ -56,8 +56,3 @@ Reuses task-001 §Implementation primitives for SQL/transactions. New only:
 - [ ] Consolidated event vocabulary emitted per spec §11
 - [ ] Demo script committed and runs end-to-end
 - [ ] Adam + agent walk through demo and confirm Pithos backbone behaves as specced (human-verified, not CI-checkable; record confirmation as a comment on this issue)
-
-## Blocked by
-
-- Slice 1 (task-001)
-- Slice 2 (task-002)

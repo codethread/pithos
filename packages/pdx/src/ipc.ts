@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, ParseResult, Schema } from "effect";
 import { PdxError } from "./errors.js";
 
 export const IpcRequestSchema = Schema.Union(
@@ -15,32 +15,39 @@ export const IpcResponseSchema = Schema.Struct({
 });
 export type IpcResponse = Schema.Schema.Type<typeof IpcResponseSchema>;
 
-const parseJson = (input: string, label: string): unknown => {
-	try {
-		return JSON.parse(input);
-	} catch (cause) {
-		throw new PdxError({ code: "IPC_ERROR", message: `Malformed IPC ${label}: ${String(cause)}` });
-	}
-};
+const parseJson = (input: string, label: string): Effect.Effect<unknown, PdxError> =>
+	Effect.try({
+		try: () => JSON.parse(input) as unknown,
+		catch: (cause) =>
+			new PdxError({ code: "IPC_ERROR", message: `Malformed IPC ${label}: ${String(cause)}` }),
+	});
 
-export const parseIpcRequest = (input: string): IpcRequest => {
-	try {
-		return Schema.decodeUnknownSync(IpcRequestSchema)(parseJson(input, "request JSON"), {
-			errors: "all",
-		});
-	} catch (cause) {
-		if (cause instanceof PdxError) throw cause;
-		throw new PdxError({ code: "IPC_ERROR", message: `Invalid IPC request: ${String(cause)}` });
-	}
-};
+export const parseIpcRequest = (input: string): Effect.Effect<IpcRequest, PdxError> =>
+	parseJson(input, "request JSON").pipe(
+		Effect.flatMap((value) =>
+			Schema.decodeUnknown(IpcRequestSchema)(value, { errors: "all" }).pipe(
+				Effect.mapError(
+					(error) =>
+						new PdxError({
+							code: "IPC_ERROR",
+							message: `Invalid IPC request: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
+						}),
+				),
+			),
+		),
+	);
 
-export const parseIpcResponse = (input: string): IpcResponse => {
-	try {
-		return Schema.decodeUnknownSync(IpcResponseSchema)(parseJson(input, "response JSON"), {
-			errors: "all",
-		});
-	} catch (cause) {
-		if (cause instanceof PdxError) throw cause;
-		throw new PdxError({ code: "IPC_ERROR", message: `Invalid IPC response: ${String(cause)}` });
-	}
-};
+export const parseIpcResponse = (input: string): Effect.Effect<IpcResponse, PdxError> =>
+	parseJson(input, "response JSON").pipe(
+		Effect.flatMap((value) =>
+			Schema.decodeUnknown(IpcResponseSchema)(value, { errors: "all" }).pipe(
+				Effect.mapError(
+					(error) =>
+						new PdxError({
+							code: "IPC_ERROR",
+							message: `Invalid IPC response: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
+						}),
+				),
+			),
+		),
+	);

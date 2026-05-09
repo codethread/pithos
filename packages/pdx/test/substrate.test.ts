@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { parsePdxConfig } from "../src/config.js";
+import { parsePdxArgs } from "../src/args.js";
 import { PdxError } from "../src/errors.js";
 import { parseIpcRequest } from "../src/ipc.js";
-import { requestIpc } from "../src/ipc-socket.js";
+import { listenIpc, requestIpc } from "../src/ipc-socket.js";
 import { makeSupervisorLog } from "../src/log.js";
 import {
 	Clock,
@@ -37,21 +38,87 @@ import {
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
 
-const configInput = (home: string) => ({
+const configInput = (home: string | undefined, envHome: string | undefined) => ({
 	home,
-	envHome: "/tmp/user-home",
+	envHome,
 	daemonEntrypoint: "/tmp/pdx-dev",
 });
 
+const parseConfig = (home: string, envHome = "/tmp/user-home") =>
+	run(parsePdxConfig(configInput(home, envHome)));
 describe("pdx substrate", () => {
-	it("derives config paths from home", () => {
-		const config = parsePdxConfig(configInput("/tmp/pdx-home"));
+	it("derives config paths from home", async () => {
+		const config = await parseConfig("/tmp/pdx-home");
 		expect(config).toMatchObject({
 			home: "/tmp/pdx-home",
 			socketPath: "/tmp/pdx-home/pdx.sock",
 			logPath: "/tmp/pdx-home/pdx.jsonl",
 			runsDir: "/tmp/pdx-home/runs",
 		});
+	});
+
+	it("uses explicit --home without HOME env", async () => {
+		const config = await run(parsePdxConfig(configInput("/tmp/pdx-home", undefined)));
+		expect(config.home).toBe("/tmp/pdx-home");
+	});
+
+	it("fails config parse when --home and HOME env are both missing", async () => {
+		await expect(run(parsePdxConfig({ daemonEntrypoint: "/tmp/pdx-dev" }))).rejects.toThrow(
+			/missing required home/,
+		);
+	});
+
+	it("parses pure CLI args and rejects unknown/extra values", async () => {
+		const parsed = await run(
+			parsePdxArgs([
+				"--home",
+				"/tmp/pdx-home",
+				"logs",
+				"show",
+				"--limit",
+				"10",
+				"--all",
+				"--json",
+				"--since",
+				"1h",
+			]),
+		);
+		expect(parsed).toMatchObject({
+			home: "/tmp/pdx-home",
+			command: {
+				kind: "logs-show",
+				limit: 10,
+				all: true,
+				since: "1h",
+			},
+		});
+
+		await expect(run(parsePdxArgs(["open", "extra"]))).rejects.toThrow(/positional arguments/);
+		await expect(run(parsePdxArgs(["open", "--unknown"]))).rejects.toThrow(/Unknown option/);
+		await expect(run(parsePdxArgs(["open", "--limit", "10"]))).rejects.toThrow(/logs options/);
+		await expect(
+			run(parsePdxArgs(["open", "--max-afk", "8", "--interval-seconds", "5"])),
+		).resolves.toMatchObject({
+			command: { kind: "open" },
+		});
+		await expect(
+			run(parsePdxArgs(["daemon", "--interval-seconds", "5", "--max-afk", "6"])),
+		).resolves.toMatchObject({
+			command: { kind: "daemon" },
+		});
+		await expect(run(parsePdxArgs(["close", "--interval-seconds", "99"]))).rejects.toThrow(
+			/does not take command options/,
+		);
+		await expect(run(parsePdxArgs(["daemon", "--json"]))).rejects.toThrow(/does not take --json/);
+		await expect(run(parsePdxArgs(["status", "--json"]))).resolves.toMatchObject({
+			command: { kind: "status" },
+		});
+		await expect(run(parsePdxArgs(["status", "--max-afk", "7"]))).rejects.toThrow(
+			/afk timing options/,
+		);
+		await expect(run(parsePdxArgs(["logs", "show", "--max-afk", "9"]))).rejects.toThrow(
+			/afk timing options/,
+		);
 	});
 
 	it("constructs tmux argv and sends literal line as text then enter", async () => {
@@ -99,10 +166,14 @@ describe("pdx substrate", () => {
 		});
 	});
 
-	it("rejects malformed and unknown IPC requests loudly", () => {
-		expect(() => parseIpcRequest("{")).toThrow(/Malformed IPC request JSON/);
-		expect(() => parseIpcRequest(JSON.stringify({ kind: "kill" }))).toThrow(/Invalid IPC request/);
-		expect(parseIpcRequest(JSON.stringify({ kind: "ping" }))).toEqual({ kind: "ping" });
+	it("rejects malformed and unknown IPC requests loudly", async () => {
+		await expect(run(parseIpcRequest("{"))).rejects.toThrow(/Malformed IPC request JSON/);
+		await expect(run(parseIpcRequest(JSON.stringify({ kind: "kill" })))).rejects.toThrow(
+			/Invalid IPC request/,
+		);
+		await expect(run(parseIpcRequest(JSON.stringify({ kind: "ping" })))).resolves.toEqual({
+			kind: "ping",
+		});
 	});
 
 	it("open rejects when daemon tmux session already exists", async () => {
@@ -124,7 +195,7 @@ describe("pdx substrate", () => {
 		});
 		await expect(
 			run(
-				openPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 4, 5).pipe(
+				openPdx(await parseConfig("/tmp/pdx-home"), 4, 5).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(PithosClient, pithos),
@@ -133,6 +204,60 @@ describe("pdx substrate", () => {
 		).rejects.toThrow(`${DAEMON_TARGET} already exists`);
 	});
 
+	it("open starts daemon tmux session with configured entrypoint", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const config = await parseConfig(home);
+		let commandInput:
+			| { readonly target: string; readonly cwd: string; readonly command: readonly string[] }
+			| undefined;
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(false),
+			lsSessions: () => Effect.succeed([]),
+			newSession: (input) =>
+				Effect.sync(() => {
+					commandInput = input;
+				}),
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
+			mkdir: () => Effect.void,
+		});
+		const pithos = PithosClient.of({
+			run: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+		});
+		const server = await run(
+			listenIpc(config.socketPath, () => Effect.succeed({ ok: true, data: { ready: true } })),
+		);
+		try {
+			await run(
+				openPdx(config, 4, 5).pipe(
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(FileSystem, fs),
+					Effect.provideService(PithosClient, pithos),
+				),
+			);
+		} finally {
+			await run(server.close);
+		}
+		expect(commandInput).toEqual({
+			target: DAEMON_TARGET,
+			cwd: config.home,
+			command: [
+				config.daemonEntrypoint,
+				"daemon",
+				"--home",
+				config.home,
+				"--max-afk",
+				"4",
+				"--interval-seconds",
+				"5",
+			],
+		});
+	});
 	it("daemon startup creates runs dir, system run, and Pandora singleton", async () => {
 		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const mkdirs: string[] = [];
@@ -171,8 +296,9 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
+		const config = await parseConfig(home);
 		const handle = await run(
-			runDaemon(parsePdxConfig(configInput(home)), 4, 5).pipe(
+			runDaemon(config, 4, 5).pipe(
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
@@ -257,7 +383,7 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
-		const config = parsePdxConfig(configInput(home));
+		const config = await parseConfig(home);
 		const handle = await run(
 			runDaemon(config, 4, 5).pipe(
 				Effect.provideService(FileSystem, fs),
@@ -317,7 +443,7 @@ describe("pdx substrate", () => {
 			mkdir: () => Effect.void,
 		});
 		const status = await run(
-			statusPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 7).pipe(
+			statusPdx(await parseConfig("/tmp/pdx-home"), 7).pipe(
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(FileSystem, fs),
@@ -352,7 +478,7 @@ describe("pdx substrate", () => {
 		});
 		await expect(
 			run(
-				statusPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 4).pipe(
+				statusPdx(await parseConfig("/tmp/pdx-home"), 4).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(PithosClient, pithos),
 					Effect.provideService(FileSystem, fs),
@@ -375,13 +501,14 @@ describe("pdx substrate", () => {
 			readFile: () => Effect.succeed(`${lines.join("\n")}\n`),
 			mkdir: () => Effect.void,
 		});
-		const config = parsePdxConfig(configInput("/tmp/pdx-home"));
+		const config = await parseConfig("/tmp/pdx-home");
 		const defaultOutput = await run(
 			logsShowPdx(config, { limit: undefined, all: false, since: undefined }).pipe(
 				Effect.provideService(FileSystem, fs),
 			),
 		);
 		expect(defaultOutput).toBe(`${lines.slice(1).join("\n")}\n`);
+		const sinceClock = Clock.of({ nowIso: Effect.succeed("2026-05-09T01:40:00.000Z") });
 		const limitOutput = await run(
 			logsShowPdx(config, { limit: 2, all: false, since: undefined }).pipe(
 				Effect.provideService(FileSystem, fs),
@@ -399,7 +526,7 @@ describe("pdx substrate", () => {
 				limit: undefined,
 				all: true,
 				since: new Date(Date.UTC(2026, 4, 9, 1, 39, 0)).toISOString(),
-			}).pipe(Effect.provideService(FileSystem, fs)),
+			}).pipe(Effect.provideService(FileSystem, fs), Effect.provideService(Clock, sinceClock)),
 		);
 		expect(sinceOutput).toBe(`${lines.slice(99).join("\n")}\n`);
 	});
@@ -416,7 +543,8 @@ describe("pdx substrate", () => {
 			readFile: () => Effect.succeed(`${line}\n`),
 			mkdir: () => Effect.void,
 		});
-		const config = parsePdxConfig(configInput("/tmp/pdx-home"));
+		const config = await parseConfig("/tmp/pdx-home");
+		const logsClock = Clock.of({ nowIso: Effect.succeed("2026-05-09T01:40:00.000Z") });
 		for (const since of [
 			"10m",
 			"1h",
@@ -430,6 +558,7 @@ describe("pdx substrate", () => {
 				run(
 					logsShowPdx(config, { limit: undefined, all: true, since }).pipe(
 						Effect.provideService(FileSystem, fs),
+						Effect.provideService(Clock, logsClock),
 					),
 				),
 			).resolves.toEqual(expect.any(String));
@@ -438,6 +567,7 @@ describe("pdx substrate", () => {
 			run(
 				logsShowPdx(config, { limit: undefined, all: true, since: "soon" }).pipe(
 					Effect.provideService(FileSystem, fs),
+					Effect.provideService(Clock, logsClock),
 				),
 			),
 		).rejects.toThrow("invalid --since value");
@@ -529,7 +659,7 @@ describe("pdx substrate", () => {
 		});
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		await run(
-			reconcileTick(parsePdxConfig(configInput(home))).pipe(
+			reconcileTick(await parseConfig(home)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(Ids, ids),

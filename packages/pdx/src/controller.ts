@@ -4,6 +4,7 @@ import type { IpcResponse } from "./ipc.js";
 import { PdxError } from "./errors.js";
 import type { PdxConfig } from "./config.js";
 import {
+	Clock,
 	FileSystem,
 	Ids,
 	PithosClient,
@@ -71,7 +72,6 @@ export const openPdx = (config: PdxConfig, maxAfk: number, intervalSeconds: numb
 			target: DAEMON_TARGET,
 			cwd: config.home,
 			command: [
-				process.execPath,
 				config.daemonEntrypoint,
 				"daemon",
 				"--home",
@@ -126,49 +126,62 @@ const parseJsonOutput = (label: string, raw: string): Effect.Effect<unknown, Pdx
 
 const readyTasks = (
 	briefing: unknown,
-): readonly { readonly scope_id: string; readonly capability: string }[] => {
-	if (typeof briefing !== "object" || briefing === null || !("ready" in briefing)) {
-		throw new PdxError({ code: "PROCESS_ERROR", message: "pithos briefing output missing ready" });
-	}
-	const ready = (briefing as { readonly ready: unknown }).ready;
-	if (!Array.isArray(ready)) {
-		throw new PdxError({ code: "PROCESS_ERROR", message: "pithos briefing ready is not an array" });
-	}
-	return ready.map((task) => {
-		const scope_id =
-			typeof task === "object" && task !== null
-				? (task as { readonly scope_id?: unknown }).scope_id
-				: undefined;
-		const capability =
-			typeof task === "object" && task !== null
-				? (task as { readonly capability?: unknown }).capability
-				: undefined;
-		if (typeof scope_id !== "string" || typeof capability !== "string") {
-			throw new PdxError({
-				code: "PROCESS_ERROR",
-				message: "pithos briefing ready task missing scope/capability",
-			});
+): Effect.Effect<readonly { readonly scope_id: string; readonly capability: string }[], PdxError> =>
+	Effect.gen(function* () {
+		if (typeof briefing !== "object" || briefing === null || !("ready" in briefing)) {
+			yield* Effect.fail(
+				new PdxError({ code: "PROCESS_ERROR", message: "pithos briefing output missing ready" }),
+			);
 		}
-		return { scope_id, capability };
+		const ready = (briefing as { readonly ready: unknown }).ready;
+		if (!Array.isArray(ready)) {
+			yield* Effect.fail(
+				new PdxError({ code: "PROCESS_ERROR", message: "pithos briefing ready is not an array" }),
+			);
+		}
+		const tasks: readonly { readonly scope_id: string; readonly capability: string }[] =
+			yield* Effect.forEach(
+				ready as readonly unknown[],
+				(
+					task,
+				): Effect.Effect<
+					{
+						readonly scope_id: string;
+						readonly capability: string;
+					},
+					PdxError
+				> => {
+					const scope_id =
+						typeof task === "object" && task !== null
+							? (task as { readonly scope_id?: unknown }).scope_id
+							: undefined;
+					const capability =
+						typeof task === "object" && task !== null
+							? (task as { readonly capability?: unknown }).capability
+							: undefined;
+					if (typeof scope_id !== "string" || typeof capability !== "string") {
+						return Effect.fail(
+							new PdxError({
+								code: "PROCESS_ERROR",
+								message: "pithos briefing ready task missing scope/capability",
+							}),
+						);
+					}
+					return Effect.succeed({ scope_id, capability });
+				},
+			);
+		return tasks;
 	});
-};
 
 const queueCounts = (briefing: unknown) =>
-	Effect.try({
-		try: () => {
-			const ready = readyTasks(briefing);
-			const byScopeCapability: Record<string, Record<string, number>> = {};
-			for (const { scope_id, capability } of ready) {
-				byScopeCapability[scope_id] = byScopeCapability[scope_id] ?? {};
-				byScopeCapability[scope_id][capability] =
-					(byScopeCapability[scope_id][capability] ?? 0) + 1;
-			}
-			return { claimable: ready.length, by_scope_capability: byScopeCapability };
-		},
-		catch: (error) =>
-			error instanceof PdxError
-				? error
-				: new PdxError({ code: "PROCESS_ERROR", message: `queue count failed: ${String(error)}` }),
+	Effect.gen(function* () {
+		const ready = yield* readyTasks(briefing);
+		const byScopeCapability: Record<string, Record<string, number>> = {};
+		for (const { scope_id, capability } of ready) {
+			byScopeCapability[scope_id] = byScopeCapability[scope_id] ?? {};
+			byScopeCapability[scope_id][capability] = (byScopeCapability[scope_id][capability] ?? 0) + 1;
+		}
+		return { claimable: ready.length, by_scope_capability: byScopeCapability };
 	});
 
 const readDaemonStatus = (config: PdxConfig, running: boolean, fallback: number) => {
@@ -219,54 +232,59 @@ export const statusPdx = (config: PdxConfig, maxAfk: number) =>
 		};
 	});
 
-const sinceCutoff = (raw: string, now: Date): number => {
-	const duration = /^(\d+)([mhdw])$/.exec(raw);
-	if (duration !== null) {
-		const amount = Number(duration[1]);
-		const unit = duration[2];
-		const millis =
-			unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : unit === "d" ? 86_400_000 : 604_800_000;
-		return now.getTime() - amount * millis;
-	}
-	if (raw === "today" || raw === "yesterday") {
-		const start = new Date(now);
-		start.setHours(0, 0, 0, 0);
-		if (raw === "yesterday") start.setDate(start.getDate() - 1);
-		return start.getTime();
-	}
-	const parsed = Date.parse(raw);
-	if (Number.isNaN(parsed)) {
-		throw new PdxError({ code: "VALIDATION_ERROR", message: `invalid --since value: ${raw}` });
-	}
-	return parsed;
-};
+const sinceCutoff = (raw: string, now: Date): Effect.Effect<number, PdxError> =>
+	Effect.gen(function* () {
+		const duration = /^(\d+)([mhdw])$/.exec(raw);
+		if (duration !== null) {
+			const amount = Number(duration[1]);
+			const unit = duration[2];
+			const millis =
+				unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : unit === "d" ? 86_400_000 : 604_800_000;
+			return now.getTime() - amount * millis;
+		}
+		if (raw === "today" || raw === "yesterday") {
+			const start = new Date(now);
+			start.setHours(0, 0, 0, 0);
+			if (raw === "yesterday") start.setDate(start.getDate() - 1);
+			return start.getTime();
+		}
+		const parsed = Date.parse(raw);
+		if (Number.isNaN(parsed)) {
+			yield* Effect.fail(
+				new PdxError({ code: "VALIDATION_ERROR", message: `invalid --since value: ${raw}` }),
+			);
+		}
+		return parsed;
+	});
 
 const logLines = (raw: string): readonly string[] =>
 	raw === "" ? [] : raw.endsWith("\n") ? raw.slice(0, -1).split("\n") : raw.split("\n");
 
-const logTimestamp = (line: string): number => {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(line) as unknown;
-	} catch (error) {
-		throw new PdxError({
-			code: "VALIDATION_ERROR",
-			message: `corrupt supervisor log JSONL: ${String(error)}`,
+const logTimestamp = (line: string): Effect.Effect<number, PdxError> =>
+	Effect.gen(function* () {
+		const parsed = yield* Effect.try({
+			try: () => JSON.parse(line) as unknown,
+			catch: (error) =>
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: `corrupt supervisor log JSONL: ${String(error)}`,
+				}),
 		});
-	}
-	const ts =
-		typeof parsed === "object" && parsed !== null
-			? (parsed as { readonly ts?: unknown }).ts
-			: undefined;
-	const timestamp = typeof ts === "string" ? Date.parse(ts) : NaN;
-	if (Number.isNaN(timestamp)) {
-		throw new PdxError({
-			code: "VALIDATION_ERROR",
-			message: "corrupt supervisor log JSONL: missing valid ts",
-		});
-	}
-	return timestamp;
-};
+		const ts =
+			typeof parsed === "object" && parsed !== null
+				? (parsed as { readonly ts?: unknown }).ts
+				: undefined;
+		const timestamp = typeof ts === "string" ? Date.parse(ts) : NaN;
+		if (Number.isNaN(timestamp)) {
+			yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: "corrupt supervisor log JSONL: missing valid ts",
+				}),
+			);
+		}
+		return timestamp;
+	});
 
 export const logsShowPdx = (
 	config: PdxConfig,
@@ -284,24 +302,27 @@ export const logsShowPdx = (
 		}
 		const fs = yield* FileSystem;
 		const raw = yield* fs.readFile(config.logPath);
-		const selected = yield* Effect.try({
-			try: () => {
-				const cutoff = input.since === undefined ? undefined : sinceCutoff(input.since, new Date());
-				const matching = logLines(raw).filter((line) => {
-					const timestamp = logTimestamp(line);
-					return cutoff === undefined || timestamp >= cutoff;
-				});
-				return input.all ? matching : matching.slice(-(input.limit ?? 100));
-			},
-			catch: (error) =>
-				error instanceof PdxError
-					? error
-					: new PdxError({
-							code: "VALIDATION_ERROR",
-							message: `log parsing failed: ${String(error)}`,
-						}),
-		});
-		return selected.length === 0 ? "" : `${selected.join("\n")}\n`;
+		let cutoff: number | undefined = undefined;
+		if (input.since !== undefined) {
+			const nowIso = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
+			const now = new Date(nowIso);
+			if (Number.isNaN(now.getTime())) {
+				yield* Effect.fail(
+					new PdxError({
+						code: "PROCESS_ERROR",
+						message: `clock provided invalid now iso: ${nowIso}`,
+					}),
+				);
+			}
+			cutoff = yield* sinceCutoff(input.since, now);
+		}
+		const parsed = yield* Effect.forEach(logLines(raw), (line) =>
+			logTimestamp(line).pipe(Effect.map((timestamp) => ({ line, timestamp }))),
+		);
+		const selected = parsed.filter(({ timestamp }) => cutoff === undefined || timestamp >= cutoff);
+		const rows = selected.map((entry) => entry.line);
+		const output = input.all ? rows : rows.slice(-(input.limit ?? 100));
+		return output.length === 0 ? "" : `${output.join("\n")}\n`;
 	});
 
 const pithosRun = (
@@ -344,7 +365,7 @@ const confirmTmuxGone = (tmux: TmuxService, target: string) =>
 	);
 
 export const isAfkAlive = (pid: number) =>
-	Process.pipe(Effect.flatMap((process) => process.isAlive(pid)));
+	Process.pipe(Effect.flatMap((processService) => processService.isAlive(pid)));
 
 const entryAlive = (entry: RegistryEntry) =>
 	Effect.gen(function* () {

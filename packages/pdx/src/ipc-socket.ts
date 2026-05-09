@@ -34,21 +34,16 @@ export const listenIpc = (
 						input += chunk;
 					});
 					socket.on("end", () => {
-						let request: IpcRequest;
-						try {
-							request = parseIpcRequest(input);
-						} catch (error) {
-							socket.end(`${JSON.stringify(errorResponse(error))}\n`);
-							return;
-						}
-						Effect.runPromise(
+						const request = parseIpcRequest(input);
+						const response = Effect.flatMap(request, (request) =>
 							Effect.match(handle(request), {
 								onFailure: errorResponse,
 								onSuccess: (value) => value,
 							}),
-						)
-							.then((response) => socket.end(`${JSON.stringify(response)}\n`))
-							.catch((error: unknown) => socket.end(`${JSON.stringify(errorResponse(error))}\n`));
+						);
+						Effect.runPromise(response)
+							.then((value) => socket.end(`${JSON.stringify(value)}\n`))
+							.catch((cause: unknown) => socket.end(`${JSON.stringify(errorResponse(cause))}\n`));
 					});
 				});
 				server.once("error", (error) => {
@@ -101,15 +96,7 @@ export const requestIpc = (
 			output += chunk;
 		});
 		socket.on("end", () => {
-			try {
-				resume(Effect.succeed(parseIpcResponse(output)));
-			} catch (cause) {
-				resume(
-					Effect.fail(
-						new PdxError({ code: "IPC_ERROR", message: `Invalid IPC response: ${String(cause)}` }),
-					),
-				);
-			}
+			resume(parseIpcResponse(output));
 		});
 		socket.end(JSON.stringify(request));
 	});

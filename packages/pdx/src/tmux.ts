@@ -8,10 +8,10 @@ const requireOk = (command: string, exitCode: number, stderr: string) =>
 		: Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: `${command} failed: ${stderr}` }));
 
 export const makeTmux = Effect.gen(function* () {
-	const process = yield* Process;
+	const processService = yield* Process;
 	const service: TmuxService = {
 		hasSession: (target) =>
-			process.execFile("tmux", ["has-session", "-t", target]).pipe(
+			processService.execFile("tmux", ["has-session", "-t", target]).pipe(
 				Effect.flatMap((result) => {
 					if (result.exitCode === 0) return Effect.succeed(true);
 					if (
@@ -29,7 +29,7 @@ export const makeTmux = Effect.gen(function* () {
 				}),
 			),
 		lsSessions: () =>
-			process.execFile("tmux", ["ls", "-F", "#S"]).pipe(
+			processService.execFile("tmux", ["ls", "-F", "#S"]).pipe(
 				Effect.flatMap((result) => {
 					if (result.exitCode !== 0 && result.stderr.includes("no server running"))
 						return Effect.succeed([]);
@@ -39,13 +39,13 @@ export const makeTmux = Effect.gen(function* () {
 				}),
 			),
 		newSession: ({ target, command, cwd }) =>
-			process
+			processService
 				.execFile("tmux", ["new-session", "-d", "-s", target, "-c", cwd, ...command])
 				.pipe(
 					Effect.flatMap((result) => requireOk("tmux new-session", result.exitCode, result.stderr)),
 				),
 		killSession: (target) =>
-			process
+			processService
 				.execFile("tmux", ["kill-session", "-t", target])
 				.pipe(
 					Effect.flatMap((result) =>
@@ -53,19 +53,19 @@ export const makeTmux = Effect.gen(function* () {
 					),
 				),
 		sendLiteralLine: (target, text) =>
-			process.execFile("tmux", ["send-keys", "-t", target, "-l", "--", text]).pipe(
+			processService.execFile("tmux", ["send-keys", "-t", target, "-l", "--", text]).pipe(
 				Effect.flatMap((result) =>
 					requireOk("tmux send-keys text", result.exitCode, result.stderr),
 				),
-				Effect.zipRight(process.execFile("tmux", ["send-keys", "-t", target, "Enter"])),
+				Effect.zipRight(processService.execFile("tmux", ["send-keys", "-t", target, "Enter"])),
 				Effect.flatMap((result) =>
 					requireOk("tmux send-keys enter", result.exitCode, result.stderr),
 				),
 			),
 		pasteBuffer: (target, content) =>
-			process.execFile("tmux", ["set-buffer", content]).pipe(
+			processService.execFile("tmux", ["set-buffer", content]).pipe(
 				Effect.flatMap((result) => requireOk("tmux set-buffer", result.exitCode, result.stderr)),
-				Effect.zipRight(process.execFile("tmux", ["paste-buffer", "-t", target])),
+				Effect.zipRight(processService.execFile("tmux", ["paste-buffer", "-t", target])),
 				Effect.flatMap((result) => requireOk("tmux paste-buffer", result.exitCode, result.stderr)),
 			),
 	};

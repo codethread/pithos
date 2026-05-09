@@ -70,6 +70,19 @@ const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown, path: string)
 	return decoded.right;
 };
 
+const PanePidSchema = Schema.NumberFromString.pipe(Schema.int(), Schema.positive());
+
+const decodePanePid = (value: string, target: string): number => {
+	const decoded = Schema.decodeUnknownEither(PanePidSchema)(value.trim());
+	if (Either.isLeft(decoded)) {
+		throw new SpawnerError({
+			code: "LAUNCH_ERROR",
+			message: `tmux list-panes returned invalid pane pid for ${target}: ${JSON.stringify(value)}`,
+		});
+	}
+	return decoded.right;
+};
+
 const readText = (path: string, services: RenderServices): string => {
 	try {
 		return services.readText(path);
@@ -261,7 +274,7 @@ export const launchAgent = (
 		"-F",
 		"#{pane_pid}",
 	]);
-	const pid = Number(pane.stdout.trim());
+	const pid = decodePanePid(pane.stdout, rendered.logicalName);
 	return {
 		agent: rendered.agent,
 		mode: rendered.mode,
@@ -271,6 +284,6 @@ export const launchAgent = (
 		logicalName: rendered.logicalName,
 		harnessKind: rendered.harness.kind,
 		sessionLogPath: sessionLogPath(rendered, rendered.harness.kind as "claude" | "pi", config),
-		hitl: { tmuxTarget: rendered.logicalName, panePid: Number.isFinite(pid) ? pid : null },
+		hitl: { tmuxTarget: rendered.logicalName, panePid: pid },
 	};
 };

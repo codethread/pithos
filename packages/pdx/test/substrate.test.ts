@@ -22,9 +22,15 @@ import { DAEMON_TARGET, PDX_SYSTEM_RUN_ID, openPdx, runDaemon } from "../src/con
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
 
+const configInput = (home: string) => ({
+	home,
+	envHome: "/tmp/user-home",
+	daemonEntrypoint: "/tmp/pdx-dev",
+});
+
 describe("pdx substrate", () => {
 	it("derives config paths from home", () => {
-		const config = parsePdxConfig({ home: "/tmp/pdx-home" });
+		const config = parsePdxConfig(configInput("/tmp/pdx-home"));
 		expect(config).toMatchObject({
 			home: "/tmp/pdx-home",
 			socketPath: "/tmp/pdx-home/pdx.sock",
@@ -97,7 +103,7 @@ describe("pdx substrate", () => {
 		});
 		await expect(
 			run(
-				openPdx(parsePdxConfig({ home: "/tmp/pdx-home" })).pipe(
+				openPdx(parsePdxConfig(configInput("/tmp/pdx-home"))).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(PithosClient, pithos),
@@ -123,7 +129,7 @@ describe("pdx substrate", () => {
 		});
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		const handle = await run(
-			runDaemon(parsePdxConfig({ home })).pipe(
+			runDaemon(parsePdxConfig(configInput(home))).pipe(
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),

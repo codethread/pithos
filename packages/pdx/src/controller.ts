@@ -50,7 +50,7 @@ export const openPdx = (config: PdxConfig) =>
 		yield* tmux.newSession({
 			target: DAEMON_TARGET,
 			cwd: config.home,
-			command: [process.execPath, process.argv[1] ?? "pdx", "daemon", "--home", config.home],
+			command: [process.execPath, config.daemonEntrypoint, "daemon", "--home", config.home],
 		});
 		const response = yield* awaitDaemonReady(config.socketPath, 50);
 		if (!response.ok) {

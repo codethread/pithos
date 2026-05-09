@@ -1,9 +1,17 @@
+import { Either, ParseResult, Schema } from "effect";
 import { resolve } from "node:path";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import { migrate, openDb, sql, type Capability, type Mode, type ScopeKind } from "./db.js";
 import { fail } from "./errors.js";
-import { decodeRow, RunRowSchema, ScopeRowSchema, TaskRowSchema, type RunRow } from "./rows.js";
+import {
+	decodeRow,
+	EventRowSchema,
+	RunRowSchema,
+	ScopeRowSchema,
+	TaskRowSchema,
+	type RunRow,
+} from "./rows.js";
 import type { Services } from "./services.js";
 
 export interface EngineContext {
@@ -282,6 +290,20 @@ const withDb = <A>(ctx: EngineContext, f: (db: Db) => A): A => {
 	} finally {
 		db.close();
 	}
+};
+
+const EventPayloadSchema = Schema.parseJson(Schema.Unknown);
+
+const decodeEventPayload = (payloadJson: string, eventId: string): unknown => {
+	const decoded = Schema.decodeUnknownEither(EventPayloadSchema)(payloadJson);
+	return Either.match(decoded, {
+		onLeft: (error) =>
+			fail(
+				"INTERNAL_ERROR",
+				`malformed event payload_json for ${eventId}: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
+			),
+		onRight: (payload) => payload,
+	});
 };
 
 const liveRun = (db: Db, runId: string): RunRow => {
@@ -873,15 +895,8 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					LIMIT ?
 					`,
 				)
-				.all(limit ?? 100) as {
-				readonly id: string;
-				readonly type: string;
-				readonly task_id: string | null;
-				readonly run_id: string | null;
-				readonly actor_run_id: string | null;
-				readonly payload_json: string;
-				readonly created_at: string;
-			}[];
+				.all(limit ?? 100)
+				.map((row) => decodeRow(EventRowSchema, row, "malformed event row"));
 			return {
 				ok: true,
 				events: rows.reverse().map((row) => ({
@@ -890,7 +905,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					task_id: row.task_id,
 					run_id: row.run_id,
 					actor_run_id: row.actor_run_id,
-					payload: JSON.parse(row.payload_json) as unknown,
+					payload: decodeEventPayload(row.payload_json, row.id),
 					created_at: row.created_at,
 				})),
 			};

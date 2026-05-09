@@ -7,7 +7,6 @@ import {
 	type AgentKind,
 	type Capability,
 } from "./builtins.js";
-import { fail } from "./errors.js";
 import { decodeRow } from "./rows.js";
 
 export type Db = Database.Database;
@@ -187,13 +186,6 @@ const seed = (db: Db): void => {
 			).run(a, c);
 		}
 	}
-};
-
-export const row = <T extends object>(value: unknown, message: string): T => {
-	if (value === undefined) fail("NOT_FOUND", message);
-	if (value === null || typeof value !== "object")
-		fail("INTERNAL_ERROR", `invalid database row: ${message}`);
-	return value as T;
 };
 
 export { decodeRow };

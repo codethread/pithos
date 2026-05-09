@@ -32,14 +32,18 @@ const parsePositiveInt = (raw: string | undefined, name: string, fallback: numbe
 };
 
 const args = process.argv.slice(2);
-const home = takeOption(args, "--home") ?? `${process.env.HOME}/.pdx`;
+const home = takeOption(args, "--home");
 const commandArgs = withoutOption(
 	withoutOption(withoutOption(args, "--home"), "--interval-seconds"),
 	"--max-afk",
 );
 
 try {
-	const config = parsePdxConfigOrThrow({ home });
+	const config = parsePdxConfigOrThrow({
+		home,
+		envHome: process.env.HOME,
+		daemonEntrypoint: process.argv[1],
+	});
 	const command = commandArgs.find((arg) => !arg.startsWith("--"));
 	parsePositiveInt(takeOption(args, "--interval-seconds"), "--interval-seconds", 5);
 	parsePositiveInt(takeOption(args, "--max-afk"), "--max-afk", 4);

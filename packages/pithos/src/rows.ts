@@ -44,9 +44,20 @@ export const ScopeRowSchema = Schema.Struct({
 	canonical_path: NullableString,
 });
 
+export const EventRowSchema = Schema.Struct({
+	id: NonEmptyString,
+	type: NonEmptyString,
+	task_id: NullableString,
+	run_id: NullableString,
+	actor_run_id: NullableString,
+	payload_json: Schema.String,
+	created_at: NonEmptyString,
+});
+
 export type RunRow = typeof RunRowSchema.Type;
 export type TaskRow = typeof TaskRowSchema.Type;
 export type ScopeRow = typeof ScopeRowSchema.Type;
+export type EventRow = typeof EventRowSchema.Type;
 
 export const decodeRow = <A, I>(
 	schema: Schema.Schema<A, I>,

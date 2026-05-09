@@ -10,7 +10,7 @@ import {
 	ClockLive,
 	FileSystemLive,
 	IdsLive,
-	PithosClientLive,
+	makePithosClientLive,
 	ProcessLive,
 	SpawnerLive,
 } from "./live.js";
@@ -70,7 +70,6 @@ const baseLayer = Layer.mergeAll(
 	Layer.succeed(Process, ProcessLive),
 	Layer.succeed(FileSystem, FileSystemLive),
 	Layer.succeed(Clock, ClockLive),
-	Layer.succeed(PithosClient, PithosClientLive),
 	Layer.succeed(Ids, IdsLive),
 	Layer.succeed(Spawner, SpawnerLive),
 );
@@ -89,6 +88,7 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 			Layer.succeed(Tmux, tmux),
 			Layer.succeed(SupervisorLog, supervisorLog),
 			Layer.succeed(Registry, registry),
+			Layer.succeed(PithosClient, makePithosClientLive(config.pithosDbPath)),
 		);
 
 		switch (input.command) {

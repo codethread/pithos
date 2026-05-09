@@ -46,6 +46,40 @@ const configInput = (home: string | undefined, envHome: string | undefined) => (
 
 const parseConfig = (home: string, envHome = "/tmp/user-home") =>
 	run(parsePdxConfig(configInput(home, envHome)));
+
+const makePithos = (
+	calls: string[] = [],
+	ready: readonly { readonly scope_id: string; readonly capability: string }[] = [],
+) =>
+	PithosClient.of({
+		init: () => Effect.sync(() => calls.push("init")),
+		scopeUpsert: (input) => Effect.sync(() => calls.push(`scopeUpsert:${input.kind}`)),
+		runUpsert: (input) =>
+			Effect.sync(() => calls.push(`runUpsert:${input.agent}:${input.runId ?? "new"}`)),
+		runCleanup: (input) =>
+			Effect.sync(() => calls.push(`runCleanup:${input.runId}:${input.reason}`)),
+		runInterrupt: (input) =>
+			Effect.sync(() => calls.push(`runInterrupt:${input.runId ?? input.taskId}:${input.reason}`)),
+		runTimeout: (input) =>
+			Effect.sync(() => calls.push(`runTimeout:${input.runId}:${input.reason}`)),
+		runInspect: (input) =>
+			Effect.succeed({
+				id: input.runId,
+				agent: "pandora",
+				mode: "hitl",
+				scope_id: "global",
+				status: "running",
+				task_id: null,
+				session_id: "session_test",
+				created_at: "2026-05-09T00:00:00.000Z",
+				updated_at: "2026-05-09T00:00:00.000Z",
+			}),
+		taskHeartbeat: (input) => Effect.sync(() => calls.push(`taskHeartbeat:${input.runId}`)),
+		taskEnqueue: (input) =>
+			Effect.sync(() => calls.push(`taskEnqueue:${input.capability}:${input.title}`)),
+		briefing: () => Effect.succeed(ready),
+	});
+
 describe("pdx substrate", () => {
 	it("derives config paths from home", async () => {
 		const config = await parseConfig("/tmp/pdx-home");
@@ -190,9 +224,7 @@ describe("pdx substrate", () => {
 			readFile: () => Effect.succeed(""),
 			mkdir: () => Effect.void,
 		});
-		const pithos = PithosClient.of({
-			run: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
-		});
+		const pithos = makePithos();
 		await expect(
 			run(
 				openPdx(await parseConfig("/tmp/pdx-home"), 4, 5).pipe(
@@ -226,9 +258,7 @@ describe("pdx substrate", () => {
 			readFile: () => Effect.succeed(""),
 			mkdir: () => Effect.void,
 		});
-		const pithos = PithosClient.of({
-			run: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
-		});
+		const pithos = makePithos();
 		const server = await run(
 			listenIpc(config.socketPath, () => Effect.succeed({ ok: true, data: { ready: true } })),
 		);
@@ -261,19 +291,13 @@ describe("pdx substrate", () => {
 	it("daemon startup creates runs dir, system run, and Pandora singleton", async () => {
 		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const mkdirs: string[] = [];
-		const pithosCalls: string[][] = [];
+		const pithosCalls: string[] = [];
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			mkdir: (path) => Effect.sync(() => mkdirs.push(path)),
 		});
-		const pithos = PithosClient.of({
-			run: (args) =>
-				Effect.sync(() => {
-					pithosCalls.push([...args]);
-					return { exitCode: 0, stdout: "{}", stderr: "" };
-				}),
-		});
+		const pithos = makePithos(pithosCalls);
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		const registry = await run(makeRegistry);
 		const ids = Ids.of({
@@ -310,56 +334,20 @@ describe("pdx substrate", () => {
 		);
 		await run(handle.close);
 		expect(mkdirs).toEqual([`${home}/runs`]);
-		expect(pithosCalls).toContainEqual(["scope", "upsert", "--kind", "global"]);
-		expect(pithosCalls).toContainEqual([
-			"run",
-			"upsert",
-			"--agent",
-			"pdx",
-			"--mode",
-			"afk",
-			"--scope",
-			"global",
-			"--cwd",
-			home,
-			"--session-id",
-			DAEMON_TARGET,
-			"--run",
-			PDX_SYSTEM_RUN_ID,
-		]);
-		expect(pithosCalls).toContainEqual([
-			"run",
-			"upsert",
-			"--agent",
-			"pandora",
-			"--mode",
-			"hitl",
-			"--scope",
-			"global",
-			"--cwd",
-			home,
-			"--session-id",
-			"session_pandora_1",
-			"--run",
-			"run_pandora_1",
-		]);
+		expect(pithosCalls).toContain("scopeUpsert:global");
+		expect(pithosCalls).toContain(`runUpsert:pdx:${PDX_SYSTEM_RUN_ID}`);
+		expect(pithosCalls).toContain("runUpsert:pandora:run_pandora_1");
 	});
 
 	it("daemon stop replies after cleanup and closes the IPC socket explicitly", async () => {
 		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
-		const pithosCalls: string[][] = [];
+		const pithosCalls: string[] = [];
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			mkdir: () => Effect.void,
 		});
-		const pithos = PithosClient.of({
-			run: (args) =>
-				Effect.sync(() => {
-					pithosCalls.push([...args]);
-					return { exitCode: 0, stdout: "{}", stderr: "" };
-				}),
-		});
+		const pithos = makePithos(pithosCalls);
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		const registry = await run(makeRegistry);
 		const ids = Ids.of({
@@ -399,14 +387,7 @@ describe("pdx substrate", () => {
 		await run(handle.shutdown);
 		await run(handle.close);
 		expect(response).toEqual({ ok: true, data: { stopped: true } });
-		expect(pithosCalls.at(-1)).toEqual([
-			"run",
-			"cleanup",
-			"--run",
-			PDX_SYSTEM_RUN_ID,
-			"--reason",
-			"pdx_close",
-		]);
+		expect(pithosCalls.at(-1)).toEqual(`runCleanup:${PDX_SYSTEM_RUN_ID}:pdx_close`);
 		expect(existsSync(config.socketPath)).toBe(false);
 	});
 
@@ -419,24 +400,8 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
-		const pithosCalls: string[][] = [];
-		const pithos = PithosClient.of({
-			run: (args) =>
-				Effect.sync(() => {
-					pithosCalls.push([...args]);
-					return args[0] === "init"
-						? { exitCode: 0, stdout: "{}", stderr: "" }
-						: {
-								exitCode: 0,
-								stdout: JSON.stringify({
-									ok: true,
-									ready: [{ id: "task_1", scope_id: "global", capability: "escalate" }],
-									blocked: [],
-								}),
-								stderr: "",
-							};
-				}),
-		});
+		const pithosCalls: string[] = [];
+		const pithos = makePithos(pithosCalls, [{ scope_id: "global", capability: "escalate" }]);
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
@@ -449,7 +414,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(FileSystem, fs),
 			),
 		);
-		expect(pithosCalls).toEqual([["init"], ["briefing"]]);
+		expect(pithosCalls).toEqual(["init"]);
 		expect(status).toEqual({
 			daemon: { running: false, target: DAEMON_TARGET, socket_path: "/tmp/pdx-home/pdx.sock" },
 			registry: { entries: [] },
@@ -468,9 +433,7 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
-		const pithos = PithosClient.of({
-			run: () => Effect.succeed({ exitCode: 0, stdout: "{}", stderr: "" }),
-		});
+		const pithos = makePithos();
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
@@ -628,14 +591,8 @@ describe("pdx substrate", () => {
 				tmuxTarget: PANDORA_TARGET,
 			}),
 		);
-		const pithosCalls: string[][] = [];
-		const pithos = PithosClient.of({
-			run: (args) =>
-				Effect.sync(() => {
-					pithosCalls.push([...args]);
-					return { exitCode: 0, stdout: "{}", stderr: "" };
-				}),
-		});
+		const pithosCalls: string[] = [];
+		const pithos = makePithos(pithosCalls);
 		const ids = Ids.of({
 			nextRunId: Effect.succeed("run_new"),
 			nextSessionId: Effect.succeed("session_new"),
@@ -670,14 +627,7 @@ describe("pdx substrate", () => {
 		);
 		const entries = await run(registry.list);
 		expect(entries.map((entry) => entry.runId)).toEqual(["run_new"]);
-		expect(pithosCalls).toContainEqual([
-			"run",
-			"cleanup",
-			"--run",
-			"run_old",
-			"--reason",
-			"natural_death",
-		]);
+		expect(pithosCalls).toContain("runCleanup:run_old:natural_death");
 	});
 
 	it("starts registry empty and supports typed operations", async () => {

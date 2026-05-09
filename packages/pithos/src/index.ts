@@ -12,7 +12,7 @@ export {
 	type SystemActor,
 } from "./builtins.js";
 export { makePithosCommand, type CliContext } from "./cli.js";
-export { makeEngine, type Engine, type EngineContext } from "./engine.js";
+export { makeEngine, type Engine, type EngineContext, type RunOutput } from "./engine.js";
 export { loadConfig, ConfigSchema, type Config, type EnvReader } from "./config.js";
 export { migrate, openDb, type Db, type Mode, type ScopeKind, type TaskStatus } from "./db.js";
 export {
@@ -25,4 +25,5 @@ export {
 	type TaskRow,
 } from "./rows.js";
 export { PithosError, exitCodeFor, type ErrorCode } from "./errors.js";
+export { liveServices } from "./services.js";
 export type { FsService, OutputService, Services } from "./services.js";

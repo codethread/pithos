@@ -19,6 +19,7 @@ await esbuild.build({
 	format: "esm",
 	bundle: true,
 	sourcemap: dev ? "inline" : false,
+	external: ["better-sqlite3"],
 	banner: {
 		js: '#!/usr/bin/env node\nimport { createRequire } from "node:module"; const require = createRequire(import.meta.url);',
 	},

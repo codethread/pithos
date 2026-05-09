@@ -3,6 +3,8 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { launchAgent } from "../../spawner/src/index.ts";
+import { liveServices, makeEngine, PithosError } from "@pithos/pithos";
+import type { Config as PithosConfig } from "@pithos/pithos";
 import { PdxError } from "./errors.js";
 import {
 	FileSystem,
@@ -11,6 +13,7 @@ import {
 	PithosClient,
 	Process,
 	Spawner,
+	type PithosClientService,
 	type ProcessResult,
 } from "./services.js";
 
@@ -84,9 +87,78 @@ export const IdsLive = Ids.of({
 	nextRunId: Effect.sync(() => `run_${randomUUID().replaceAll("-", "")}`),
 	nextSessionId: Effect.sync(() => `session_${randomUUID().replaceAll("-", "")}`),
 });
-export const PithosClientLive = PithosClient.of({
-	run: (args, options) => execFileEffect("pithos-next", args, options),
-});
+const pithosError = (operation: string, error: unknown) => {
+	if (error instanceof PdxError) return error;
+	if (error instanceof PithosError) {
+		return new PdxError({ code: error.code, message: `${operation} failed: ${error.message}` });
+	}
+	return new PdxError({ code: "PROCESS_ERROR", message: `${operation} failed: ${String(error)}` });
+};
+
+const pithosClient = (dbPath: string): PithosClientService => {
+	const engine = makeEngine({
+		config: { dbPath } satisfies PithosConfig,
+		services: liveServices,
+	});
+	const run = <A>(operation: string, f: () => A) =>
+		Effect.try({ try: f, catch: (error) => pithosError(operation, error) });
+	return {
+		init: () => run("pithos init", () => void engine.init({ fresh: false })),
+		scopeUpsert: (input) =>
+			run(
+				"pithos scope upsert",
+				() => void engine.scopeUpsert({ kind: input.kind, path: input.path }),
+			),
+		runUpsert: (input) =>
+			run(
+				"pithos run upsert",
+				() =>
+					void engine.runUpsert({
+						agent: input.agent,
+						mode: input.mode,
+						scope: input.scope,
+						cwd: input.cwd,
+						sessionId: input.sessionId,
+						runId: input.runId,
+					}),
+			),
+		runCleanup: (input) => run("pithos run cleanup", () => void engine.runCleanup(input)),
+		runInterrupt: (input) =>
+			run(
+				"pithos run interrupt",
+				() =>
+					void engine.runInterrupt({
+						runId: input.runId,
+						taskId: input.taskId,
+						reason: input.reason,
+					}),
+			),
+		runTimeout: (input) => run("pithos run timeout", () => void engine.runTimeout(input)),
+		runInspect: (input) => run("pithos run inspect", () => engine.runInspect(input).run),
+		taskHeartbeat: (input) =>
+			run(
+				"pithos task heartbeat",
+				() => void engine.heartbeat({ runId: input.runId, taskId: undefined, token: undefined }),
+			),
+		taskEnqueue: (input) =>
+			run(
+				"pithos task enqueue",
+				() =>
+					void engine.enqueue({
+						scope: input.scope,
+						capability: input.capability,
+						title: input.title,
+						body: input.body,
+						bodyFile: undefined,
+						runId: input.runId,
+						dependsOn: input.dependsOn ?? [],
+					}),
+			),
+		briefing: () => run("pithos briefing", () => engine.briefing({ agent: undefined }).ready),
+	};
+};
+
+export const makePithosClientLive = (dbPath: string) => PithosClient.of(pithosClient(dbPath));
 export const SpawnerLive = Spawner.of({
 	launchAgent: (input) =>
 		Effect.try({

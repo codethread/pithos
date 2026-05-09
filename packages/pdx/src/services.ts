@@ -1,4 +1,5 @@
 import { Context, Effect, SynchronizedRef } from "effect";
+import type { RunOutput } from "@pithos/pithos";
 import type { PdxError } from "./errors.js";
 
 export interface ProcessResult {
@@ -49,11 +50,49 @@ export interface TmuxService {
 }
 export class Tmux extends Context.Tag("pdx/Tmux")<Tmux, TmuxService>() {}
 
+export interface PithosReadyTask {
+	readonly scope_id: string;
+	readonly capability: string;
+}
+
 export interface PithosClientService {
-	readonly run: (
-		args: readonly string[],
-		options?: { readonly env?: Record<string, string> },
-	) => Effect.Effect<ProcessResult, PdxError>;
+	readonly init: () => Effect.Effect<void, PdxError>;
+	readonly scopeUpsert: (input: {
+		readonly kind: "global" | "repo" | "worktree";
+		readonly path?: string;
+	}) => Effect.Effect<void, PdxError>;
+	readonly runUpsert: (input: {
+		readonly agent: string;
+		readonly mode: "afk" | "hitl";
+		readonly scope: string;
+		readonly cwd: string;
+		readonly sessionId: string;
+		readonly runId?: string;
+	}) => Effect.Effect<void, PdxError>;
+	readonly runCleanup: (input: {
+		readonly runId: string;
+		readonly reason: string;
+	}) => Effect.Effect<void, PdxError>;
+	readonly runInterrupt: (input: {
+		readonly runId?: string;
+		readonly taskId?: string;
+		readonly reason: string;
+	}) => Effect.Effect<void, PdxError>;
+	readonly runTimeout: (input: {
+		readonly runId: string;
+		readonly reason: string;
+	}) => Effect.Effect<void, PdxError>;
+	readonly runInspect: (input: { readonly runId: string }) => Effect.Effect<RunOutput, PdxError>;
+	readonly taskHeartbeat: (input: { readonly runId: string }) => Effect.Effect<void, PdxError>;
+	readonly taskEnqueue: (input: {
+		readonly scope: string;
+		readonly capability: "triage" | "design" | "execute" | "escalate";
+		readonly title: string;
+		readonly body: string;
+		readonly runId?: string;
+		readonly dependsOn?: readonly string[];
+	}) => Effect.Effect<void, PdxError>;
+	readonly briefing: () => Effect.Effect<readonly PithosReadyTask[], PdxError>;
 }
 export class PithosClient extends Context.Tag("pdx/PithosClient")<
 	PithosClient,

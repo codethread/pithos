@@ -13,7 +13,6 @@ import {
 	Spawner,
 	SupervisorLog,
 	Tmux,
-	type PithosClientService,
 	type RegistryEntry,
 	type TmuxService,
 } from "./services.js";
@@ -21,20 +20,6 @@ import {
 export const DAEMON_TARGET = "pdx--daemon";
 export const PANDORA_TARGET = "pdx--pandora";
 export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
-
-const pithosEnv = (config: PdxConfig): Record<string, string> => ({
-	PITHOS_DB: config.pithosDbPath,
-});
-
-const requireOk = (label: string, result: { readonly exitCode: number; readonly stderr: string }) =>
-	result.exitCode === 0
-		? Effect.void
-		: Effect.fail(
-				new PdxError({
-					code: "PROCESS_ERROR",
-					message: `${label} failed: ${result.stderr}`,
-				}),
-			);
 
 const awaitDaemonReady = (
 	socketPath: string,
@@ -64,9 +49,7 @@ export const openPdx = (config: PdxConfig, maxAfk: number, intervalSeconds: numb
 			);
 		}
 		yield* fs.mkdir(config.home);
-		yield* pithos
-			.run(["init"], { env: pithosEnv(config) })
-			.pipe(Effect.flatMap((result) => requireOk("pithos init", result)));
+		yield* pithos.init();
 		yield* fs.mkdir(config.runsDir);
 		yield* tmux.newSession({
 			target: DAEMON_TARGET,
@@ -114,75 +97,16 @@ export const closePdx = (config: PdxConfig) =>
 			);
 	});
 
-const parseJsonOutput = (label: string, raw: string): Effect.Effect<unknown, PdxError> =>
-	Effect.try({
-		try: (): unknown => JSON.parse(raw) as unknown,
-		catch: (error) =>
-			new PdxError({
-				code: "PROCESS_ERROR",
-				message: `${label} returned invalid JSON: ${String(error)}`,
-			}),
-	});
-
-const readyTasks = (
-	briefing: unknown,
-): Effect.Effect<readonly { readonly scope_id: string; readonly capability: string }[], PdxError> =>
-	Effect.gen(function* () {
-		if (typeof briefing !== "object" || briefing === null || !("ready" in briefing)) {
-			yield* Effect.fail(
-				new PdxError({ code: "PROCESS_ERROR", message: "pithos briefing output missing ready" }),
-			);
-		}
-		const ready = (briefing as { readonly ready: unknown }).ready;
-		if (!Array.isArray(ready)) {
-			yield* Effect.fail(
-				new PdxError({ code: "PROCESS_ERROR", message: "pithos briefing ready is not an array" }),
-			);
-		}
-		const tasks: readonly { readonly scope_id: string; readonly capability: string }[] =
-			yield* Effect.forEach(
-				ready as readonly unknown[],
-				(
-					task,
-				): Effect.Effect<
-					{
-						readonly scope_id: string;
-						readonly capability: string;
-					},
-					PdxError
-				> => {
-					const scope_id =
-						typeof task === "object" && task !== null
-							? (task as { readonly scope_id?: unknown }).scope_id
-							: undefined;
-					const capability =
-						typeof task === "object" && task !== null
-							? (task as { readonly capability?: unknown }).capability
-							: undefined;
-					if (typeof scope_id !== "string" || typeof capability !== "string") {
-						return Effect.fail(
-							new PdxError({
-								code: "PROCESS_ERROR",
-								message: "pithos briefing ready task missing scope/capability",
-							}),
-						);
-					}
-					return Effect.succeed({ scope_id, capability });
-				},
-			);
-		return tasks;
-	});
-
-const queueCounts = (briefing: unknown) =>
-	Effect.gen(function* () {
-		const ready = yield* readyTasks(briefing);
-		const byScopeCapability: Record<string, Record<string, number>> = {};
-		for (const { scope_id, capability } of ready) {
-			byScopeCapability[scope_id] = byScopeCapability[scope_id] ?? {};
-			byScopeCapability[scope_id][capability] = (byScopeCapability[scope_id][capability] ?? 0) + 1;
-		}
-		return { claimable: ready.length, by_scope_capability: byScopeCapability };
-	});
+const queueCounts = (
+	ready: readonly { readonly scope_id: string; readonly capability: string }[],
+) => {
+	const byScopeCapability: Record<string, Record<string, number>> = {};
+	for (const { scope_id, capability } of ready) {
+		byScopeCapability[scope_id] = byScopeCapability[scope_id] ?? {};
+		byScopeCapability[scope_id][capability] = (byScopeCapability[scope_id][capability] ?? 0) + 1;
+	}
+	return { claimable: ready.length, by_scope_capability: byScopeCapability };
+};
 
 const readDaemonStatus = (config: PdxConfig, running: boolean, fallback: number) => {
 	if (!running)
@@ -214,13 +138,9 @@ export const statusPdx = (config: PdxConfig, maxAfk: number) =>
 		const running = yield* tmux.hasSession(DAEMON_TARGET);
 		const daemonStatus = yield* readDaemonStatus(config, running, maxAfk);
 		yield* fs.mkdir(config.home);
-		yield* pithos
-			.run(["init"], { env: pithosEnv(config) })
-			.pipe(Effect.flatMap((result) => requireOk("pithos init", result)));
-		const result = yield* pithos.run(["briefing"], { env: pithosEnv(config) });
-		yield* requireOk("pithos briefing", result);
-		const briefing = yield* parseJsonOutput("pithos briefing", result.stdout);
-		const queue = yield* queueCounts(briefing);
+		yield* pithos.init();
+		const ready = yield* pithos.briefing();
+		const queue = queueCounts(ready);
 		return {
 			daemon: { running, target: DAEMON_TARGET, socket_path: config.socketPath },
 			registry: { entries: daemonStatus.entries },
@@ -325,31 +245,6 @@ export const logsShowPdx = (
 		return output.length === 0 ? "" : `${output.join("\n")}\n`;
 	});
 
-const pithosRun = (
-	pithos: PithosClientService,
-	config: PdxConfig,
-	label: string,
-	args: readonly string[],
-) =>
-	pithos
-		.run(args, { env: pithosEnv(config) })
-		.pipe(Effect.flatMap((result) => requireOk(label, result)));
-
-const cleanupRun = (
-	pithos: PithosClientService,
-	config: PdxConfig,
-	runId: string,
-	reason: string,
-) =>
-	pithosRun(pithos, config, "pithos run cleanup", [
-		"run",
-		"cleanup",
-		"--run",
-		runId,
-		"--reason",
-		reason,
-	]);
-
 const confirmTmuxGone = (tmux: TmuxService, target: string) =>
 	tmux.hasSession(target).pipe(
 		Effect.flatMap((exists) =>
@@ -400,7 +295,7 @@ export const reconcileTick = (config: PdxConfig) =>
 		for (const entry of yield* registry.list) {
 			const alive = yield* entryAlive(entry);
 			if (!alive) {
-				yield* cleanupRun(pithos, config, entry.runId, "natural_death");
+				yield* pithos.runCleanup({ runId: entry.runId, reason: "natural_death" });
 				yield* registry.remove(entry.runId);
 				yield* log.write({
 					level: "info",
@@ -409,34 +304,21 @@ export const reconcileTick = (config: PdxConfig) =>
 					data: { run_id: entry.runId },
 				});
 			} else if (entry.mode === "hitl") {
-				yield* pithosRun(pithos, config, "pithos task heartbeat", [
-					"task",
-					"heartbeat",
-					"--run",
-					entry.runId,
-				]);
+				yield* pithos.taskHeartbeat({ runId: entry.runId });
 			}
 		}
 		const entries = yield* registry.list;
 		if (!entries.some((entry) => entry.agent === "pandora")) {
 			const runId = yield* ids.nextRunId;
 			const sessionId = yield* ids.nextSessionId;
-			yield* pithosRun(pithos, config, "pithos run upsert", [
-				"run",
-				"upsert",
-				"--agent",
-				"pandora",
-				"--mode",
-				"hitl",
-				"--scope",
-				"global",
-				"--cwd",
-				config.home,
-				"--session-id",
+			yield* pithos.runUpsert({
+				agent: "pandora",
+				mode: "hitl",
+				scope: "global",
+				cwd: config.home,
 				sessionId,
-				"--run",
 				runId,
-			]);
+			});
 			const launched = yield* spawner
 				.launchAgent({
 					agent: "pandora",
@@ -448,14 +330,14 @@ export const reconcileTick = (config: PdxConfig) =>
 				})
 				.pipe(
 					Effect.catchAll((error) =>
-						cleanupRun(pithos, config, runId, "launch_failed").pipe(
-							Effect.zipRight(Effect.fail(error)),
-						),
+						pithos
+							.runCleanup({ runId, reason: "launch_failed" })
+							.pipe(Effect.zipRight(Effect.fail(error))),
 					),
 				);
 			const tmuxTarget = launched.hitl?.tmuxTarget;
 			if (tmuxTarget === undefined) {
-				yield* cleanupRun(pithos, config, runId, "launch_failed");
+				yield* pithos.runCleanup({ runId, reason: "launch_failed" });
 				yield* Effect.fail(
 					new PdxError({ code: "PROCESS_ERROR", message: "pandora launch missing tmux target" }),
 				);
@@ -486,28 +368,15 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 		const log = yield* SupervisorLog;
 		yield* fs.mkdir(config.runsDir);
 		yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon starting" });
-		yield* pithosRun(pithos, config, "pithos scope upsert", [
-			"scope",
-			"upsert",
-			"--kind",
-			"global",
-		]);
-		yield* pithosRun(pithos, config, "pithos run upsert", [
-			"run",
-			"upsert",
-			"--agent",
-			"pdx",
-			"--mode",
-			"afk",
-			"--scope",
-			"global",
-			"--cwd",
-			config.home,
-			"--session-id",
-			DAEMON_TARGET,
-			"--run",
-			PDX_SYSTEM_RUN_ID,
-		]);
+		yield* pithos.scopeUpsert({ kind: "global" });
+		yield* pithos.runUpsert({
+			agent: "pdx",
+			mode: "afk",
+			scope: "global",
+			cwd: config.home,
+			sessionId: DAEMON_TARGET,
+			runId: PDX_SYSTEM_RUN_ID,
+		});
 		const registry = yield* Registry;
 		const tmux = yield* Tmux;
 		for (const session of yield* tmux.lsSessions()) {
@@ -542,10 +411,10 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 						);
 					yield* confirmTmuxGone(tmux, entry.tmuxTarget);
 				}
-				yield* cleanupRun(pithos, config, entry.runId, "pdx_close");
+				yield* pithos.runCleanup({ runId: entry.runId, reason: "pdx_close" });
 				yield* registry.remove(entry.runId);
 			}
-			yield* cleanupRun(pithos, config, PDX_SYSTEM_RUN_ID, "pdx_close");
+			yield* pithos.runCleanup({ runId: PDX_SYSTEM_RUN_ID, reason: "pdx_close" });
 			yield* Deferred.succeed(shutdown, undefined);
 			return { ok: true, data: { stopped: true } } as const;
 		});

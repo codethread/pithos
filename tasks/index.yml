@@ -101,7 +101,7 @@ tasks:
   - id: task-006a
     title: "Slice 6a: Refactor pdx to reuse `@pithos/pithos` directly"
     file: ./task-006a.md
-    status: pending
+    status: complete
     blocked_by:
       - task-006
   - id: task-007

@@ -17,7 +17,9 @@ pithos <command> --help              # per-command flags + examples + exit codes
 
 - `pithos init` — create or migrate the SQLite store (idempotent).
 - `pithos scope upsert --kind {global|repo|worktree} --path <path>` — register the unit-of-work scope.
-- `pithos run register|end` — agent session lifecycle.
+- `pithos run cleanup` — finalize a naturally ended run, reclaim/dead-letter active held work with fenced token invalidation.
+- `pithos run interrupt` — deliberate operator interruption by run or held task, failing active held work and clearing the run.
+- `pithos run timeout` — mark non-Pandora no-claim runs as `timed_out` when no task is held.
 - `pithos enqueue` — add a task to a scope with a capability and optional repeatable `--depends-on` blockers.
 - `pithos task supersede <task-id> --run <run-id> --reason <text>` — replace a task with a fresh queued task, preserve supersession history, and retarget direct queued dependents.
 - `pithos task cancel <task-id> --run <run-id> --reason <text>` — cancel queued, failed, or dead-lettered work and emit `task.cancelled`.
@@ -27,7 +29,7 @@ pithos <command> --help              # per-command flags + examples + exit codes
 - `pithos artifact add` — attach a worker-completion or other artifact to a task.
 - `pithos inspect scope|run|task|graph` / `pithos task inspect` / `pithos graph inspect` — read structured state; task inspection includes direct dependencies, dependents, unresolved blockers, supersession links, and artifacts, while graph inspection with `--task <id> | --scope <scope-id> | --all` returns a closed dependency/supersession graph for one task, one scope, or all non-cancelled work. Graph nodes include `claimable`, `unresolved_dependency_ids`, `supersedes_task_id`, and `superseded_by_task_id`; graph edges are `depends_on`/`supersedes` records with dependency `satisfied` state.
 - `pithos tail [--limit N]` — recent events, including graph-history payloads for `task.created` (`depends_on_task_ids`, optional `supersedes_task_id`), `task.cancelled` (`reason`, optional `superseded_by_task_id`), and `task.superseded` (`new_task_id`, `reason`, `retargeted_dependent_task_ids`).
-- `pithos sweep` — requeue expired leases, dead-letter exhausted tasks, mark stale runs.
+- `pithos sweep` — legacy current-bin stale lease maintenance; the next Pithos surface uses `run cleanup|interrupt|timeout` for supervised run finalization.
 - `pithos briefing --agent pandora` — markdown briefing with `as_of_event_id` watermark plus ready vs blocked queued work.
 
 ## Environment

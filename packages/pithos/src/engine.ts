@@ -36,6 +36,19 @@ export interface Engine {
 		readonly ok: true;
 		readonly run: RunOutput;
 	};
+	readonly runCleanup: (input: { readonly runId: string; readonly reason: string }) => {
+		readonly ok: true;
+		readonly run: RunOutput;
+	};
+	readonly runInterrupt: (input: {
+		readonly runId: string | undefined;
+		readonly taskId: string | undefined;
+		readonly reason: string;
+	}) => { readonly ok: true; readonly run: RunOutput };
+	readonly runTimeout: (input: { readonly runId: string; readonly reason: string }) => {
+		readonly ok: true;
+		readonly run: RunOutput;
+	};
 	readonly eventsTail: (input: { readonly limit: number | undefined }) => {
 		readonly ok: true;
 		readonly events: readonly EventOutput[];
@@ -305,14 +318,14 @@ const authorized = (
 	return r;
 };
 
-type TaskSummary = {
+interface TaskSummary {
 	readonly id: string;
 	readonly scope_id: string;
 	readonly capability: Capability;
 	readonly status: string;
 	readonly title: string;
 	readonly created_at: string;
-};
+}
 
 const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
 	(
@@ -353,6 +366,24 @@ const taskSummary = (db: Db, taskId: string): TaskSummary =>
 
 const isClaimable = (db: Db, task: { readonly id: string; readonly status: string }): boolean =>
 	task.status === "queued" && unresolvedDependencies(db, task.id).length === 0;
+
+const runById = (db: Db, runId: string): RunRow =>
+	decodeRow(
+		RunRowSchema,
+		db
+			.prepare(
+				sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
+			)
+			.get(runId),
+		`run not found: ${runId}`,
+	);
+
+const terminalRunStatuses = ["ended", "failed", "cancelled", "timed_out"] as const;
+const activeTaskStatuses = ["claimed", "running"] as const;
+const terminalTaskStatuses = ["done", "failed", "dead_letter", "cancelled"] as const;
+
+const runTerminalStatusForTask = (taskStatus: string): "ended" | "failed" =>
+	taskStatus === "done" ? "ended" : "failed";
 
 const assertAcyclic = (db: Db): void => {
 	const edges = db
@@ -584,17 +615,246 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			return { ok: true, run: toRunOutput(row) };
 		}),
 	runInspect: ({ runId }) =>
+		withDb(ctx, (db) => ({ ok: true, run: toRunOutput(runById(db, runId)) })),
+	runCleanup: ({ runId, reason }) =>
 		withDb(ctx, (db) => {
-			const row = decodeRow(
-				RunRowSchema,
-				db
+			const nonEmptyReason = requireNonEmpty(reason, "--reason");
+			const finalRun: RunRow = db.transaction((): RunRow => {
+				const run = runById(db, runId);
+				if (terminalRunStatuses.includes(run.status as (typeof terminalRunStatuses)[number])) {
+					return run;
+				}
+				if (run.task_id === null) {
+					const runUpdate = db
+						.prepare(
+							sql`UPDATE runs SET status='ended', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id IS NULL`,
+						)
+						.run(run.id, run.status);
+					if (runUpdate.changes === 0)
+						fail("STALE_TOKEN_RACE", "cleanup run snapshot changed before update");
+					event(ctx, db, "run.cleanup", {
+						run_id: run.id,
+						payload: { reason: nonEmptyReason, previous_status: run.status, status: "ended" },
+					});
+					return runById(db, run.id);
+				}
+				const task = decodeRow(
+					TaskRowSchema,
+					db.prepare(`${taskSummarySelect} WHERE id=?`).get(run.task_id),
+					`task not found: ${run.task_id}`,
+				);
+				if (terminalTaskStatuses.includes(task.status as (typeof terminalTaskStatuses)[number])) {
+					const status = runTerminalStatusForTask(task.status);
+					const runUpdate = db
+						.prepare(
+							sql`UPDATE runs SET status=?, task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
+						)
+						.run(status, run.id, run.status, task.id);
+					if (runUpdate.changes === 0)
+						fail("STALE_TOKEN_RACE", "cleanup run snapshot changed before update");
+					event(ctx, db, "run.cleanup", {
+						run_id: run.id,
+						payload: {
+							reason: nonEmptyReason,
+							previous_status: run.status,
+							status,
+							task_id: task.id,
+						},
+					});
+					return runById(db, run.id);
+				}
+				if (!activeTaskStatuses.includes(task.status as (typeof activeTaskStatuses)[number])) {
+					fail("INTERNAL_ERROR", `unsupported held task status: ${task.status}`);
+				}
+				const nextTaskStatus = task.attempts < task.max_attempts ? "queued" : "dead_letter";
+				const taskUpdate = db
 					.prepare(
-						sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
+						sql`
+						UPDATE tasks
+						SET status=?, fencing_token=fencing_token + 1, updated_at=CURRENT_TIMESTAMP
+						WHERE id=? AND status=? AND fencing_token=?
+					`,
 					)
-					.get(runId),
-				`run not found: ${runId}`,
-			);
-			return { ok: true, run: toRunOutput(row) };
+					.run(nextTaskStatus, task.id, task.status, task.fencing_token);
+				if (taskUpdate.changes === 0)
+					fail("STALE_TOKEN_RACE", "cleanup active task snapshot changed before update");
+				const runUpdate = db
+					.prepare(
+						sql`UPDATE runs SET status='failed', task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
+					)
+					.run(run.id, run.status, task.id);
+				if (runUpdate.changes === 0)
+					fail("STALE_TOKEN_RACE", "cleanup run snapshot changed before update");
+				const taskEventType = nextTaskStatus === "queued" ? "task.reclaimed" : "task.dead_lettered";
+				event(ctx, db, taskEventType, {
+					task_id: task.id,
+					run_id: run.id,
+					payload: {
+						previous_run_id: run.id,
+						reason: nonEmptyReason,
+						attempts: task.attempts,
+						max_attempts: task.max_attempts,
+						previous_fencing_token: task.fencing_token,
+						new_fencing_token: task.fencing_token + 1,
+					},
+				});
+				event(ctx, db, "run.cleanup", {
+					run_id: run.id,
+					payload: {
+						reason: nonEmptyReason,
+						previous_status: run.status,
+						status: "failed",
+						task_id: task.id,
+					},
+				});
+				return runById(db, run.id);
+			})();
+			return { ok: true, run: toRunOutput(finalRun) };
+		}),
+	runInterrupt: ({ runId, taskId, reason }) =>
+		withDb(ctx, (db) => {
+			const nonEmptyReason = requireNonEmpty(reason, "--reason");
+			if ((runId === undefined) === (taskId === undefined)) {
+				fail("VALIDATION_ERROR", "provide exactly one of --run or --task");
+			}
+			const finalRun: RunRow = db.transaction((): RunRow => {
+				const resolvedRunId =
+					runId ??
+					(db
+						.prepare(
+							sql`SELECT id FROM runs WHERE task_id=? AND status NOT IN ('ended','failed','cancelled','timed_out')`,
+						)
+						.pluck()
+						.get(taskId) as string | undefined) ??
+					fail("NOT_FOUND", `no active run holds task: ${taskId}`);
+				const run = runById(db, resolvedRunId);
+				if (taskId !== undefined && run.task_id !== taskId) {
+					fail("STALE_TOKEN_RACE", "interrupt task owner changed before update");
+				}
+				if (terminalRunStatuses.includes(run.status as (typeof terminalRunStatuses)[number])) {
+					return run;
+				}
+				if (run.task_id === null) {
+					const runUpdate = db
+						.prepare(
+							sql`UPDATE runs SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id IS NULL`,
+						)
+						.run(run.id, run.status);
+					if (runUpdate.changes === 0)
+						fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
+					event(ctx, db, "run.interrupted", {
+						run_id: run.id,
+						payload: { reason: nonEmptyReason, previous_status: run.status, status: "cancelled" },
+					});
+					return runById(db, run.id);
+				}
+				const task = decodeRow(
+					TaskRowSchema,
+					db.prepare(`${taskSummarySelect} WHERE id=?`).get(run.task_id),
+					`task not found: ${run.task_id}`,
+				);
+				if (activeTaskStatuses.includes(task.status as (typeof activeTaskStatuses)[number])) {
+					const taskUpdate = db
+						.prepare(
+							sql`
+							UPDATE tasks
+							SET status='failed', fencing_token=fencing_token + 1, updated_at=CURRENT_TIMESTAMP, completed_at=CURRENT_TIMESTAMP, result_json=?
+							WHERE id=? AND status=? AND fencing_token=?
+						`,
+						)
+						.run(
+							JSON.stringify({ reason: nonEmptyReason }),
+							task.id,
+							task.status,
+							task.fencing_token,
+						);
+					if (taskUpdate.changes === 0)
+						fail("STALE_TOKEN_RACE", "interrupt active task snapshot changed before update");
+					const runUpdate = db
+						.prepare(
+							sql`UPDATE runs SET status='failed', task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
+						)
+						.run(run.id, run.status, task.id);
+					if (runUpdate.changes === 0)
+						fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
+					event(ctx, db, "task.interrupted", {
+						task_id: task.id,
+						run_id: run.id,
+						payload: {
+							run_id: run.id,
+							reason: nonEmptyReason,
+							previous_status: task.status,
+							previous_fencing_token: task.fencing_token,
+							new_fencing_token: task.fencing_token + 1,
+						},
+					});
+					event(ctx, db, "run.interrupted", {
+						run_id: run.id,
+						payload: {
+							reason: nonEmptyReason,
+							previous_status: run.status,
+							status: "failed",
+							task_id: task.id,
+						},
+					});
+					return runById(db, run.id);
+				}
+				if (terminalTaskStatuses.includes(task.status as (typeof terminalTaskStatuses)[number])) {
+					const status = runTerminalStatusForTask(task.status);
+					const runUpdate = db
+						.prepare(
+							sql`UPDATE runs SET status=?, task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
+						)
+						.run(status, run.id, run.status, task.id);
+					if (runUpdate.changes === 0)
+						fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
+					event(ctx, db, "run.interrupted", {
+						run_id: run.id,
+						payload: {
+							reason: nonEmptyReason,
+							previous_status: run.status,
+							status,
+							task_id: task.id,
+						},
+					});
+					return runById(db, run.id);
+				}
+				return fail("INTERNAL_ERROR", `unsupported held task status: ${task.status}`);
+			})();
+			return { ok: true, run: toRunOutput(finalRun) };
+		}),
+	runTimeout: ({ runId, reason }) =>
+		withDb(ctx, (db) => {
+			const nonEmptyReason = requireNonEmpty(reason, "--reason");
+			const finalRun: RunRow = db.transaction((): RunRow => {
+				const run = runById(db, runId);
+				if (run.task_id !== null) fail("VALIDATION_ERROR", "run timeout requires no held task");
+				if (terminalRunStatuses.includes(run.status as (typeof terminalRunStatuses)[number])) {
+					return run;
+				}
+				if (run.agent_kind === "pandora" || run.agent_kind === "pdx") {
+					fail("VALIDATION_ERROR", `run timeout is not valid for ${run.agent_kind}`);
+				}
+				const hasClaimed = db
+					.prepare(sql`SELECT 1 FROM events WHERE type='task.claimed' AND actor_run_id=?`)
+					.get(run.id);
+				if (hasClaimed !== undefined) {
+					fail("VALIDATION_ERROR", "run timeout requires a run that has never claimed a task");
+				}
+				const runUpdate = db
+					.prepare(
+						sql`UPDATE runs SET status='timed_out', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id IS NULL`,
+					)
+					.run(run.id, run.status);
+				if (runUpdate.changes === 0)
+					fail("STALE_TOKEN_RACE", "timeout run snapshot changed before update");
+				event(ctx, db, "run.timed_out", {
+					run_id: run.id,
+					payload: { reason: nonEmptyReason, previous_status: run.status, status: "timed_out" },
+				});
+				return runById(db, run.id);
+			})();
+			return { ok: true, run: toRunOutput(finalRun) };
 		}),
 	eventsTail: ({ limit }) =>
 		withDb(ctx, (db) => {

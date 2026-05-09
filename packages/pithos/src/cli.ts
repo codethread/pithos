@@ -30,6 +30,14 @@ type CommandInput =
 			readonly runId: string | undefined;
 	  }
 	| { readonly command: "run.inspect"; readonly runId: string }
+	| { readonly command: "run.cleanup"; readonly runId: string; readonly reason: string }
+	| {
+			readonly command: "run.interrupt";
+			readonly runId: string | undefined;
+			readonly taskId: string | undefined;
+			readonly reason: string;
+	  }
+	| { readonly command: "run.timeout"; readonly runId: string; readonly reason: string }
 	| { readonly command: "events.tail"; readonly limit: number | undefined }
 	| {
 			readonly command: "task.enqueue";
@@ -122,6 +130,15 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "run.inspect":
 					ctx.services.output.write(json(engine.runInspect({ runId: input.runId })));
 					return;
+				case "run.cleanup":
+					ctx.services.output.write(json(engine.runCleanup(input)));
+					return;
+				case "run.interrupt":
+					ctx.services.output.write(json(engine.runInterrupt(input)));
+					return;
+				case "run.timeout":
+					ctx.services.output.write(json(engine.runTimeout(input)));
+					return;
 				case "events.tail":
 					ctx.services.output.write(json(engine.eventsTail({ limit: input.limit })));
 					return;
@@ -211,7 +228,34 @@ export const makePithosCommand = (ctx: CliContext) => {
 	const runInspect = Command.make("inspect", { id: Args.text({ name: "run-id" }) }, ({ id }) =>
 		runCommand(ctx, { command: "run.inspect", runId: id }),
 	);
-	const runParent = Command.make("run").pipe(Command.withSubcommands([runUpsert, runInspect]));
+	const runCleanup = Command.make(
+		"cleanup",
+		{ runId: Options.text("run"), reason: Options.text("reason") },
+		({ runId, reason }) => runCommand(ctx, { command: "run.cleanup", runId, reason }),
+	);
+	const runInterrupt = Command.make(
+		"interrupt",
+		{
+			runId: Options.text("run").pipe(Options.optional),
+			taskId: Options.text("task").pipe(Options.optional),
+			reason: Options.text("reason"),
+		},
+		(o) =>
+			runCommand(ctx, {
+				command: "run.interrupt",
+				runId: opt(o.runId),
+				taskId: opt(o.taskId),
+				reason: o.reason,
+			}),
+	);
+	const runTimeout = Command.make(
+		"timeout",
+		{ runId: Options.text("run"), reason: Options.text("reason") },
+		({ runId, reason }) => runCommand(ctx, { command: "run.timeout", runId, reason }),
+	);
+	const runParent = Command.make("run").pipe(
+		Command.withSubcommands([runUpsert, runInspect, runCleanup, runInterrupt, runTimeout]),
+	);
 	const eventsTail = Command.make(
 		"tail",
 		{ limit: Options.integer("limit").pipe(Options.optional) },

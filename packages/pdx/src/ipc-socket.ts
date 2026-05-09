@@ -27,7 +27,7 @@ export const listenIpc = (
 	unlinkSocket(socketPath).pipe(
 		Effect.zipRight(
 			Effect.async<IpcServerHandle, PdxError>((resume) => {
-				const server: Server = createServer((socket) => {
+				const server: Server = createServer({ allowHalfOpen: true }, (socket) => {
 					let input = "";
 					socket.setEncoding("utf8");
 					socket.on("data", (chunk: string) => {

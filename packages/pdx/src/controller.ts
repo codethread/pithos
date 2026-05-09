@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Deferred, Effect } from "effect";
 import { requestIpc, listenIpc } from "./ipc-socket.js";
 import type { IpcResponse } from "./ipc.js";
 import { PdxError } from "./errors.js";
@@ -112,12 +112,13 @@ export const runDaemon = (config: PdxConfig) =>
 				PDX_SYSTEM_RUN_ID,
 			])
 			.pipe(Effect.flatMap((result) => requireOk("pithos run upsert", result)));
+		const shutdown = yield* Deferred.make<void, never>();
 		const stop = Effect.gen(function* () {
 			yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon stopping" });
 			yield* pithos
 				.run(["run", "cleanup", "--run", PDX_SYSTEM_RUN_ID, "--reason", "pdx_close"])
 				.pipe(Effect.flatMap((result) => requireOk("pithos run cleanup", result)));
-			yield* Effect.sync(() => setTimeout(() => process.exit(0), 10));
+			yield* Deferred.succeed(shutdown, undefined);
 			return { ok: true, data: { stopped: true } } as const;
 		});
 		const handle = yield* listenIpc(config.socketPath, (request) => {
@@ -127,5 +128,5 @@ export const runDaemon = (config: PdxConfig) =>
 			return stop;
 		});
 		yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon ready" });
-		return handle;
+		return { ...handle, shutdown: Deferred.await(shutdown) };
 	});

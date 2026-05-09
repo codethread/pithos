@@ -69,8 +69,9 @@ try {
 		if (command === "open") return yield* openPdx(config).pipe(Effect.provide(provided));
 		if (command === "close") return yield* closePdx(config).pipe(Effect.provide(provided));
 		if (command === "daemon") {
-			yield* runDaemon(config).pipe(Effect.provide(provided));
-			yield* Effect.never;
+			const handle = yield* runDaemon(config).pipe(Effect.provide(provided));
+			yield* handle.shutdown;
+			yield* handle.close;
 			return;
 		}
 		yield* Effect.fail(

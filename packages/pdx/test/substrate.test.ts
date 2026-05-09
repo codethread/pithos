@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { mkdtemp } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { parsePdxConfig } from "../src/config.js";
 import { parseIpcRequest } from "../src/ipc.js";
+import { requestIpc } from "../src/ipc-socket.js";
 import { makeSupervisorLog } from "../src/log.js";
 import {
 	Clock,
@@ -155,6 +157,44 @@ describe("pdx substrate", () => {
 			PDX_SYSTEM_RUN_ID,
 		]);
 		expect(pithosCalls.some((args) => args.includes("pandora"))).toBe(false);
+	});
+
+	it("daemon stop replies after cleanup and closes the IPC socket explicitly", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const pithosCalls: string[][] = [];
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			mkdir: () => Effect.void,
+		});
+		const pithos = PithosClient.of({
+			run: (args) =>
+				Effect.sync(() => {
+					pithosCalls.push([...args]);
+					return { exitCode: 0, stdout: "{}", stderr: "" };
+				}),
+		});
+		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const config = parsePdxConfig(configInput(home));
+		const handle = await run(
+			runDaemon(config).pipe(
+				Effect.provideService(FileSystem, fs),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		const response = await run(requestIpc(config.socketPath, { kind: "stop" }));
+		await run(handle.shutdown);
+		await run(handle.close);
+		expect(response).toEqual({ ok: true, data: { stopped: true } });
+		expect(pithosCalls.at(-1)).toEqual([
+			"run",
+			"cleanup",
+			"--run",
+			PDX_SYSTEM_RUN_ID,
+			"--reason",
+			"pdx_close",
+		]);
+		expect(existsSync(config.socketPath)).toBe(false);
 	});
 
 	it("starts registry empty and supports typed operations", async () => {

@@ -5,7 +5,7 @@ import {
 	BUILTIN_SPAWNABLE_AGENT_KINDS,
 	type Capability,
 	type SpawnableAgentKind,
-} from "@pithos/pithos";
+} from "@pithos/pithos/builtins";
 import { Either, ParseResult, Schema } from "effect";
 import { SpawnerError } from "./errors.js";
 import { agentsPath, templatesDir } from "./paths.js";

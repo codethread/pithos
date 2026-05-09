@@ -7,7 +7,8 @@
 	},
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./builtins": "./src/builtins.ts"
 	},
 	"scripts": {
 		"clean": "rimraf dist bin/pithos-next bin/pithos-next-dev *.tsbuildinfo",

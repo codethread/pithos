@@ -1,0 +1,216 @@
+# Central dependency map for implementation slices.
+# Individual task files describe scope and acceptance only; blockers live here.
+tasks:
+  - id: task-001
+    title: "Slice 1: Pithos foundation epic"
+    file: ./task-001.md
+    status: split_required
+    blocked_by:
+      - task-001a
+      - task-001b
+      - task-001c
+      - task-001d
+      - task-001e
+  - id: task-001a
+    title: "Slice 1a: Pithos core architecture, config, schema, seeds"
+    file: ./task-001a.md
+    status: complete
+    blocked_by: []
+  - id: task-001b
+    title: "Slice 1b: Nested CLI shell + scope/run foundations"
+    file: ./task-001b.md
+    status: complete
+    blocked_by:
+      - task-001a
+  - id: task-001c
+    title: "Slice 1c: Task write lifecycle, authorization, fencing"
+    file: ./task-001c.md
+    status: complete
+    blocked_by:
+      - task-001b
+  - id: task-001d
+    title: "Slice 1d: Graph, supersession, read surfaces"
+    file: ./task-001d.md
+    status: complete
+    blocked_by:
+      - task-001c
+  - id: task-001e
+    title: "Slice 1e: Foundation contract hardening + acceptance"
+    file: ./task-001e.md
+    status: complete
+    blocked_by:
+      - task-001a
+      - task-001b
+      - task-001c
+      - task-001d
+  - id: task-002
+    title: "Slice 2: Run lifecycle transitions: cleanup, interrupt, timeout"
+    file: ./task-002.md
+    status: complete
+    blocked_by:
+      - task-001e
+  - id: task-003
+    title: "Slice 3: Pithos backbone DEMO GATE 1"
+    file: ./task-003.md
+    status: complete
+    blocked_by:
+      - task-001e
+      - task-002
+  - id: task-004
+    title: "Slice 4: Spawner in-place refactor: launcher-only library + preview CLI"
+    file: ./task-004.md
+    status: complete
+    blocked_by:
+      - task-001e
+      - task-005a
+  - id: task-005
+    title: "Slice 5: pdx skeleton epic"
+    file: ./task-005.md
+    status: split_required
+    blocked_by:
+      - task-005a
+      - task-005b
+      - task-005c
+  - id: task-005a
+    title: "Slice 5a: pdx package + control-plane substrate"
+    file: ./task-005a.md
+    status: complete
+    blocked_by:
+      - task-001e
+  - id: task-005b
+    title: "Slice 5b: pdx open/close + pdx system run"
+    file: ./task-005b.md
+    status: complete
+    blocked_by:
+      - task-005a
+      - task-002
+  - id: task-005c
+    title: "Slice 5c: pdx status + logs show"
+    file: ./task-005c.md
+    status: complete
+    blocked_by:
+      - task-005b
+  - id: task-006
+    title: "Slice 6: Pandora singleton + death detection + DEMO GATE 2"
+    file: ./task-006.md
+    status: complete
+    blocked_by:
+      - task-002
+      - task-004
+      - task-005c
+  - id: task-006a
+    title: "Slice 6a: Refactor pdx to reuse `@pithos/pithos` directly"
+    file: ./task-006a.md
+    status: pending
+    blocked_by:
+      - task-006
+  - id: task-007
+    title: "Slice 7: pdx kill flow"
+    file: ./task-007.md
+    status: pending
+    blocked_by:
+      - task-002
+      - task-006a
+  - id: task-008
+    title: "Slice 8: Agent spawning epic"
+    file: ./task-008.md
+    status: split_required
+    blocked_by:
+      - task-008a
+      - task-008b
+      - task-008c
+      - task-008d
+  - id: task-008a
+    title: "Slice 8a: Spawn policy for Toil/Greed/War"
+    file: ./task-008a.md
+    status: pending
+    blocked_by:
+      - task-006a
+  - id: task-008b
+    title: "Slice 8b: Registry cap accounting"
+    file: ./task-008b.md
+    status: pending
+    blocked_by:
+      - task-008a
+  - id: task-008c
+    title: "Slice 8c: AFK pidfile lifecycle"
+    file: ./task-008c.md
+    status: pending
+    blocked_by:
+      - task-008a
+  - id: task-008d
+    title: "Slice 8d: No-claim timeout"
+    file: ./task-008d.md
+    status: pending
+    blocked_by:
+      - task-008b
+      - task-008c
+  - id: task-009
+    title: "Slice 9: Wakeup transport + Pandora marker recognition"
+    file: ./task-009.md
+    status: pending
+    blocked_by:
+      - task-006a
+  - id: task-010
+    title: "Slice 10: Orphan discovery on `pdx open`"
+    file: ./task-010.md
+    status: pending
+    blocked_by:
+      - task-002
+      - task-005b
+      - task-006a
+  - id: task-011
+    title: "Slice 11: Cutover: retire `packages/cli/`, point `pithos` bin at new package"
+    file: ./task-011.md
+    status: pending
+    blocked_by:
+      - task-001e
+      - task-002
+      - task-003
+      - task-004
+      - task-005c
+      - task-006
+      - task-007
+      - task-008d
+      - task-009
+      - task-010
+  - id: task-012
+    title: "Slice 12: Test tightening for v1 epic"
+    file: ./task-012.md
+    status: split_required
+    blocked_by:
+      - task-012a
+      - task-012b
+      - task-012c
+      - task-012d
+      - task-012e
+  - id: task-012a
+    title: "Slice 12a: MVP integration tests"
+    file: ./task-012a.md
+    status: pending
+    blocked_by:
+      - task-011
+  - id: task-012b
+    title: "Slice 12b: Stable surface snapshots"
+    file: ./task-012b.md
+    status: pending
+    blocked_by:
+      - task-011
+  - id: task-012c
+    title: "Slice 12c: Event payload schema coverage"
+    file: ./task-012c.md
+    status: pending
+    blocked_by:
+      - task-011
+  - id: task-012d
+    title: "Slice 12d: Race and lifecycle edge tests"
+    file: ./task-012d.md
+    status: pending
+    blocked_by:
+      - task-011
+  - id: task-012e
+    title: "Slice 12e: Error wording + graph performance smoke"
+    file: ./task-012e.md
+    status: pending
+    blocked_by:
+      - task-011

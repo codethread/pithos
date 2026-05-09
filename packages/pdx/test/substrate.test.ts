@@ -51,7 +51,12 @@ const parseConfig = (home: string, envHome = "/tmp/user-home") =>
 
 const makePithos = (
 	calls: string[] = [],
-	ready: readonly { readonly scope_id: string; readonly capability: string }[] = [],
+	ready: readonly {
+		readonly scope_id: string;
+		readonly capability: string;
+		readonly scope_kind?: "global" | "repo" | "worktree";
+		readonly canonical_path?: string | null;
+	}[] = [],
 	overrides: Partial<PithosClientService> = {},
 ) => {
 	const base: PithosClientService = {
@@ -108,7 +113,14 @@ const makePithos = (
 		taskHeartbeat: (input) => Effect.sync(() => calls.push(`taskHeartbeat:${input.runId}`)),
 		taskEnqueue: (input) =>
 			Effect.sync(() => calls.push(`taskEnqueue:${input.capability}:${input.title}`)),
-		briefing: () => Effect.succeed(ready),
+		briefing: () =>
+			Effect.succeed(
+				ready.map((task) => ({
+					scope_kind: task.scope_kind ?? "global",
+					canonical_path: task.canonical_path ?? null,
+					...task,
+				})),
+			),
 	};
 	return PithosClient.of({ ...base, ...overrides });
 };
@@ -927,6 +939,216 @@ describe("pdx substrate", () => {
 		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
 		expect(logs).toContain("pdx.kill.retry");
 		expect(logs).toContain("pdx.kill");
+	});
+
+	it("reconcile spawns one non-Pandora agent in seeded order without pre-claiming", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_pandora",
+				agent: "pandora",
+				scopeId: "global",
+				mode: "hitl",
+				state: "live",
+				logicalName: PANDORA_TARGET,
+				tmuxTarget: PANDORA_TARGET,
+			}),
+		);
+		const pithosCalls: string[] = [];
+		const pithos = makePithos(pithosCalls, [
+			{ scope_id: "scope_war", capability: "execute", scope_kind: "repo", canonical_path: "/repo" },
+			{
+				scope_id: "scope_greed",
+				capability: "design",
+				scope_kind: "worktree",
+				canonical_path: "/wt",
+			},
+			{ scope_id: "global", capability: "triage", scope_kind: "global", canonical_path: null },
+		]);
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_toil"),
+			nextSessionId: Effect.succeed("session_toil"),
+		});
+		const launches: unknown[] = [];
+		const spawner = Spawner.of({
+			launchAgent: (input) =>
+				Effect.sync(() => {
+					launches.push(input);
+					return { ...input, logicalName: "pdx--toil", afk: { pid: 123, processStartTime: "now" } };
+				}),
+		});
+		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		await run(
+			reconcileTick(await parseConfig(home)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		expect(pithosCalls).toContain("runUpsert:toil:run_toil");
+		expect(
+			pithosCalls.some(
+				(call) => call.startsWith("runInterrupt") || call.startsWith("taskHeartbeat:run_toil"),
+			),
+		).toBe(false);
+		expect(launches).toEqual([
+			expect.objectContaining({
+				agent: "toil",
+				mode: "afk",
+				runId: "run_toil",
+				sessionId: "session_toil",
+				scopeId: "global",
+				cwd: home,
+			}),
+		]);
+		expect(await run(registry.list)).toContainEqual(
+			expect.objectContaining({ runId: "run_toil", agent: "toil", state: "live", pid: 123 }),
+		);
+	});
+
+	it("derives non-Pandora cwd from repo and worktree scopes", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_pandora",
+				agent: "pandora",
+				scopeId: "global",
+				mode: "hitl",
+				state: "live",
+				logicalName: PANDORA_TARGET,
+				tmuxTarget: PANDORA_TARGET,
+			}),
+		);
+		const pithos = makePithos(
+			[],
+			[
+				{
+					scope_id: "scope_greed",
+					capability: "design",
+					scope_kind: "worktree",
+					canonical_path: "/wt",
+				},
+			],
+		);
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_greed"),
+			nextSessionId: Effect.succeed("session_greed"),
+		});
+		const launches: unknown[] = [];
+		const spawner = Spawner.of({
+			launchAgent: (input) =>
+				Effect.sync(() => {
+					launches.push(input);
+					return {
+						...input,
+						logicalName: "pdx--greed",
+						hitl: { tmuxTarget: "pdx--greed", panePid: 1 },
+					};
+				}),
+		});
+		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		await run(
+			reconcileTick(await parseConfig(home)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		expect(launches).toEqual([
+			expect.objectContaining({ agent: "greed", cwd: "/wt", scopeId: "scope_greed" }),
+		]);
+	});
+
+	it("spawns War for repo execute work with repo cwd", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_pandora",
+				agent: "pandora",
+				scopeId: "global",
+				mode: "hitl",
+				state: "live",
+				logicalName: PANDORA_TARGET,
+				tmuxTarget: PANDORA_TARGET,
+			}),
+		);
+		const pithos = makePithos(
+			[],
+			[
+				{
+					scope_id: "scope_repo",
+					capability: "execute",
+					scope_kind: "repo",
+					canonical_path: "/repo",
+				},
+			],
+		);
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_war"),
+			nextSessionId: Effect.succeed("session_war"),
+		});
+		const launches: unknown[] = [];
+		const spawner = Spawner.of({
+			launchAgent: (input) =>
+				Effect.sync(() => {
+					launches.push(input);
+					return { ...input, logicalName: "pdx--war", afk: { pid: 456, processStartTime: "now" } };
+				}),
+		});
+		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		await run(
+			reconcileTick(await parseConfig(home)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		expect(launches).toEqual([
+			expect.objectContaining({
+				agent: "war",
+				mode: "afk",
+				runId: "run_war",
+				sessionId: "session_war",
+				scopeId: "scope_repo",
+				cwd: "/repo",
+			}),
+		]);
 	});
 
 	it("starts registry empty and supports typed operations", async () => {

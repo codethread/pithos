@@ -339,6 +339,109 @@ const entryAlive = (entry: RegistryEntry) =>
 		return yield* isAfkAlive(pid);
 	});
 
+const agentPolicy = {
+	toil: { capability: "triage", mode: "afk" },
+	greed: { capability: "design", mode: "hitl" },
+	war: { capability: "execute", mode: "afk" },
+} as const;
+
+const spawnReadyAgent = (config: PdxConfig) =>
+	Effect.gen(function* () {
+		const registry = yield* Registry;
+		const pithos = yield* PithosClient;
+		const ids = yield* Ids;
+		const spawner = yield* Spawner;
+		const log = yield* SupervisorLog;
+		const entries = yield* registry.list;
+		const ready = yield* pithos.briefing();
+		for (const agent of ["toil", "greed", "war"] as const) {
+			const policy = agentPolicy[agent];
+			const task = ready.find(
+				(candidate) =>
+					candidate.capability === policy.capability &&
+					!entries.some((entry) => entry.agent === agent && entry.scopeId === candidate.scope_id),
+			);
+			if (task === undefined) continue;
+			const cwd = task.scope_kind === "global" ? config.home : task.canonical_path;
+			if (cwd === null) {
+				return yield* Effect.fail(
+					new PdxError({
+						code: "VALIDATION_ERROR",
+						message: `${task.scope_id} missing canonical_path for ${task.scope_kind} scope`,
+					}),
+				);
+			}
+			const runId = yield* ids.nextRunId;
+			const sessionId = yield* ids.nextSessionId;
+			yield* pithos.runUpsert({
+				agent,
+				mode: policy.mode,
+				scope: task.scope_id,
+				cwd,
+				sessionId,
+				runId,
+			});
+			yield* registry.upsert({
+				runId,
+				agent,
+				mode: policy.mode,
+				scopeId: task.scope_id,
+				state: "launching",
+				logicalName: `pdx--${agent}`,
+			});
+			const launched = yield* spawner
+				.launchAgent({
+					agent,
+					mode: policy.mode,
+					runId,
+					sessionId,
+					scopeId: task.scope_id,
+					cwd,
+				})
+				.pipe(
+					Effect.catchAll((error) =>
+						pithos
+							.runCleanup({ runId, reason: "launch_failed" })
+							.pipe(Effect.zipRight(registry.remove(runId)), Effect.zipRight(Effect.fail(error))),
+					),
+				);
+			const liveEntry =
+				policy.mode === "hitl"
+					? launched.hitl === undefined
+						? undefined
+						: { tmuxTarget: launched.hitl.tmuxTarget }
+					: launched.afk === undefined
+						? undefined
+						: { pid: launched.afk.pid };
+			if (liveEntry === undefined) {
+				yield* pithos.runCleanup({ runId, reason: "launch_failed" });
+				yield* registry.remove(runId);
+				yield* Effect.fail(
+					new PdxError({
+						code: "PROCESS_ERROR",
+						message: `${agent} launch missing ${policy.mode} metadata`,
+					}),
+				);
+			}
+			yield* registry.upsert({
+				runId,
+				agent,
+				mode: policy.mode,
+				scopeId: task.scope_id,
+				state: "live",
+				logicalName: launched.logicalName,
+				...liveEntry,
+			});
+			yield* log.write({
+				level: "info",
+				span: "pdx.reconcile",
+				msg: `spawned ${agent}`,
+				data: { run_id: runId, scope_id: task.scope_id },
+			});
+			return;
+		}
+	});
+
 export const reconcileTick = (config: PdxConfig) =>
 	Effect.gen(function* () {
 		const registry = yield* Registry;
@@ -437,6 +540,7 @@ export const reconcileTick = (config: PdxConfig) =>
 				data: { run_id: runId },
 			});
 		}
+		yield* spawnReadyAgent(config);
 	});
 
 const escalationBody = (input: {

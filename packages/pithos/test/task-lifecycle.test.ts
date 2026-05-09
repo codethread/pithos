@@ -415,7 +415,13 @@ describe("task lifecycle", () => {
 		});
 		expect(engine.briefing({ agent: "war" })).toMatchObject({
 			ok: true,
-			ready: [expect.objectContaining({ id: blocker })],
+			ready: [
+				expect.objectContaining({
+					id: blocker,
+					scope_kind: "repo",
+					canonical_path: "/tmp/pithos-repo",
+				}),
+			],
 			blocked: [expect.objectContaining({ id: downstream, unresolved_dependency_ids: [blocker] })],
 		});
 		const replacement = engine.supersede({

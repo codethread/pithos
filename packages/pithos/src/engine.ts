@@ -19,7 +19,6 @@ import {
 	ScopeRowSchema,
 	TaskRowSchema,
 	type RunRow,
-	type TaskRow,
 } from "./rows.js";
 import type { Services } from "./services.js";
 
@@ -157,6 +156,8 @@ export type Json =
 export interface TaskSummaryOutput {
 	readonly id: string;
 	readonly scope_id: string;
+	readonly scope_kind: ScopeKind;
+	readonly canonical_path: string | null;
 	readonly capability: Capability;
 	readonly status: TaskStatus;
 	readonly title: string;
@@ -478,6 +479,15 @@ const authorized = (
 
 export type TaskSummary = TaskSummaryOutput;
 
+const TaskSummaryRowSchema = Schema.extend(
+	TaskRowSchema,
+	Schema.Struct({
+		scope_kind: Schema.Literal("global", "repo", "worktree"),
+		canonical_path: Schema.NullOr(Schema.String),
+	}),
+);
+type TaskSummaryRow = typeof TaskSummaryRowSchema.Type;
+
 const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
 	(
 		db
@@ -493,13 +503,16 @@ const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
 	).map((r) => r.id);
 
 const taskSummarySelect = sql`
-SELECT id, scope_id, capability, title, body, status, fencing_token, attempts, max_attempts, created_at
-FROM tasks
+SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at
+FROM tasks t
+JOIN scopes s ON s.id = t.scope_id
 `;
 
-const toTaskSummary = (row: TaskRow): TaskSummary => ({
+const toTaskSummary = (row: TaskSummaryRow): TaskSummary => ({
 	id: row.id,
 	scope_id: row.scope_id,
+	scope_kind: row.scope_kind,
+	canonical_path: row.canonical_path,
 	capability: row.capability,
 	status: row.status,
 	title: row.title,
@@ -507,10 +520,10 @@ const toTaskSummary = (row: TaskRow): TaskSummary => ({
 });
 
 const parseTaskSummary = (value: unknown, message: string): TaskSummary =>
-	toTaskSummary(decodeRow(TaskRowSchema, value, message));
+	toTaskSummary(decodeRow(TaskSummaryRowSchema, value, message));
 
 const parseTaskDetail = (value: unknown, message: string): TaskDetailOutput => {
-	const row = decodeRow(TaskRowSchema, value, message);
+	const row = decodeRow(TaskSummaryRowSchema, value, message);
 	return {
 		...toTaskSummary(row),
 		body: row.body,
@@ -533,7 +546,7 @@ const parseArtifact = (value: unknown): ArtifactOutput =>
 
 const taskSummary = (db: Db, taskId: string): TaskSummary =>
 	parseTaskSummary(
-		db.prepare(`${taskSummarySelect} WHERE id = ?`).get(taskId),
+		db.prepare(`${taskSummarySelect} WHERE t.id = ?`).get(taskId),
 		`task not found: ${taskId}`,
 	);
 
@@ -675,6 +688,8 @@ const graphForIds = (
 		.map((task) => ({
 			id: task.id,
 			scope_id: task.scope_id,
+			scope_kind: task.scope_kind,
+			canonical_path: task.canonical_path,
 			capability: task.capability,
 			status: task.status,
 			title: task.title,
@@ -826,7 +841,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				}
 				const task = decodeRow(
 					TaskRowSchema,
-					db.prepare(`${taskSummarySelect} WHERE id=?`).get(run.task_id),
+					db.prepare(`${taskSummarySelect} WHERE t.id=?`).get(run.task_id),
 					`task not found: ${run.task_id}`,
 				);
 				if (terminalTaskStatuses.includes(task.status as (typeof terminalTaskStatuses)[number])) {
@@ -943,7 +958,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					}
 					const task = decodeRow(
 						TaskRowSchema,
-						db.prepare(`${taskSummarySelect} WHERE id=?`).get(run.task_id),
+						db.prepare(`${taskSummarySelect} WHERE t.id=?`).get(run.task_id),
 						`task not found: ${run.task_id}`,
 					);
 					if (activeTaskStatuses.includes(task.status as (typeof activeTaskStatuses)[number])) {
@@ -1330,13 +1345,13 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const task = taskSummary(db, taskId);
 			const dependencies = db
 				.prepare(
-					`${taskSummarySelect} WHERE id IN (SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?) ORDER BY created_at ASC, id ASC`,
+					`${taskSummarySelect} WHERE t.id IN (SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?) ORDER BY t.created_at ASC, t.id ASC`,
 				)
 				.all(taskId)
 				.map((row) => parseTaskDetail(row, "malformed dependency task row"));
 			const dependents = db
 				.prepare(
-					`${taskSummarySelect} WHERE id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id=?) ORDER BY created_at ASC, id ASC`,
+					`${taskSummarySelect} WHERE t.id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id=?) ORDER BY t.created_at ASC, t.id ASC`,
 				)
 				.all(taskId)
 				.map((row) => parseTaskDetail(row, "malformed dependent task row"));
@@ -1418,7 +1433,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			if (agent !== undefined && caps?.length === 0)
 				fail("VALIDATION_ERROR", `unknown or unclaiming agent: ${agent}`);
 			const queued = db
-				.prepare(`${taskSummarySelect} WHERE status='queued' ORDER BY created_at ASC, id ASC`)
+				.prepare(`${taskSummarySelect} WHERE t.status='queued' ORDER BY t.created_at ASC, t.id ASC`)
 				.all()
 				.map((row) => parseTaskSummary(row, "malformed queued task row"));
 			const visible =

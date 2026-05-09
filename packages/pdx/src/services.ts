@@ -58,6 +58,8 @@ export interface PithosInterruptResult {
 
 export interface PithosReadyTask {
 	readonly scope_id: string;
+	readonly scope_kind: "global" | "repo" | "worktree";
+	readonly canonical_path: string | null;
 	readonly capability: string;
 }
 

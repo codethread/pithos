@@ -123,7 +123,7 @@ tasks:
   - id: task-008a
     title: "Slice 8a: Spawn policy for Toil/Greed/War"
     file: ./task-008a.md
-    status: pending
+    status: complete
     blocked_by:
       - task-006a
   - id: task-008b

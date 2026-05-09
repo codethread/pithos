@@ -85,6 +85,12 @@ type CommandInput =
 	  }
 	| { readonly command: "task.inspect"; readonly taskId: string }
 	| {
+			readonly command: "task.cancel";
+			readonly taskId: string;
+			readonly runId: string | undefined;
+			readonly reason: string;
+	  }
+	| {
 			readonly command: "task.supersede";
 			readonly taskId: string;
 			readonly runId: string | undefined;
@@ -162,6 +168,9 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 					return;
 				case "task.inspect":
 					ctx.services.output.write(json(engine.taskInspect({ taskId: input.taskId })));
+					return;
+				case "task.cancel":
+					ctx.services.output.write(json(engine.cancel(input)));
 					return;
 				case "task.supersede":
 					ctx.services.output.write(json(engine.supersede(input)));
@@ -374,6 +383,21 @@ export const makePithosCommand = (ctx: CliContext) => {
 	const taskInspect = Command.make("inspect", { taskId: Args.text({ name: "task-id" }) }, (o) =>
 		runCommand(ctx, { command: "task.inspect", taskId: o.taskId }),
 	);
+	const taskCancel = Command.make(
+		"cancel",
+		{
+			taskId: Args.text({ name: "task-id" }),
+			runId: Options.text("run").pipe(Options.optional),
+			reason: Options.text("reason"),
+		},
+		(o) =>
+			runCommand(ctx, {
+				command: "task.cancel",
+				taskId: o.taskId,
+				runId: opt(o.runId),
+				reason: o.reason,
+			}),
+	);
 	const taskSupersede = Command.make(
 		"supersede",
 		{
@@ -407,6 +431,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 			taskComplete,
 			taskFail,
 			taskInspect,
+			taskCancel,
 			taskSupersede,
 			taskArtifact,
 		]),

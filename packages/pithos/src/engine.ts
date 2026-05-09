@@ -95,6 +95,11 @@ export interface Engine {
 		readonly bodyFile: string | undefined;
 	}) => { readonly ok: true; readonly artifact: { readonly id: string } };
 	readonly taskInspect: (input: { readonly taskId: string }) => unknown;
+	readonly cancel: (input: {
+		readonly taskId: string;
+		readonly runId: string | undefined;
+		readonly reason: string;
+	}) => { readonly ok: true; readonly task: { readonly id: string; readonly status: "cancelled" } };
 	readonly graphInspect: (input: {
 		readonly taskId: string | undefined;
 		readonly scope: string | undefined;
@@ -1098,6 +1103,36 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				});
 			})();
 			return { ok: true, artifact: { id: artifactId } };
+		}),
+	cancel: ({ taskId, runId, reason }) =>
+		withDb(ctx, (db) => {
+			const actorRunId = resolveRunId(ctx, runId);
+			liveRun(db, actorRunId);
+			const nonEmptyReason = requireNonEmpty(reason, "--reason");
+			db.transaction(() => {
+				const task = taskSummary(db, taskId);
+				if (["claimed", "running"].includes(task.status)) {
+					fail(
+						"VALIDATION_ERROR",
+						`task ${taskId} is ${task.status}; use pdx kill or pithos run interrupt for held tasks`,
+					);
+				}
+				if (!["queued", "failed", "dead_letter"].includes(task.status)) {
+					fail("VALIDATION_ERROR", `task status cannot be cancelled: ${task.status}`);
+				}
+				const result = db
+					.prepare(
+						sql`UPDATE tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?`,
+					)
+					.run(taskId, task.status);
+				if (result.changes === 0) fail("STALE_TOKEN_RACE", "task changed before cancel");
+				event(ctx, db, "task.cancelled", {
+					task_id: taskId,
+					actor_run_id: actorRunId,
+					payload: { reason: nonEmptyReason },
+				});
+			})();
+			return { ok: true, task: { id: taskId, status: "cancelled" } };
 		}),
 	taskInspect: ({ taskId }) =>
 		withDb(ctx, (db) => {

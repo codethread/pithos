@@ -352,6 +352,40 @@ describe("task lifecycle", () => {
 		expect(() => engine.runTimeout({ runId: "run_war2", reason: "no claim" })).toThrow(PithosError);
 	});
 
+	it("cancels queued tasks and rejects active task cancellation", () => {
+		const { engine, repo } = setup();
+		const queued = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "cancel me",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+		}).task.id;
+		expect(engine.cancel({ taskId: queued, runId: "run_toil", reason: "not needed" })).toEqual({
+			ok: true,
+			task: { id: queued, status: "cancelled" },
+		});
+		expect(engine.taskInspect({ taskId: queued })).toMatchObject({
+			task: { id: queued, status: "cancelled" },
+		});
+
+		const held = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "do not cancel active",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+		}).task.id;
+		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		expect(() => engine.cancel({ taskId: held, runId: "run_toil", reason: "bad" })).toThrow(
+			/use pdx kill or pithos run interrupt/,
+		);
+	});
+
 	it("inspects outputs and repairs a broken queued chain with supersede", () => {
 		const { engine, repo } = setup();
 		const blocker = engine.enqueue({
@@ -433,6 +467,7 @@ describe("task lifecycle", () => {
 			kind: "depends_on",
 			from_task_id: downstream,
 			to_task_id: replacement.task.id,
+			satisfied: false,
 		});
 	});
 });

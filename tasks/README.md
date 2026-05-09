@@ -23,8 +23,8 @@ Central dependency map for implementation slices. Individual task files describe
 - [ ] [task-002 — Slice 2: Run lifecycle transitions: cleanup, interrupt, timeout](./task-002.md)
   - **Status:** complete
   - **Blocked by:** [task-001e](./task-001e.md)
-- [ ] [task-003 — Slice 3: Pithos backbone DEMO GATE 1](./task-003.md)
-  - **Status:** pending
+- [x] [task-003 — Slice 3: Pithos backbone DEMO GATE 1](./task-003.md)
+  - **Status:** complete
   - **Blocked by:** [task-001e](./task-001e.md), [task-002](./task-002.md)
 - [ ] [task-004 — Slice 4: Spawner in-place refactor: launcher-only library + preview CLI](./task-004.md)
   - **Status:** pending

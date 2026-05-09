@@ -33,7 +33,7 @@ Central dependency map for implementation slices. Individual task files describe
   - **Status:** split_required
   - **Blocked by:** [task-005a](./task-005a.md), [task-005b](./task-005b.md), [task-005c](./task-005c.md)
 - [ ] [task-005a — Slice 5a: pdx package + control-plane substrate](./task-005a.md)
-  - **Status:** pending
+  - **Status:** complete
   - **Blocked by:** [task-001e](./task-001e.md)
 - [ ] [task-005b — Slice 5b: pdx open/close + pdx system run](./task-005b.md)
   - **Status:** pending

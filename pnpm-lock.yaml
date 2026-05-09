@@ -82,6 +82,12 @@ importers:
         specifier: ^7.6.0
         version: 7.6.13
 
+  packages/pdx:
+    dependencies:
+      effect:
+        specifier: ^3.21.2
+        version: 3.21.2
+
   packages/pithos:
     dependencies:
       '@effect/cli':

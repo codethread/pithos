@@ -23,6 +23,8 @@ export interface FileSystemService {
 	readonly appendFile: (path: string, content: string) => Effect.Effect<void, PdxError>;
 	readonly readFile: (path: string) => Effect.Effect<string, PdxError>;
 	readonly mkdir: (path: string) => Effect.Effect<void, PdxError>;
+	readonly writeFileAtomic: (path: string, content: string) => Effect.Effect<void, PdxError>;
+	readonly removeFile: (path: string) => Effect.Effect<void, PdxError>;
 }
 export class FileSystem extends Context.Tag("pdx/FileSystem")<FileSystem, FileSystemService>() {}
 

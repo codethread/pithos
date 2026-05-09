@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { launchAgent } from "../../spawner/src/index.ts";
@@ -89,6 +89,20 @@ export const FileSystemLive = FileSystem.of({
 		Effect.tryPromise({
 			try: () => mkdir(path, { recursive: true }),
 			catch: (error) => fsError("mkdir", error),
+		}).pipe(Effect.asVoid),
+	writeFileAtomic: (path, content) =>
+		Effect.tryPromise({
+			try: async () => {
+				const tmpPath = `${path}.tmp`;
+				await writeFile(tmpPath, content, "utf8");
+				await rename(tmpPath, path);
+			},
+			catch: (error) => fsError("writeFileAtomic", error),
+		}).pipe(Effect.asVoid),
+	removeFile: (path) =>
+		Effect.tryPromise({
+			try: () => rm(path, { force: true }),
+			catch: (error) => fsError("removeFile", error),
 		}).pipe(Effect.asVoid),
 });
 export const ClockLive = Clock.of({ nowIso: Effect.sync(() => new Date().toISOString()) });

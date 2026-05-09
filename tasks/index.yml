@@ -135,7 +135,7 @@ tasks:
   - id: task-008c
     title: "Slice 8c: AFK pidfile lifecycle"
     file: ./task-008c.md
-    status: pending
+    status: complete
     blocked_by:
       - task-008a
   - id: task-008d

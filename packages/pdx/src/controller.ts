@@ -21,6 +21,23 @@ export const DAEMON_TARGET = "pdx--daemon";
 export const PANDORA_TARGET = "pdx--pandora";
 export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
 
+const pidfilePath = (config: PdxConfig, runId: string): string => `${config.runsDir}/${runId}.pid`;
+
+const writeAfkPidfile = (config: PdxConfig, runId: string, pid: number) =>
+	FileSystem.pipe(
+		Effect.flatMap((fs) => fs.writeFileAtomic(pidfilePath(config, runId), `${pid}\n`)),
+	);
+
+const cleanupRun = (runId: string, reason: string) =>
+	PithosClient.pipe(Effect.flatMap((pithos) => pithos.runCleanup({ runId, reason })));
+
+const cleanupAfkRun = (config: PdxConfig, runId: string, reason: string) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem;
+		yield* cleanupRun(runId, reason);
+		yield* fs.removeFile(pidfilePath(config, runId));
+	});
+
 const awaitDaemonReady = (
 	socketPath: string,
 	attemptsRemaining: number,
@@ -290,6 +307,20 @@ const confirmTmuxGone = (tmux: TmuxService, target: string) =>
 		),
 	);
 
+const confirmAfkGone = (pid: number) =>
+	isAfkAlive(pid).pipe(
+		Effect.flatMap((alive) =>
+			alive
+				? Effect.fail(
+						new PdxError({
+							code: "PROCESS_ERROR",
+							message: `${pid} still alive after kill`,
+						}),
+					)
+				: Effect.void,
+		),
+	);
+
 export const isAfkAlive = (pid: number) =>
 	Process.pipe(Effect.flatMap((processService) => processService.isAlive(pid)));
 
@@ -410,9 +441,10 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				})
 				.pipe(
 					Effect.catchAll((error) =>
-						pithos
-							.runCleanup({ runId, reason: "launch_failed" })
-							.pipe(Effect.zipRight(registry.remove(runId)), Effect.zipRight(Effect.fail(error))),
+						cleanupRun(runId, "launch_failed").pipe(
+							Effect.zipRight(registry.remove(runId)),
+							Effect.zipRight(Effect.fail(error)),
+						),
 					),
 				);
 			const liveEntry =
@@ -423,8 +455,32 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 					: launched.afk === undefined
 						? undefined
 						: { pid: launched.afk.pid };
+			const afk = launched.afk;
+			if (afk !== undefined) {
+				yield* writeAfkPidfile(config, runId, afk.pid).pipe(
+					Effect.catchAll((error) =>
+						killEntryResource(
+							{
+								runId,
+								agent,
+								mode: "afk",
+								scopeId: task.scope_id,
+								state: "launching",
+								logicalName: launched.logicalName,
+								pid: afk.pid,
+							},
+							"SIGTERM",
+						).pipe(
+							Effect.zipRight(confirmAfkGone(afk.pid)),
+							Effect.zipRight(cleanupAfkRun(config, runId, "launch_failed")),
+							Effect.zipRight(registry.remove(runId)),
+							Effect.zipRight(Effect.fail(error)),
+						),
+					),
+				);
+			}
 			if (liveEntry === undefined) {
-				yield* pithos.runCleanup({ runId, reason: "launch_failed" });
+				yield* cleanupRun(runId, "launch_failed");
 				yield* registry.remove(runId);
 				yield* Effect.fail(
 					new PdxError({
@@ -486,7 +542,11 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					yield* registry.upsert({ ...entry, killAttempts: attempts });
 				}
 			} else if (!alive) {
-				yield* pithos.runCleanup({ runId: entry.runId, reason: "natural_death" });
+				if (entry.mode === "afk") {
+					yield* cleanupAfkRun(config, entry.runId, "natural_death");
+				} else {
+					yield* cleanupRun(entry.runId, "natural_death");
+				}
 				yield* registry.remove(entry.runId);
 				yield* log.write({
 					level: "info",
@@ -521,14 +581,12 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				})
 				.pipe(
 					Effect.catchAll((error) =>
-						pithos
-							.runCleanup({ runId, reason: "launch_failed" })
-							.pipe(Effect.zipRight(Effect.fail(error))),
+						cleanupRun(runId, "launch_failed").pipe(Effect.zipRight(Effect.fail(error))),
 					),
 				);
 			const tmuxTarget = launched.hitl?.tmuxTarget;
 			if (tmuxTarget === undefined) {
-				yield* pithos.runCleanup({ runId, reason: "launch_failed" });
+				yield* cleanupRun(runId, "launch_failed");
 				yield* Effect.fail(
 					new PdxError({ code: "PROCESS_ERROR", message: "pandora launch missing tmux target" }),
 				);
@@ -710,8 +768,22 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 							),
 						);
 					yield* confirmTmuxGone(tmux, entry.tmuxTarget);
+				} else if (entry.pid !== undefined) {
+					yield* processService.kill(entry.pid, "SIGTERM");
+					const alive = yield* processService.isAlive(entry.pid);
+					if (alive) {
+						yield* Effect.fail(
+							new PdxError({
+								code: "PROCESS_ERROR",
+								message: `${entry.pid} still alive after kill`,
+							}),
+						);
+					}
 				}
 				yield* pithos.runCleanup({ runId: entry.runId, reason: "pdx_close" });
+				if (entry.mode === "afk") {
+					yield* fs.removeFile(pidfilePath(config, entry.runId));
+				}
 				yield* registry.remove(entry.runId);
 			}
 			yield* pithos.runCleanup({ runId: PDX_SYSTEM_RUN_ID, reason: "pdx_close" });

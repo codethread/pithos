@@ -7,6 +7,12 @@ export type ParsedCommand =
 	| { readonly kind: "close" }
 	| { readonly kind: "status" }
 	| {
+			readonly kind: "kill";
+			runId: string | undefined;
+			taskId: string | undefined;
+			reason: string;
+	  }
+	| {
 			readonly kind: "logs-show";
 			readonly limit: number | undefined;
 			readonly all: boolean;
@@ -107,6 +113,11 @@ const parseCommand = (
 	showHelp: boolean,
 	intervalSecondsRaw: string | undefined,
 	maxAfkRaw: string | undefined,
+	killInput: {
+		readonly runId: string | undefined;
+		readonly taskId: string | undefined;
+		readonly reason: string | undefined;
+	},
 ): Effect.Effect<ParsedCommand, PdxError> =>
 	Effect.gen(function* () {
 		const command = commandArgs[0];
@@ -163,6 +174,42 @@ const parseCommand = (
 			}
 			return { kind: "status" } as const;
 		}
+		if (command === "kill") {
+			if (
+				hasAfkTimingOption(intervalSecondsRaw, maxAfkRaw) ||
+				hasLogsFilterOption(logsShowInput) ||
+				logsShowInput.json
+			) {
+				yield* rejectCommandOptions("kill");
+			}
+			if (commandArgs.length !== 1) {
+				return yield* Effect.fail(
+					new PdxError({
+						code: "VALIDATION_ERROR",
+						message: "kill does not take positional arguments",
+					}),
+				);
+			}
+			if ((killInput.runId === undefined) === (killInput.taskId === undefined)) {
+				return yield* Effect.fail(
+					new PdxError({
+						code: "VALIDATION_ERROR",
+						message: "kill requires exactly one of --run or --task",
+					}),
+				);
+			}
+			if (killInput.reason === undefined || killInput.reason.trim() === "") {
+				return yield* Effect.fail(
+					new PdxError({ code: "VALIDATION_ERROR", message: "kill requires --reason" }),
+				);
+			}
+			return {
+				kind: "kill",
+				runId: killInput.runId,
+				taskId: killInput.taskId,
+				reason: killInput.reason,
+			} as const;
+		}
 		if (command === "logs") {
 			if (commandArgs[1] !== "show" || commandArgs.length !== 2) {
 				return yield* Effect.fail(
@@ -211,6 +258,9 @@ export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxAr
 		let all = false;
 		let json = false;
 		let showHelp = false;
+		let runId: string | undefined;
+		let taskId: string | undefined;
+		let reason: string | undefined;
 
 		for (let index = 0; index < args.length; index++) {
 			const arg = args[index]!;
@@ -249,6 +299,21 @@ export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxAr
 					all = true;
 					continue;
 				}
+				case "--run": {
+					runId = yield* parseOptionValue(args, index, "--run");
+					index += 1;
+					continue;
+				}
+				case "--task": {
+					taskId = yield* parseOptionValue(args, index, "--task");
+					index += 1;
+					continue;
+				}
+				case "--reason": {
+					reason = yield* parseOptionValue(args, index, "--reason");
+					index += 1;
+					continue;
+				}
 				case "--json": {
 					json = true;
 					continue;
@@ -271,6 +336,7 @@ export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxAr
 			showHelp,
 			intervalSecondsRaw,
 			maxAfkRaw,
+			{ runId, taskId, reason },
 		);
 		return {
 			command,

@@ -107,7 +107,7 @@ tasks:
   - id: task-007
     title: "Slice 7: pdx kill flow"
     file: ./task-007.md
-    status: pending
+    status: complete
     blocked_by:
       - task-002
       - task-006a

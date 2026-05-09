@@ -53,6 +53,10 @@ export interface Engine {
 		readonly ok: true;
 		readonly run: RunOutput;
 	};
+	readonly activeRunForTask: (input: { readonly taskId: string }) => {
+		readonly ok: true;
+		readonly run: RunOutput | null;
+	};
 	readonly runCleanup: (input: { readonly runId: string; readonly reason: string }) => {
 		readonly ok: true;
 		readonly run: RunOutput;
@@ -61,7 +65,12 @@ export interface Engine {
 		readonly runId: string | undefined;
 		readonly taskId: string | undefined;
 		readonly reason: string;
-	}) => { readonly ok: true; readonly run: RunOutput };
+		readonly expectedRunId?: string;
+	}) => {
+		readonly ok: true;
+		readonly run: RunOutput;
+		readonly interrupted_task: { readonly id: string; readonly scope_id: string } | null;
+	};
 	readonly runTimeout: (input: { readonly runId: string; readonly reason: string }) => {
 		readonly ok: true;
 		readonly run: RunOutput;
@@ -781,6 +790,18 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		}),
 	runInspect: ({ runId }) =>
 		withDb(ctx, (db) => ({ ok: true, run: toRunOutput(runById(db, runId)) })),
+	activeRunForTask: ({ taskId }) =>
+		withDb(ctx, (db) => {
+			const run = db
+				.prepare(
+					sql`SELECT * FROM runs WHERE task_id=? AND status NOT IN ('ended','failed','cancelled','timed_out')`,
+				)
+				.get(taskId);
+			return {
+				ok: true,
+				run: run === undefined ? null : toRunOutput(decodeRow(RunRowSchema, run, "active run")),
+			};
+		}),
 	runCleanup: ({ runId, reason }) =>
 		withDb(ctx, (db) => {
 			const nonEmptyReason = requireNonEmpty(reason, "--reason");
@@ -876,117 +897,132 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			})();
 			return { ok: true, run: toRunOutput(finalRun) };
 		}),
-	runInterrupt: ({ runId, taskId, reason }) =>
+	runInterrupt: ({ runId, taskId, reason, expectedRunId }) =>
 		withDb(ctx, (db) => {
 			const nonEmptyReason = requireNonEmpty(reason, "--reason");
 			if ((runId === undefined) === (taskId === undefined)) {
 				fail("VALIDATION_ERROR", "provide exactly one of --run or --task");
 			}
-			const finalRun: RunRow = db.transaction((): RunRow => {
-				const resolvedRunId =
-					runId ??
-					(db
-						.prepare(
-							sql`SELECT id FROM runs WHERE task_id=? AND status NOT IN ('ended','failed','cancelled','timed_out')`,
-						)
-						.pluck()
-						.get(taskId) as string | undefined) ??
-					fail("NOT_FOUND", `no active run holds task: ${taskId}`);
-				const run = runById(db, resolvedRunId);
-				if (taskId !== undefined && run.task_id !== taskId) {
-					fail("STALE_TOKEN_RACE", "interrupt task owner changed before update");
-				}
-				if (terminalRunStatuses.includes(run.status as (typeof terminalRunStatuses)[number])) {
-					return run;
-				}
-				if (run.task_id === null) {
-					const runUpdate = db
-						.prepare(
-							sql`UPDATE runs SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id IS NULL`,
-						)
-						.run(run.id, run.status);
-					if (runUpdate.changes === 0)
-						fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
-					event(ctx, db, "run.interrupted", {
-						run_id: run.id,
-						payload: { reason: nonEmptyReason, previous_status: run.status, status: "cancelled" },
-					});
-					return runById(db, run.id);
-				}
-				const task = decodeRow(
-					TaskRowSchema,
-					db.prepare(`${taskSummarySelect} WHERE id=?`).get(run.task_id),
-					`task not found: ${run.task_id}`,
-				);
-				if (activeTaskStatuses.includes(task.status as (typeof activeTaskStatuses)[number])) {
-					const taskUpdate = db
-						.prepare(
-							sql`
+			const result = db.transaction(
+				(): {
+					readonly run: RunRow;
+					readonly interruptedTask: { readonly id: string; readonly scope_id: string } | null;
+				} => {
+					const resolvedRunId =
+						runId ??
+						(db
+							.prepare(
+								sql`SELECT id FROM runs WHERE task_id=? AND status NOT IN ('ended','failed','cancelled','timed_out')`,
+							)
+							.pluck()
+							.get(taskId) as string | undefined) ??
+						fail("NOT_FOUND", `no active run holds task: ${taskId}`);
+					if (expectedRunId !== undefined && resolvedRunId !== expectedRunId) {
+						fail("STALE_TOKEN_RACE", "interrupt task owner changed before supervisor kill");
+					}
+					const run = runById(db, resolvedRunId);
+					if (taskId !== undefined && run.task_id !== taskId) {
+						fail("STALE_TOKEN_RACE", "interrupt task owner changed before update");
+					}
+					if (terminalRunStatuses.includes(run.status as (typeof terminalRunStatuses)[number])) {
+						return { run, interruptedTask: null };
+					}
+					if (run.task_id === null) {
+						const runUpdate = db
+							.prepare(
+								sql`UPDATE runs SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id IS NULL`,
+							)
+							.run(run.id, run.status);
+						if (runUpdate.changes === 0)
+							fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
+						event(ctx, db, "run.interrupted", {
+							run_id: run.id,
+							payload: { reason: nonEmptyReason, previous_status: run.status, status: "cancelled" },
+						});
+						return { run: runById(db, run.id), interruptedTask: null };
+					}
+					const task = decodeRow(
+						TaskRowSchema,
+						db.prepare(`${taskSummarySelect} WHERE id=?`).get(run.task_id),
+						`task not found: ${run.task_id}`,
+					);
+					if (activeTaskStatuses.includes(task.status as (typeof activeTaskStatuses)[number])) {
+						const taskUpdate = db
+							.prepare(
+								sql`
 							UPDATE tasks
 							SET status='failed', fencing_token=fencing_token + 1, updated_at=CURRENT_TIMESTAMP, completed_at=CURRENT_TIMESTAMP, result_json=?
 							WHERE id=? AND status=? AND fencing_token=?
 						`,
-						)
-						.run(
-							JSON.stringify({ reason: nonEmptyReason }),
-							task.id,
-							task.status,
-							task.fencing_token,
-						);
-					if (taskUpdate.changes === 0)
-						fail("STALE_TOKEN_RACE", "interrupt active task snapshot changed before update");
-					const runUpdate = db
-						.prepare(
-							sql`UPDATE runs SET status='failed', task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
-						)
-						.run(run.id, run.status, task.id);
-					if (runUpdate.changes === 0)
-						fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
-					event(ctx, db, "task.interrupted", {
-						task_id: task.id,
-						run_id: run.id,
-						payload: {
+							)
+							.run(
+								JSON.stringify({ reason: nonEmptyReason }),
+								task.id,
+								task.status,
+								task.fencing_token,
+							);
+						if (taskUpdate.changes === 0)
+							fail("STALE_TOKEN_RACE", "interrupt active task snapshot changed before update");
+						const runUpdate = db
+							.prepare(
+								sql`UPDATE runs SET status='failed', task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
+							)
+							.run(run.id, run.status, task.id);
+						if (runUpdate.changes === 0)
+							fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
+						event(ctx, db, "task.interrupted", {
+							task_id: task.id,
 							run_id: run.id,
-							reason: nonEmptyReason,
-							previous_status: task.status,
-							previous_fencing_token: task.fencing_token,
-							new_fencing_token: task.fencing_token + 1,
-						},
-					});
-					event(ctx, db, "run.interrupted", {
-						run_id: run.id,
-						payload: {
-							reason: nonEmptyReason,
-							previous_status: run.status,
-							status: "failed",
-							task_id: task.id,
-						},
-					});
-					return runById(db, run.id);
-				}
-				if (terminalTaskStatuses.includes(task.status as (typeof terminalTaskStatuses)[number])) {
-					const status = runTerminalStatusForTask(task.status);
-					const runUpdate = db
-						.prepare(
-							sql`UPDATE runs SET status=?, task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
-						)
-						.run(status, run.id, run.status, task.id);
-					if (runUpdate.changes === 0)
-						fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
-					event(ctx, db, "run.interrupted", {
-						run_id: run.id,
-						payload: {
-							reason: nonEmptyReason,
-							previous_status: run.status,
-							status,
-							task_id: task.id,
-						},
-					});
-					return runById(db, run.id);
-				}
-				return fail("INTERNAL_ERROR", `unsupported held task status: ${task.status}`);
-			})();
-			return { ok: true, run: toRunOutput(finalRun) };
+							payload: {
+								run_id: run.id,
+								reason: nonEmptyReason,
+								previous_status: task.status,
+								previous_fencing_token: task.fencing_token,
+								new_fencing_token: task.fencing_token + 1,
+							},
+						});
+						event(ctx, db, "run.interrupted", {
+							run_id: run.id,
+							payload: {
+								reason: nonEmptyReason,
+								previous_status: run.status,
+								status: "failed",
+								task_id: task.id,
+							},
+						});
+						return {
+							run: runById(db, run.id),
+							interruptedTask: { id: task.id, scope_id: task.scope_id },
+						};
+					}
+					if (terminalTaskStatuses.includes(task.status as (typeof terminalTaskStatuses)[number])) {
+						const status = runTerminalStatusForTask(task.status);
+						const runUpdate = db
+							.prepare(
+								sql`UPDATE runs SET status=?, task_id=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND task_id=?`,
+							)
+							.run(status, run.id, run.status, task.id);
+						if (runUpdate.changes === 0)
+							fail("STALE_TOKEN_RACE", "interrupt run snapshot changed before update");
+						event(ctx, db, "run.interrupted", {
+							run_id: run.id,
+							payload: {
+								reason: nonEmptyReason,
+								previous_status: run.status,
+								status,
+								task_id: task.id,
+							},
+						});
+						return { run: runById(db, run.id), interruptedTask: null };
+					}
+					return fail("INTERNAL_ERROR", `unsupported held task status: ${task.status}`);
+				},
+			)();
+			return {
+				ok: true,
+				run: toRunOutput(result.run),
+				interrupted_task: result.interruptedTask,
+			};
 		}),
 	runTimeout: ({ runId, reason }) =>
 		withDb(ctx, (db) => {

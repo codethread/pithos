@@ -5,6 +5,12 @@ export const IpcRequestSchema = Schema.Union(
 	Schema.Struct({ kind: Schema.Literal("ping") }),
 	Schema.Struct({ kind: Schema.Literal("status") }),
 	Schema.Struct({ kind: Schema.Literal("stop") }),
+	Schema.Struct({
+		kind: Schema.Literal("kill"),
+		run: Schema.optional(Schema.String),
+		task: Schema.optional(Schema.String),
+		reason: Schema.String,
+	}),
 );
 export type IpcRequest = Schema.Schema.Type<typeof IpcRequestSchema>;
 

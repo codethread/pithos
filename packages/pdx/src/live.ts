@@ -61,6 +61,15 @@ export const ProcessLive = Process.of({
 				return false;
 			}
 		}),
+	kill: (pid, signal) =>
+		Effect.try({
+			try: () => void process.kill(pid, signal),
+			catch: (error) =>
+				new PdxError({
+					code: "PROCESS_ERROR",
+					message: `kill ${pid} ${signal} failed: ${String(error)}`,
+				}),
+		}),
 });
 const fsError = (operation: string, error: unknown) =>
 	new PdxError({ code: "FS_ERROR", message: `${operation} failed: ${String(error)}` });
@@ -124,17 +133,23 @@ const pithosClient = (dbPath: string): PithosClientService => {
 			),
 		runCleanup: (input) => run("pithos run cleanup", () => void engine.runCleanup(input)),
 		runInterrupt: (input) =>
-			run(
-				"pithos run interrupt",
-				() =>
-					void engine.runInterrupt({
-						runId: input.runId,
-						taskId: input.taskId,
-						reason: input.reason,
-					}),
-			),
+			run("pithos run interrupt", () => {
+				const interruptInput =
+					input.expectedRunId === undefined
+						? { runId: input.runId, taskId: input.taskId, reason: input.reason }
+						: {
+								runId: input.runId,
+								taskId: input.taskId,
+								reason: input.reason,
+								expectedRunId: input.expectedRunId,
+							};
+				const result = engine.runInterrupt(interruptInput);
+				return { run: result.run, interruptedTask: result.interrupted_task };
+			}),
 		runTimeout: (input) => run("pithos run timeout", () => void engine.runTimeout(input)),
 		runInspect: (input) => run("pithos run inspect", () => engine.runInspect(input).run),
+		activeRunForTask: (input) =>
+			run("pithos active run for task", () => engine.activeRunForTask(input).run),
 		taskHeartbeat: (input) =>
 			run(
 				"pithos task heartbeat",

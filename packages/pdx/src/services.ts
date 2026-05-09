@@ -15,6 +15,7 @@ export interface ProcessService {
 		options?: { readonly cwd?: string; readonly env?: Record<string, string> },
 	) => Effect.Effect<ProcessResult, PdxError>;
 	readonly isAlive: (pid: number) => Effect.Effect<boolean, PdxError>;
+	readonly kill: (pid: number, signal: "SIGTERM" | "SIGKILL") => Effect.Effect<void, PdxError>;
 }
 export class Process extends Context.Tag("pdx/Process")<Process, ProcessService>() {}
 
@@ -50,6 +51,11 @@ export interface TmuxService {
 }
 export class Tmux extends Context.Tag("pdx/Tmux")<Tmux, TmuxService>() {}
 
+export interface PithosInterruptResult {
+	readonly run: RunOutput;
+	readonly interruptedTask: { readonly id: string; readonly scope_id: string } | null;
+}
+
 export interface PithosReadyTask {
 	readonly scope_id: string;
 	readonly capability: string;
@@ -77,12 +83,16 @@ export interface PithosClientService {
 		readonly runId?: string;
 		readonly taskId?: string;
 		readonly reason: string;
-	}) => Effect.Effect<void, PdxError>;
+		readonly expectedRunId?: string;
+	}) => Effect.Effect<PithosInterruptResult, PdxError>;
 	readonly runTimeout: (input: {
 		readonly runId: string;
 		readonly reason: string;
 	}) => Effect.Effect<void, PdxError>;
 	readonly runInspect: (input: { readonly runId: string }) => Effect.Effect<RunOutput, PdxError>;
+	readonly activeRunForTask: (input: {
+		readonly taskId: string;
+	}) => Effect.Effect<RunOutput | null, PdxError>;
 	readonly taskHeartbeat: (input: { readonly runId: string }) => Effect.Effect<void, PdxError>;
 	readonly taskEnqueue: (input: {
 		readonly scope: string;
@@ -131,6 +141,7 @@ export interface RegistryEntry {
 	readonly mode: "afk" | "hitl";
 	readonly state: "launching" | "live" | "terminating";
 	readonly logicalName: string;
+	readonly killAttempts?: number;
 	readonly pid?: number;
 	readonly tmuxTarget?: string;
 }

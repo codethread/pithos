@@ -21,6 +21,7 @@ import {
 	Spawner,
 	SupervisorLog,
 	Tmux,
+	type PithosClientService,
 } from "../src/services.js";
 import { makeTmux } from "../src/tmux.js";
 import {
@@ -29,6 +30,7 @@ import {
 	logsShowPdx,
 	openPdx,
 	PDX_SYSTEM_RUN_ID,
+	handleKillRequest,
 	isAfkAlive,
 	reconcileTick,
 	runDaemon,
@@ -50,8 +52,9 @@ const parseConfig = (home: string, envHome = "/tmp/user-home") =>
 const makePithos = (
 	calls: string[] = [],
 	ready: readonly { readonly scope_id: string; readonly capability: string }[] = [],
-) =>
-	PithosClient.of({
+	overrides: Partial<PithosClientService> = {},
+) => {
+	const base: PithosClientService = {
 		init: () => Effect.sync(() => calls.push("init")),
 		scopeUpsert: (input) => Effect.sync(() => calls.push(`scopeUpsert:${input.kind}`)),
 		runUpsert: (input) =>
@@ -59,7 +62,23 @@ const makePithos = (
 		runCleanup: (input) =>
 			Effect.sync(() => calls.push(`runCleanup:${input.runId}:${input.reason}`)),
 		runInterrupt: (input) =>
-			Effect.sync(() => calls.push(`runInterrupt:${input.runId ?? input.taskId}:${input.reason}`)),
+			Effect.sync(() => {
+				calls.push(`runInterrupt:${input.runId ?? input.taskId}:${input.reason}`);
+				return {
+					run: {
+						id: input.runId ?? "run_for_task",
+						agent: "greed",
+						mode: "afk",
+						scope_id: "scope_repo",
+						status: "failed",
+						task_id: null,
+						session_id: "session_test",
+						created_at: "2026-05-09T00:00:00.000Z",
+						updated_at: "2026-05-09T00:00:00.000Z",
+					},
+					interruptedTask: { id: input.taskId ?? "task_held", scope_id: "scope_repo" },
+				};
+			}),
 		runTimeout: (input) =>
 			Effect.sync(() => calls.push(`runTimeout:${input.runId}:${input.reason}`)),
 		runInspect: (input) =>
@@ -74,11 +93,25 @@ const makePithos = (
 				created_at: "2026-05-09T00:00:00.000Z",
 				updated_at: "2026-05-09T00:00:00.000Z",
 			}),
+		activeRunForTask: () =>
+			Effect.succeed({
+				id: "run_for_task",
+				agent: "greed",
+				mode: "afk",
+				scope_id: "scope_repo",
+				status: "running",
+				task_id: "task_held",
+				session_id: "session_test",
+				created_at: "2026-05-09T00:00:00.000Z",
+				updated_at: "2026-05-09T00:00:00.000Z",
+			}),
 		taskHeartbeat: (input) => Effect.sync(() => calls.push(`taskHeartbeat:${input.runId}`)),
 		taskEnqueue: (input) =>
 			Effect.sync(() => calls.push(`taskEnqueue:${input.capability}:${input.title}`)),
 		briefing: () => Effect.succeed(ready),
-	});
+	};
+	return PithosClient.of({ ...base, ...overrides });
+};
 
 describe("pdx substrate", () => {
 	it("derives config paths from home", async () => {
@@ -164,6 +197,7 @@ describe("pdx substrate", () => {
 					return { exitCode: 0, stdout: "", stderr: "" };
 				}),
 			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
 		});
 		const tmux = await run(makeTmux.pipe(Effect.provideService(Process, process)));
 		await run(tmux.sendLiteralLine("pdx--pandora", "hello; rm -rf /"));
@@ -320,6 +354,11 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
+		});
 		const config = await parseConfig(home);
 		const handle = await run(
 			runDaemon(config, 4, 5).pipe(
@@ -330,6 +369,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Ids, ids),
 				Effect.provideService(Spawner, spawner),
 				Effect.provideService(Tmux, tmux),
+				Effect.provideService(Process, process),
 			),
 		);
 		await run(handle.close);
@@ -363,6 +403,11 @@ describe("pdx substrate", () => {
 				}),
 		});
 		const killed: string[] = [];
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
+		});
 		const tmux = Tmux.of({
 			hasSession: (target) => Effect.succeed(!killed.includes(target)),
 			lsSessions: () => Effect.succeed([]),
@@ -381,6 +426,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Ids, ids),
 				Effect.provideService(Spawner, spawner),
 				Effect.provideService(Tmux, tmux),
+				Effect.provideService(Process, process),
 			),
 		);
 		const response = await run(requestIpc(config.socketPath, { kind: "stop" }));
@@ -564,10 +610,12 @@ describe("pdx substrate", () => {
 		const liveProcess = Process.of({
 			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
 			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
 		});
 		const deadProcess = Process.of({
 			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
 			isAlive: () => Effect.succeed(false),
+			kill: () => Effect.void,
 		});
 		await expect(
 			run(isAfkAlive(123).pipe(Effect.provideService(Process, liveProcess))),
@@ -628,6 +676,257 @@ describe("pdx substrate", () => {
 		const entries = await run(registry.list);
 		expect(entries.map((entry) => entry.runId)).toEqual(["run_new"]);
 		expect(pithosCalls).toContain("runCleanup:run_old:natural_death");
+	});
+
+	it("daemon kill uses interrupted run details for escalation and resource kill", async () => {
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_old_owner",
+				agent: "greed",
+				scopeId: "scope_repo",
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--greed-old",
+				pid: 123,
+			}),
+		);
+		await run(
+			registry.upsert({
+				runId: "run_new_owner",
+				agent: "greed",
+				scopeId: "scope_repo",
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--greed",
+				pid: 321,
+			}),
+		);
+		const calls: string[] = [];
+		const enqueues: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
+		const pithos = makePithos(calls, [], {
+			activeRunForTask: () =>
+				Effect.succeed({
+					id: "run_old_owner",
+					agent: "greed",
+					mode: "afk",
+					scope_id: "scope_repo",
+					status: "running",
+					task_id: "task_held",
+					session_id: "session_old",
+					created_at: "2026-05-09T00:00:00.000Z",
+					updated_at: "2026-05-09T00:00:00.000Z",
+				}),
+			runInterrupt: () =>
+				Effect.succeed({
+					run: {
+						id: "run_new_owner",
+						agent: "greed",
+						mode: "afk",
+						scope_id: "scope_repo",
+						status: "failed",
+						task_id: null,
+						session_id: "session_new",
+						created_at: "2026-05-09T00:00:00.000Z",
+						updated_at: "2026-05-09T00:00:00.000Z",
+					},
+					interruptedTask: { id: "task_held", scope_id: "scope_repo" },
+				}),
+			taskEnqueue: (input) =>
+				Effect.sync(() => {
+					enqueues.push(input);
+					calls.push(`taskEnqueue:${input.capability}:${input.title}`);
+				}),
+		});
+		const kills: string[] = [];
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(true),
+			kill: (pid, signal) => Effect.sync(() => kills.push(`${pid}:${signal}`)),
+		});
+		await run(
+			handleKillRequest({ run: undefined, task: "task_held", reason: "operator stop" }).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Process, process),
+				Effect.provideService(
+					Tmux,
+					Tmux.of({
+						hasSession: () => Effect.succeed(true),
+						lsSessions: () => Effect.succeed([]),
+						newSession: () => Effect.void,
+						killSession: () => Effect.void,
+						sendLiteralLine: () => Effect.void,
+						pasteBuffer: () => Effect.void,
+					}),
+				),
+			),
+		);
+		expect(kills).toEqual(["321:SIGTERM"]);
+		expect(calls).toContain("taskEnqueue:escalate:Investigate interrupted task task_held");
+		expect(enqueues[0]).toMatchObject({
+			scope: "global",
+			capability: "escalate",
+			runId: PDX_SYSTEM_RUN_ID,
+		});
+		expect(enqueues[0]?.body).toContain("Run: run_new_owner");
+		expect(enqueues[0]?.body).toContain("Task: task_held");
+		expect(enqueues[0]?.body).toContain("Scope: scope_repo");
+		expect(enqueues[0]?.body).toContain("Reason: operator stop");
+		expect(await run(registry.list)).toContainEqual(
+			expect.objectContaining({ runId: "run_new_owner", state: "terminating" }),
+		);
+	});
+
+	it("daemon kill rejects non-held task with cancel guidance", async () => {
+		const registry = await run(makeRegistry);
+		const pithos = makePithos([], [], { activeRunForTask: () => Effect.succeed(null) });
+		await expect(
+			run(
+				handleKillRequest({ run: undefined, task: "task_idle", reason: "stop" }).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+				),
+			),
+		).rejects.toThrow(/pithos task cancel/);
+	});
+
+	it("daemon kill rejects missing runs loudly", async () => {
+		const registry = await run(makeRegistry);
+		const pithos = makePithos([], [], {
+			runInspect: () =>
+				Effect.fail(new PdxError({ code: "NOT_FOUND", message: "run not found: run_missing" })),
+		});
+		await expect(
+			run(
+				handleKillRequest({ run: "run_missing", task: undefined, reason: "stop" }).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+				),
+			),
+		).rejects.toThrow(/run not found/);
+	});
+
+	it("daemon kill rejects terminal runs before interrupting", async () => {
+		const registry = await run(makeRegistry);
+		const calls: string[] = [];
+		const pithos = makePithos(calls, [], {
+			runInspect: () =>
+				Effect.succeed({
+					id: "run_done",
+					agent: "greed",
+					mode: "afk",
+					scope_id: "scope_repo",
+					status: "ended",
+					task_id: null,
+					session_id: "session_done",
+					created_at: "2026-05-09T00:00:00.000Z",
+					updated_at: "2026-05-09T00:00:00.000Z",
+				}),
+		});
+		await expect(
+			run(
+				handleKillRequest({ run: "run_done", task: undefined, reason: "stop" }).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+				),
+			),
+		).rejects.toThrow(/terminal/);
+		expect(calls).not.toContain("runInterrupt:run_done:stop");
+	});
+
+	it("kill retry keeps terminating entry until resource is gone", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_pandora",
+				agent: "pandora",
+				scopeId: "global",
+				mode: "hitl",
+				state: "live",
+				logicalName: PANDORA_TARGET,
+				tmuxTarget: PANDORA_TARGET,
+			}),
+		);
+		await run(
+			registry.upsert({
+				runId: "run_kill",
+				agent: "greed",
+				scopeId: "scope_repo",
+				mode: "afk",
+				state: "terminating",
+				logicalName: "pdx--greed",
+				pid: 123,
+				killAttempts: 1,
+			}),
+		);
+		const kills: string[] = [];
+		let aliveProbe = 0;
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(aliveProbe++ === 0),
+			kill: (_pid, signal) =>
+				Effect.sync(() => kills.push(signal)).pipe(
+					Effect.zipRight(
+						Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "kill failed" })),
+					),
+				),
+		});
+		const logs: string[] = [];
+		const log = SupervisorLog.of({
+			write: (record) =>
+				Effect.sync(() => {
+					logs.push(record.span);
+					return { ts: "now", ...record };
+				}),
+		});
+		const pithos = makePithos([]);
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_unused"),
+			nextSessionId: Effect.succeed("session_unused"),
+		});
+		const spawner = Spawner.of({
+			launchAgent: () =>
+				Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected launch" })),
+		});
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		await run(
+			reconcileTick(await parseConfig(home)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(Process, process),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		expect(kills).toEqual(["SIGKILL"]);
+		expect(await run(registry.list)).toContainEqual(
+			expect.objectContaining({ runId: "run_kill", state: "terminating" }),
+		);
+		await run(
+			reconcileTick(await parseConfig(home)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(Process, process),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
+		expect(logs).toContain("pdx.kill.retry");
+		expect(logs).toContain("pdx.kill");
 	});
 
 	it("starts registry empty and supports typed operations", async () => {

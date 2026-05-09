@@ -73,6 +73,37 @@ export const openPdx = (config: PdxConfig, maxAfk: number, intervalSeconds: numb
 		}
 	});
 
+export const killPdx = (
+	config: PdxConfig,
+	input: {
+		readonly runId: string | undefined;
+		readonly taskId: string | undefined;
+		readonly reason: string;
+	},
+) =>
+	Effect.gen(function* () {
+		if ((input.runId === undefined) === (input.taskId === undefined)) {
+			yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: "provide exactly one of --run or --task",
+				}),
+			);
+		}
+		const response = yield* requestIpc(config.socketPath, {
+			kind: "kill",
+			run: input.runId,
+			task: input.taskId,
+			reason: input.reason,
+		});
+		if (!response.ok) {
+			yield* Effect.fail(
+				new PdxError({ code: "IPC_ERROR", message: response.error ?? "daemon kill failed" }),
+			);
+		}
+		return response.data;
+	});
+
 export const closePdx = (config: PdxConfig) =>
 	Effect.gen(function* () {
 		const tmux = yield* Tmux;
@@ -262,6 +293,29 @@ const confirmTmuxGone = (tmux: TmuxService, target: string) =>
 export const isAfkAlive = (pid: number) =>
 	Process.pipe(Effect.flatMap((processService) => processService.isAlive(pid)));
 
+const killEntryResource = (entry: RegistryEntry, signal: "SIGTERM" | "SIGKILL") =>
+	Effect.gen(function* () {
+		if (entry.mode === "hitl") {
+			const target = entry.tmuxTarget;
+			if (target === undefined) {
+				return yield* Effect.fail(
+					new PdxError({ code: "VALIDATION_ERROR", message: `${entry.runId} missing tmux target` }),
+				);
+			}
+			const tmux = yield* Tmux;
+			yield* tmux.killSession(target);
+			return;
+		}
+		const pid = entry.pid;
+		if (pid === undefined) {
+			return yield* Effect.fail(
+				new PdxError({ code: "VALIDATION_ERROR", message: `${entry.runId} missing pid` }),
+			);
+		}
+		const processService = yield* Process;
+		yield* processService.kill(pid, signal);
+	});
+
 const entryAlive = (entry: RegistryEntry) =>
 	Effect.gen(function* () {
 		if (entry.mode === "hitl") {
@@ -294,7 +348,31 @@ export const reconcileTick = (config: PdxConfig) =>
 		const log = yield* SupervisorLog;
 		for (const entry of yield* registry.list) {
 			const alive = yield* entryAlive(entry);
-			if (!alive) {
+			if (entry.state === "terminating") {
+				if (!alive) {
+					yield* registry.remove(entry.runId);
+					yield* log.write({
+						level: "info",
+						span: "pdx.kill",
+						msg: "removed terminated entry",
+						data: { run_id: entry.runId },
+					});
+				} else {
+					const attempts = (entry.killAttempts ?? 0) + 1;
+					const signal = attempts === 1 ? "SIGTERM" : "SIGKILL";
+					yield* killEntryResource(entry, signal).pipe(
+						Effect.catchAll((error) =>
+							log.write({
+								level: "warn",
+								span: "pdx.kill.retry",
+								msg: "kill attempt failed",
+								data: { run_id: entry.runId, signal, error: error.message },
+							}),
+						),
+					);
+					yield* registry.upsert({ ...entry, killAttempts: attempts });
+				}
+			} else if (!alive) {
 				yield* pithos.runCleanup({ runId: entry.runId, reason: "natural_death" });
 				yield* registry.remove(entry.runId);
 				yield* log.write({
@@ -361,6 +439,113 @@ export const reconcileTick = (config: PdxConfig) =>
 		}
 	});
 
+const escalationBody = (input: {
+	readonly runId: string;
+	readonly taskId: string;
+	readonly scopeId: string;
+	readonly reason: string;
+}) =>
+	`pdx kill interrupted a live run.\n\nRun: ${input.runId}\nTask: ${input.taskId}\nScope: ${input.scopeId}\nReason: ${input.reason}\n\nSuggested next steps: inspect the failed task and artifacts, decide whether to supersede, cancel, or replan the broken chain, then enqueue follow-up work if needed.`;
+
+export const handleKillRequest = (input: {
+	readonly run: string | undefined;
+	readonly task: string | undefined;
+	readonly reason: string;
+}) =>
+	Effect.gen(function* () {
+		if ((input.run === undefined) === (input.task === undefined)) {
+			yield* Effect.fail(
+				new PdxError({ code: "VALIDATION_ERROR", message: "provide exactly one of run or task" }),
+			);
+		}
+
+		const pithos = yield* PithosClient;
+		const registry = yield* Registry;
+		const entries = yield* registry.list;
+
+		const interruptResult = yield* Effect.gen(function* () {
+			if (input.run !== undefined) {
+				const run = yield* pithos.runInspect({ runId: input.run });
+				if (["ended", "failed", "cancelled", "timed_out"].includes(run.status)) {
+					yield* Effect.fail(
+						new PdxError({
+							code: "VALIDATION_ERROR",
+							message: `Run ${run.id} is terminal (${run.status}); no live run can be killed.`,
+						}),
+					);
+				}
+				if (!entries.some((entry) => entry.runId === run.id)) {
+					yield* Effect.fail(
+						new PdxError({
+							code: "VALIDATION_ERROR",
+							message: `Run ${run.id} is not supervised by pdx; no live resource can be killed.`,
+						}),
+					);
+				}
+				return yield* pithos.runInterrupt({ runId: run.id, reason: input.reason });
+			}
+
+			if (input.task === undefined) {
+				return yield* Effect.fail(
+					new PdxError({ code: "VALIDATION_ERROR", message: "kill requires --task" }),
+				);
+			}
+			const owner = yield* pithos.activeRunForTask({ taskId: input.task });
+			if (owner === null) {
+				return yield* Effect.fail(
+					new PdxError({
+						code: "VALIDATION_ERROR",
+						message: `Task ${input.task} is not held by any active run; use 'pithos task cancel' for non-held abandonment.`,
+					}),
+				);
+			}
+			if (!entries.some((entry) => entry.runId === owner.id)) {
+				return yield* Effect.fail(
+					new PdxError({
+						code: "VALIDATION_ERROR",
+						message: `Run ${owner.id} is not supervised by pdx; no live resource can be killed.`,
+					}),
+				);
+			}
+			return yield* pithos.runInterrupt({
+				taskId: input.task,
+				reason: input.reason,
+				expectedRunId: owner.id,
+			});
+		});
+
+		const runId = interruptResult.run.id;
+		const entry = (yield* registry.list).find((candidate) => candidate.runId === runId);
+		if (entry === undefined) {
+			return yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: `Run ${runId} is not supervised by pdx; no live resource can be killed.`,
+				}),
+			);
+		}
+		if (interruptResult.interruptedTask !== null) {
+			yield* pithos.taskEnqueue({
+				scope: "global",
+				capability: "escalate",
+				title: `Investigate interrupted task ${interruptResult.interruptedTask.id}`,
+				body: escalationBody({
+					runId,
+					taskId: interruptResult.interruptedTask.id,
+					scopeId: interruptResult.interruptedTask.scope_id,
+					reason: input.reason,
+				}),
+				runId: PDX_SYSTEM_RUN_ID,
+			});
+		}
+		yield* registry.upsert({ ...entry, state: "terminating", killAttempts: 1 });
+		yield* killEntryResource(entry, "SIGTERM");
+		return {
+			ok: true,
+			data: { run_id: runId, task_id: interruptResult.interruptedTask?.id ?? null },
+		} as const;
+	});
+
 export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: number) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem;
@@ -379,6 +564,7 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 		});
 		const registry = yield* Registry;
 		const tmux = yield* Tmux;
+		const processService = yield* Process;
 		for (const session of yield* tmux.lsSessions()) {
 			if (session.startsWith("pdx--") && session !== DAEMON_TARGET) {
 				yield* tmux
@@ -430,6 +616,18 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 							}) as const,
 					),
 				);
+			if (request.kind === "kill") {
+				return handleKillRequest({
+					run: request.run,
+					task: request.task,
+					reason: request.reason,
+				}).pipe(
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(Registry, registry),
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(Process, processService),
+				);
+			}
 			return stop;
 		});
 		yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon ready" });

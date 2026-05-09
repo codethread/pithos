@@ -3,7 +3,7 @@ import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, Option } from "effect";
 import process from "node:process";
 import { inspect } from "node:util";
-import { closePdx, logsShowPdx, openPdx, runDaemon, statusPdx } from "./controller.js";
+import { closePdx, killPdx, logsShowPdx, openPdx, runDaemon, statusPdx } from "./controller.js";
 import { parsePdxConfig } from "./config.js";
 import { PdxError } from "./errors.js";
 import {
@@ -38,6 +38,13 @@ type CommandInput =
 	| { readonly command: "open"; readonly home: string | undefined }
 	| { readonly command: "close"; readonly home: string | undefined }
 	| { readonly command: "status"; readonly home: string | undefined }
+	| {
+			readonly command: "kill";
+			readonly home: string | undefined;
+			readonly runId: string | undefined;
+			readonly taskId: string | undefined;
+			readonly reason: string;
+	  }
 	| {
 			readonly command: "logs.show";
 			readonly home: string | undefined;
@@ -103,6 +110,12 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 				yield* Effect.sync(() => process.stdout.write(`${JSON.stringify(status)}\n`));
 				return;
 			}
+			case "kill":
+				return yield* killPdx(config, {
+					runId: input.runId,
+					taskId: input.taskId,
+					reason: input.reason,
+				}).pipe(Effect.provide(provided));
 			case "logs.show": {
 				const outputText = yield* logsShowPdx(config, {
 					limit: input.limit,
@@ -159,6 +172,24 @@ const makeCommand = (runtime: RuntimeInput) => {
 		({ home }) => runCommand(runtime, { command: "status", home: opt(home) }),
 	);
 
+	const kill = Command.make(
+		"kill",
+		{
+			home: Options.text("home").pipe(Options.optional),
+			runId: Options.text("run").pipe(Options.optional),
+			taskId: Options.text("task").pipe(Options.optional),
+			reason: Options.text("reason"),
+		},
+		({ home, runId, taskId, reason }) =>
+			runCommand(runtime, {
+				command: "kill",
+				home: opt(home),
+				runId: opt(runId),
+				taskId: opt(taskId),
+				reason,
+			}),
+	);
+
 	const logsShow = Command.make(
 		"show",
 		{
@@ -193,7 +224,9 @@ const makeCommand = (runtime: RuntimeInput) => {
 		({ home }) => runCommand(runtime, { command: "daemon", home: opt(home) }),
 	);
 
-	return Command.make("pdx").pipe(Command.withSubcommands([open, close, status, logs, daemon]));
+	return Command.make("pdx").pipe(
+		Command.withSubcommands([open, close, status, kill, logs, daemon]),
+	);
 };
 
 const program = captureRuntimeInput.pipe(

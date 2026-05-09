@@ -14,6 +14,7 @@ export interface PdxConfig {
 	readonly logPath: string;
 	readonly runsDir: string;
 	readonly daemonEntrypoint: string;
+	readonly pithosDbPath: string;
 }
 
 export const parsePdxConfig = (input: unknown): PdxConfig => {
@@ -25,6 +26,7 @@ export const parsePdxConfig = (input: unknown): PdxConfig => {
 		logPath: `${home}/pdx.jsonl`,
 		runsDir: `${home}/runs`,
 		daemonEntrypoint: decoded.daemonEntrypoint,
+		pithosDbPath: `${home}/pithos.sqlite`,
 	};
 };
 

@@ -5,7 +5,7 @@ import { ClockLive, FileSystemLive, PithosClientLive, ProcessLive } from "./live
 import { makeSupervisorLog } from "./log.js";
 import { makeTmux } from "./tmux.js";
 import { Clock, FileSystem, PithosClient, Process, SupervisorLog, Tmux } from "./services.js";
-import { closePdx, openPdx, runDaemon } from "./controller.js";
+import { closePdx, logsShowPdx, openPdx, runDaemon, statusPdx } from "./controller.js";
 
 const takeOption = (args: readonly string[], name: string): string | undefined => {
 	const index = args.indexOf(name);
@@ -22,6 +22,15 @@ const withoutOption = (args: readonly string[], name: string): readonly string[]
 	return index === -1 ? args : args.filter((_, i) => i !== index && i !== index + 1);
 };
 
+const withoutFlag = (args: readonly string[], name: string): readonly string[] =>
+	args.filter((arg) => arg !== name);
+
+const stripOptions = (args: readonly string[]): readonly string[] =>
+	["--home", "--interval-seconds", "--max-afk", "--limit", "--since"].reduce(
+		(current, name) => withoutOption(current, name),
+		withoutFlag(withoutFlag(args, "--all"), "--json"),
+	);
+
 const parsePositiveInt = (raw: string | undefined, name: string, fallback: number): number => {
 	if (raw === undefined) return fallback;
 	const value = Number(raw);
@@ -33,10 +42,7 @@ const parsePositiveInt = (raw: string | undefined, name: string, fallback: numbe
 
 const args = process.argv.slice(2);
 const home = takeOption(args, "--home");
-const commandArgs = withoutOption(
-	withoutOption(withoutOption(args, "--home"), "--interval-seconds"),
-	"--max-afk",
-);
+const commandArgs = stripOptions(args);
 
 try {
 	const config = parsePdxConfigOrThrow({
@@ -46,7 +52,9 @@ try {
 	});
 	const command = commandArgs.find((arg) => !arg.startsWith("--"));
 	parsePositiveInt(takeOption(args, "--interval-seconds"), "--interval-seconds", 5);
-	parsePositiveInt(takeOption(args, "--max-afk"), "--max-afk", 4);
+	const maxAfk = parsePositiveInt(takeOption(args, "--max-afk"), "--max-afk", 4);
+	const limit = takeOption(args, "--limit");
+	const since = takeOption(args, "--since");
 
 	if (command === "--help" || command === undefined) {
 		process.stdout.write("pdx commands: open, close, status, kill, logs show\n");
@@ -66,10 +74,24 @@ try {
 			Layer.succeed(Tmux, tmux),
 			Layer.succeed(SupervisorLog, supervisorLog),
 		);
-		if (command === "open") return yield* openPdx(config).pipe(Effect.provide(provided));
+		if (command === "open") return yield* openPdx(config, maxAfk).pipe(Effect.provide(provided));
 		if (command === "close") return yield* closePdx(config).pipe(Effect.provide(provided));
+		if (command === "status") {
+			const status = yield* statusPdx(config, maxAfk).pipe(Effect.provide(provided));
+			process.stdout.write(`${JSON.stringify(status)}\n`);
+			return;
+		}
+		if (command === "logs" && commandArgs[1] === "show") {
+			const output = yield* logsShowPdx(config, {
+				limit: limit === undefined ? undefined : parsePositiveInt(limit, "--limit", 100),
+				all: args.includes("--all"),
+				since,
+			}).pipe(Effect.provide(provided));
+			process.stdout.write(output);
+			return;
+		}
 		if (command === "daemon") {
-			const handle = yield* runDaemon(config).pipe(Effect.provide(provided));
+			const handle = yield* runDaemon(config, maxAfk).pipe(Effect.provide(provided));
 			yield* handle.shutdown;
 			yield* handle.close;
 			return;
@@ -77,12 +99,16 @@ try {
 		yield* Effect.fail(
 			new PdxError({ code: "VALIDATION_ERROR", message: `Command not implemented: ${command}` }),
 		);
-	}).pipe(Effect.provide(base));
+	}).pipe(
+		Effect.provide(base),
+		Effect.catchAll((error) =>
+			Effect.sync(() => {
+				process.stderr.write(`${error.code}: ${error.message}\n`);
+				process.exitCode = 2;
+			}),
+		),
+	);
 	Effect.runPromise(program).catch((error: unknown) => {
-		if (error instanceof PdxError) {
-			process.stderr.write(`${error.code}: ${error.message}\n`);
-			process.exit(2);
-		}
 		throw error;
 	});
 } catch (error) {

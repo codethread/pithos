@@ -11,13 +11,14 @@ export interface ProcessService {
 	readonly execFile: (
 		file: string,
 		args: readonly string[],
-		options?: { readonly cwd?: string },
+		options?: { readonly cwd?: string; readonly env?: Record<string, string> },
 	) => Effect.Effect<ProcessResult, PdxError>;
 }
 export class Process extends Context.Tag("pdx/Process")<Process, ProcessService>() {}
 
 export interface FileSystemService {
 	readonly appendFile: (path: string, content: string) => Effect.Effect<void, PdxError>;
+	readonly readFile: (path: string) => Effect.Effect<string, PdxError>;
 	readonly mkdir: (path: string) => Effect.Effect<void, PdxError>;
 }
 export class FileSystem extends Context.Tag("pdx/FileSystem")<FileSystem, FileSystemService>() {}
@@ -42,7 +43,10 @@ export interface TmuxService {
 export class Tmux extends Context.Tag("pdx/Tmux")<Tmux, TmuxService>() {}
 
 export interface PithosClientService {
-	readonly run: (args: readonly string[]) => Effect.Effect<ProcessResult, PdxError>;
+	readonly run: (
+		args: readonly string[],
+		options?: { readonly env?: Record<string, string> },
+	) => Effect.Effect<ProcessResult, PdxError>;
 }
 export class PithosClient extends Context.Tag("pdx/PithosClient")<
 	PithosClient,

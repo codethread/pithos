@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { parsePdxConfig } from "../src/config.js";
+import { PdxError } from "../src/errors.js";
 import { parseIpcRequest } from "../src/ipc.js";
 import { requestIpc } from "../src/ipc-socket.js";
 import { makeSupervisorLog } from "../src/log.js";
@@ -19,7 +20,14 @@ import {
 	Tmux,
 } from "../src/services.js";
 import { makeTmux } from "../src/tmux.js";
-import { DAEMON_TARGET, PDX_SYSTEM_RUN_ID, openPdx, runDaemon } from "../src/controller.js";
+import {
+	DAEMON_TARGET,
+	logsShowPdx,
+	openPdx,
+	PDX_SYSTEM_RUN_ID,
+	runDaemon,
+	statusPdx,
+} from "../src/controller.js";
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
@@ -66,6 +74,7 @@ describe("pdx substrate", () => {
 		const writes: string[] = [];
 		const fs = FileSystem.of({
 			appendFile: (_path, content) => Effect.sync(() => writes.push(content)),
+			readFile: () => Effect.succeed(""),
 			mkdir: () => Effect.void,
 		});
 		const clock = Clock.of({ nowIso: Effect.succeed("2026-05-09T00:00:00.000Z") });
@@ -99,13 +108,17 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
-		const fs = FileSystem.of({ appendFile: () => Effect.void, mkdir: () => Effect.void });
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
+			mkdir: () => Effect.void,
+		});
 		const pithos = PithosClient.of({
 			run: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
 		});
 		await expect(
 			run(
-				openPdx(parsePdxConfig(configInput("/tmp/pdx-home"))).pipe(
+				openPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 4).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(PithosClient, pithos),
@@ -120,6 +133,7 @@ describe("pdx substrate", () => {
 		const pithosCalls: string[][] = [];
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
 			mkdir: (path) => Effect.sync(() => mkdirs.push(path)),
 		});
 		const pithos = PithosClient.of({
@@ -131,7 +145,7 @@ describe("pdx substrate", () => {
 		});
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		const handle = await run(
-			runDaemon(parsePdxConfig(configInput(home))).pipe(
+			runDaemon(parsePdxConfig(configInput(home)), 4).pipe(
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
@@ -164,6 +178,7 @@ describe("pdx substrate", () => {
 		const pithosCalls: string[][] = [];
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
 			mkdir: () => Effect.void,
 		});
 		const pithos = PithosClient.of({
@@ -176,7 +191,7 @@ describe("pdx substrate", () => {
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		const config = parsePdxConfig(configInput(home));
 		const handle = await run(
-			runDaemon(config).pipe(
+			runDaemon(config, 4).pipe(
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
@@ -195,6 +210,189 @@ describe("pdx substrate", () => {
 			"pdx_close",
 		]);
 		expect(existsSync(config.socketPath)).toBe(false);
+	});
+
+	it("status returns required top-level keys when daemon is down", async () => {
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(false),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const pithosCalls: string[][] = [];
+		const pithos = PithosClient.of({
+			run: (args) =>
+				Effect.sync(() => {
+					pithosCalls.push([...args]);
+					return args[0] === "init"
+						? { exitCode: 0, stdout: "{}", stderr: "" }
+						: {
+								exitCode: 0,
+								stdout: JSON.stringify({
+									ok: true,
+									ready: [{ id: "task_1", scope_id: "global", capability: "escalate" }],
+									blocked: [],
+								}),
+								stderr: "",
+							};
+				}),
+		});
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
+			mkdir: () => Effect.void,
+		});
+		const status = await run(
+			statusPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 7).pipe(
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(FileSystem, fs),
+			),
+		);
+		expect(pithosCalls).toEqual([["init"], ["briefing"]]);
+		expect(status).toEqual({
+			daemon: { running: false, target: DAEMON_TARGET, socket_path: "/tmp/pdx-home/pdx.sock" },
+			registry: { entries: [] },
+			queue: { claimable: 1, by_scope_capability: { global: { escalate: 1 } } },
+			caps: { max_afk: 7, afk_used: 0 },
+		});
+	});
+
+	it("status fails loudly on tmux status errors", async () => {
+		const tmux = Tmux.of({
+			hasSession: () =>
+				Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "tmux exploded" })),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const pithos = PithosClient.of({
+			run: () => Effect.succeed({ exitCode: 0, stdout: "{}", stderr: "" }),
+		});
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
+			mkdir: () => Effect.void,
+		});
+		await expect(
+			run(
+				statusPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 4).pipe(
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(FileSystem, fs),
+				),
+			),
+		).rejects.toThrow("tmux exploded");
+	});
+
+	it("logs show preserves raw JSONL and applies default limit, explicit limit, all, and since", async () => {
+		const lines = Array.from({ length: 101 }, (_, index) =>
+			JSON.stringify({
+				ts: new Date(Date.UTC(2026, 4, 9, 0, index, 0)).toISOString(),
+				level: "info",
+				span: "test",
+				msg: `line-${index}`,
+			}),
+		);
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(`${lines.join("\n")}\n`),
+			mkdir: () => Effect.void,
+		});
+		const config = parsePdxConfig(configInput("/tmp/pdx-home"));
+		const defaultOutput = await run(
+			logsShowPdx(config, { limit: undefined, all: false, since: undefined }).pipe(
+				Effect.provideService(FileSystem, fs),
+			),
+		);
+		expect(defaultOutput).toBe(`${lines.slice(1).join("\n")}\n`);
+		const limitOutput = await run(
+			logsShowPdx(config, { limit: 2, all: false, since: undefined }).pipe(
+				Effect.provideService(FileSystem, fs),
+			),
+		);
+		expect(limitOutput).toBe(`${lines.slice(-2).join("\n")}\n`);
+		const allOutput = await run(
+			logsShowPdx(config, { limit: undefined, all: true, since: undefined }).pipe(
+				Effect.provideService(FileSystem, fs),
+			),
+		);
+		expect(allOutput).toBe(`${lines.join("\n")}\n`);
+		const sinceOutput = await run(
+			logsShowPdx(config, {
+				limit: undefined,
+				all: true,
+				since: new Date(Date.UTC(2026, 4, 9, 1, 39, 0)).toISOString(),
+			}).pipe(Effect.provideService(FileSystem, fs)),
+		);
+		expect(sinceOutput).toBe(`${lines.slice(99).join("\n")}\n`);
+	});
+
+	it("logs show accepts documented since forms and rejects malformed input and corrupt JSONL", async () => {
+		const line = JSON.stringify({
+			ts: new Date().toISOString(),
+			level: "info",
+			span: "test",
+			msg: "line",
+		});
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(`${line}\n`),
+			mkdir: () => Effect.void,
+		});
+		const config = parsePdxConfig(configInput("/tmp/pdx-home"));
+		for (const since of [
+			"10m",
+			"1h",
+			"2d",
+			"1w",
+			"today",
+			"yesterday",
+			"2026-05-09T00:00:00.000Z",
+		]) {
+			await expect(
+				run(
+					logsShowPdx(config, { limit: undefined, all: true, since }).pipe(
+						Effect.provideService(FileSystem, fs),
+					),
+				),
+			).resolves.toEqual(expect.any(String));
+		}
+		await expect(
+			run(
+				logsShowPdx(config, { limit: undefined, all: true, since: "soon" }).pipe(
+					Effect.provideService(FileSystem, fs),
+				),
+			),
+		).rejects.toThrow("invalid --since value");
+		const corruptFs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed("{\n"),
+			mkdir: () => Effect.void,
+		});
+		await expect(
+			run(
+				logsShowPdx(config, { limit: undefined, all: true, since: undefined }).pipe(
+					Effect.provideService(FileSystem, corruptFs),
+				),
+			),
+		).rejects.toThrow("corrupt supervisor log JSONL");
+		const blankLineFs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(`${line}\n\n${line}\n`),
+			mkdir: () => Effect.void,
+		});
+		await expect(
+			run(
+				logsShowPdx(config, { limit: undefined, all: true, since: undefined }).pipe(
+					Effect.provideService(FileSystem, blankLineFs),
+				),
+			),
+		).rejects.toThrow("corrupt supervisor log JSONL");
 	});
 
 	it("starts registry empty and supports typed operations", async () => {

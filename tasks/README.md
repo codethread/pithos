@@ -39,7 +39,7 @@ Central dependency map for implementation slices. Individual task files describe
   - **Status:** complete
   - **Blocked by:** [task-005a](./task-005a.md), [task-002](./task-002.md)
 - [ ] [task-005c — Slice 5c: pdx status + logs show](./task-005c.md)
-  - **Status:** pending
+  - **Status:** complete
   - **Blocked by:** [task-005b](./task-005b.md)
 - [ ] [task-006 — Slice 6: Pandora singleton + death detection + DEMO GATE 2](./task-006.md)
   - **Status:** pending

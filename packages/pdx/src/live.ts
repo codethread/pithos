@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { PdxError } from "./errors.js";
 import { FileSystem, Clock, PithosClient, Process, type ProcessResult } from "./services.js";
@@ -7,29 +7,34 @@ import { FileSystem, Clock, PithosClient, Process, type ProcessResult } from "./
 const execFileEffect = (
 	file: string,
 	args: readonly string[],
-	options?: { readonly cwd?: string },
+	options?: { readonly cwd?: string; readonly env?: Record<string, string> },
 ) =>
 	Effect.async<ProcessResult, PdxError>((resume) => {
-		execFile(file, [...args], { cwd: options?.cwd }, (error, stdout, stderr) => {
-			if (error !== null && typeof error.code !== "number") {
+		execFile(
+			file,
+			[...args],
+			{ cwd: options?.cwd, env: { ...process.env, ...options?.env } },
+			(error, stdout, stderr) => {
+				if (error !== null && typeof error.code !== "number") {
+					resume(
+						Effect.fail(
+							new PdxError({
+								code: "PROCESS_ERROR",
+								message: `${file} failed to start: ${error.message}`,
+							}),
+						),
+					);
+					return;
+				}
 				resume(
-					Effect.fail(
-						new PdxError({
-							code: "PROCESS_ERROR",
-							message: `${file} failed to start: ${error.message}`,
-						}),
-					),
+					Effect.succeed({
+						exitCode: typeof error?.code === "number" ? error.code : 0,
+						stdout,
+						stderr,
+					}),
 				);
-				return;
-			}
-			resume(
-				Effect.succeed({
-					exitCode: typeof error?.code === "number" ? error.code : 0,
-					stdout,
-					stderr,
-				}),
-			);
-		});
+			},
+		);
 	});
 
 export const ProcessLive = Process.of({ execFile: execFileEffect });
@@ -42,6 +47,11 @@ export const FileSystemLive = FileSystem.of({
 			try: () => appendFile(path, content),
 			catch: (error) => fsError("appendFile", error),
 		}),
+	readFile: (path) =>
+		Effect.tryPromise({
+			try: () => readFile(path, "utf8"),
+			catch: (error) => fsError("readFile", error),
+		}),
 	mkdir: (path) =>
 		Effect.tryPromise({
 			try: () => mkdir(path, { recursive: true }),
@@ -50,5 +60,5 @@ export const FileSystemLive = FileSystem.of({
 });
 export const ClockLive = Clock.of({ nowIso: Effect.sync(() => new Date().toISOString()) });
 export const PithosClientLive = PithosClient.of({
-	run: (args) => execFileEffect("pithos-next", args),
+	run: (args, options) => execFileEffect("pithos-next", args, options),
 });

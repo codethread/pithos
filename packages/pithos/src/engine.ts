@@ -1,8 +1,16 @@
-import { Either, ParseResult, Schema } from "effect";
+import { Effect, Either, ParseResult, Schema } from "effect";
 import { resolve } from "node:path";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
-import { migrate, openDb, sql, type Capability, type Mode, type ScopeKind } from "./db.js";
+import {
+	migrate,
+	openDb,
+	sql,
+	type Capability,
+	type Mode,
+	type ScopeKind,
+	type TaskStatus,
+} from "./db.js";
 import { fail } from "./errors.js";
 import {
 	decodeRow,
@@ -11,6 +19,7 @@ import {
 	ScopeRowSchema,
 	TaskRowSchema,
 	type RunRow,
+	type TaskRow,
 } from "./rows.js";
 import type { Services } from "./services.js";
 
@@ -102,7 +111,7 @@ export interface Engine {
 		readonly title: string;
 		readonly bodyFile: string | undefined;
 	}) => { readonly ok: true; readonly artifact: { readonly id: string } };
-	readonly taskInspect: (input: { readonly taskId: string }) => unknown;
+	readonly taskInspect: (input: { readonly taskId: string }) => TaskInspectOutput;
 	readonly cancel: (input: {
 		readonly taskId: string;
 		readonly runId: string | undefined;
@@ -114,8 +123,8 @@ export interface Engine {
 		readonly all: boolean;
 		readonly flat: boolean;
 		readonly dump: boolean;
-	}) => unknown;
-	readonly briefing: (input: { readonly agent: string | undefined }) => unknown;
+	}) => GraphInspectOutput | string;
+	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
 	readonly supersede: (input: {
 		readonly taskId: string;
 		readonly runId: string | undefined;
@@ -125,7 +134,118 @@ export interface Engine {
 		readonly bodyFile: string | undefined;
 		readonly scope: string | undefined;
 		readonly capability: Capability | undefined;
-	}) => unknown;
+	}) => SupersedeOutput;
+}
+
+export type Json =
+	| null
+	| boolean
+	| number
+	| string
+	| readonly Json[]
+	| { readonly [key: string]: Json };
+
+export interface TaskSummaryOutput {
+	readonly id: string;
+	readonly scope_id: string;
+	readonly capability: Capability;
+	readonly status: TaskStatus;
+	readonly title: string;
+	readonly created_at: string;
+}
+
+export interface TaskDetailOutput extends TaskSummaryOutput {
+	readonly body: string;
+	readonly fencing_token: number;
+	readonly attempts: number;
+	readonly max_attempts: number;
+}
+
+export interface TaskInspectOutput {
+	readonly ok: true;
+	readonly task: TaskSummaryOutput & {
+		readonly claimable: boolean;
+		readonly unresolved_dependency_ids: readonly string[];
+	};
+	readonly dependencies: readonly TaskDetailOutput[];
+	readonly dependents: readonly TaskDetailOutput[];
+	readonly supersedes: string | null;
+	readonly superseded_by: string | null;
+	readonly artifacts: readonly ArtifactOutput[];
+}
+
+export interface ArtifactOutput {
+	readonly id: string;
+	readonly kind: string;
+	readonly title: string;
+	readonly body: string;
+	readonly created_at: string;
+}
+
+export type GraphSelectorOutput =
+	| { readonly kind: "task"; readonly value: string }
+	| { readonly kind: "scope"; readonly value: string }
+	| { readonly kind: "all" };
+
+export interface GraphNodeOutput extends TaskSummaryOutput {
+	readonly claimable: boolean;
+	readonly unresolved_dependency_ids: readonly string[];
+	readonly supersedes_task_id: string | null;
+	readonly superseded_by_task_id: string | null;
+}
+
+export type GraphEdgeOutput =
+	| {
+			readonly kind: "depends_on";
+			readonly from_task_id: string;
+			readonly to_task_id: string;
+			readonly satisfied: boolean;
+	  }
+	| {
+			readonly kind: "supersedes";
+			readonly from_task_id: string;
+			readonly to_task_id: string;
+	  };
+
+export interface GraphInspectOutput {
+	readonly ok: true;
+	readonly graph: {
+		readonly selector: GraphSelectorOutput;
+		readonly nodes: readonly GraphNodeOutput[];
+		readonly edges: readonly GraphEdgeOutput[];
+	};
+}
+
+export interface BlockerOutput {
+	readonly id: string;
+	readonly scope_id: string;
+	readonly status: TaskStatus;
+}
+
+export interface BlockedTaskOutput extends TaskSummaryOutput {
+	readonly unresolved_dependency_ids: readonly string[];
+	readonly blockers: readonly BlockerOutput[];
+}
+
+export interface BriefingOutput {
+	readonly ok: true;
+	readonly ready: readonly TaskSummaryOutput[];
+	readonly blocked: readonly BlockedTaskOutput[];
+}
+
+export interface SupersedeOutput {
+	readonly ok: true;
+	readonly task: {
+		readonly id: string;
+		readonly status: "queued";
+		readonly scope_id: string;
+		readonly capability: Capability;
+	};
+	readonly supersession: {
+		readonly old_task_id: string;
+		readonly new_task_id: string;
+		readonly retargeted_dependent_task_ids: readonly string[];
+	};
 }
 
 export interface RunOutput {
@@ -146,7 +266,7 @@ export interface EventOutput {
 	readonly task_id: string | null;
 	readonly run_id: string | null;
 	readonly actor_run_id: string | null;
-	readonly payload: unknown;
+	readonly payload: Json;
 	readonly created_at: string;
 }
 
@@ -227,7 +347,9 @@ const resolveBody = (
 	if (body !== undefined && bodyFile !== undefined) {
 		fail("VALIDATION_ERROR", "provide only one of --body or --body-file");
 	}
-	const value = body ?? (bodyFile === undefined ? undefined : ctx.services.fs.readText(bodyFile));
+	const value =
+		body ??
+		(bodyFile === undefined ? undefined : Effect.runSync(ctx.services.fs.readText(bodyFile)));
 	return requireNonEmpty(
 		value ?? fail("VALIDATION_ERROR", "missing --body or --body-file"),
 		"body",
@@ -270,10 +392,10 @@ const event = (
 	ctx: EngineContext,
 	db: Db,
 	type: string,
-	payload: { task_id?: string; run_id?: string; actor_run_id?: string; payload: unknown },
+	payload: { task_id?: string; run_id?: string; actor_run_id?: string; payload: Json },
 ): void => {
 	db.prepare(eventPayload).run(
-		ctx.services.ids.make("event"),
+		Effect.runSync(ctx.services.ids.make("event")),
 		type,
 		payload.task_id ?? null,
 		payload.run_id ?? null,
@@ -294,7 +416,7 @@ const withDb = <A>(ctx: EngineContext, f: (db: Db) => A): A => {
 
 const EventPayloadSchema = Schema.parseJson(Schema.Unknown);
 
-const decodeEventPayload = (payloadJson: string, eventId: string): unknown => {
+const decodeEventPayload = (payloadJson: string, eventId: string): Json => {
 	const decoded = Schema.decodeUnknownEither(EventPayloadSchema)(payloadJson);
 	return Either.match(decoded, {
 		onLeft: (error) =>
@@ -302,7 +424,7 @@ const decodeEventPayload = (payloadJson: string, eventId: string): unknown => {
 				"INTERNAL_ERROR",
 				`malformed event payload_json for ${eventId}: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
 			),
-		onRight: (payload) => payload,
+		onRight: (payload) => payload as Json,
 	});
 };
 
@@ -345,14 +467,7 @@ const authorized = (
 	return r;
 };
 
-interface TaskSummary {
-	readonly id: string;
-	readonly scope_id: string;
-	readonly capability: Capability;
-	readonly status: string;
-	readonly title: string;
-	readonly created_at: string;
-}
+export type TaskSummary = TaskSummaryOutput;
 
 const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
 	(
@@ -373,17 +488,39 @@ SELECT id, scope_id, capability, title, body, status, fencing_token, attempts, m
 FROM tasks
 `;
 
-const parseTaskSummary = (value: unknown, message: string): TaskSummary => {
+const toTaskSummary = (row: TaskRow): TaskSummary => ({
+	id: row.id,
+	scope_id: row.scope_id,
+	capability: row.capability,
+	status: row.status,
+	title: row.title,
+	created_at: row.created_at,
+});
+
+const parseTaskSummary = (value: unknown, message: string): TaskSummary =>
+	toTaskSummary(decodeRow(TaskRowSchema, value, message));
+
+const parseTaskDetail = (value: unknown, message: string): TaskDetailOutput => {
 	const row = decodeRow(TaskRowSchema, value, message);
 	return {
-		id: row.id,
-		scope_id: row.scope_id,
-		capability: row.capability,
-		status: row.status,
-		title: row.title,
-		created_at: row.created_at,
+		...toTaskSummary(row),
+		body: row.body,
+		fencing_token: row.fencing_token,
+		attempts: row.attempts,
+		max_attempts: row.max_attempts,
 	};
 };
+
+const ArtifactRowSchema = Schema.Struct({
+	id: Schema.String,
+	kind: Schema.String,
+	title: Schema.String,
+	body: Schema.String,
+	created_at: Schema.String,
+});
+
+const parseArtifact = (value: unknown): ArtifactOutput =>
+	decodeRow(ArtifactRowSchema, value, "malformed artifact row");
 
 const taskSummary = (db: Db, taskId: string): TaskSummary =>
 	parseTaskSummary(
@@ -487,9 +624,9 @@ const renderFlatGraph = (
 
 const graphForIds = (
 	db: Db,
-	selector: { readonly kind: string; readonly value?: string },
+	selector: GraphSelectorOutput,
 	seedIds: readonly string[],
-) => {
+): GraphInspectOutput => {
 	const ids = new Set(seedIds);
 	let changed = true;
 	while (changed) {
@@ -532,6 +669,7 @@ const graphForIds = (
 			capability: task.capability,
 			status: task.status,
 			title: task.title,
+			created_at: task.created_at,
 			claimable: isClaimable(db, task),
 			unresolved_dependency_ids: unresolvedDependencies(db, task.id),
 			supersedes_task_id:
@@ -581,12 +719,12 @@ const graphForIds = (
 			a.from_task_id.localeCompare(b.from_task_id) ||
 			a.to_task_id.localeCompare(b.to_task_id),
 	);
-	return { ok: true, graph: { selector, nodes, edges } };
+	return { ok: true as const, graph: { selector, nodes, edges } };
 };
 
 export const makeEngine = (ctx: EngineContext): Engine => ({
 	init: ({ fresh }) => {
-		if (fresh) ctx.services.fs.removeFile(ctx.config.dbPath);
+		if (fresh) Effect.runSync(ctx.services.fs.removeFile(ctx.config.dbPath));
 		const db = openDb(ctx.config.dbPath);
 		try {
 			migrate(db);
@@ -621,7 +759,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id = ?`).get(scope);
 			if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
 
-			const rid = requireNonEmpty(runId ?? ctx.services.ids.make("run"), "--run");
+			const rid = requireNonEmpty(runId ?? Effect.runSync(ctx.services.ids.make("run")), "--run");
 			db.prepare(upsertRun).run(
 				rid,
 				agent,
@@ -921,7 +1059,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			}
 			const taskBody = resolveBody(ctx, body, bodyFile);
 			const taskTitle = requireNonEmpty(title, "--title");
-			const taskId = ctx.services.ids.make("task");
+			const taskId = Effect.runSync(ctx.services.ids.make("task"));
 
 			db.transaction(() => {
 				for (const depId of dependsOn) {
@@ -1006,6 +1144,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				event(ctx, db, "run.heartbeat", { run_id: actorRunId, payload: { status: run.status } });
 				return { ok: true, status: run.status };
 			}
+			const heartbeatToken = token ?? fail("VALIDATION_ERROR", "missing --token");
 			db.transaction(() => {
 				const previous = db
 					.prepare(sql`
@@ -1016,7 +1155,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					  AND status IN ('claimed','running')
 					  AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND task_id = tasks.id)
 				`)
-					.get(taskId, token, actorRunId) as { status: string } | undefined;
+					.get(taskId, heartbeatToken, actorRunId) as { status: string } | undefined;
 				const previousRow =
 					previous ?? fail("STALE_TOKEN", "heartbeat token is stale or task is not held by run");
 				const previousStatus = previousRow.status;
@@ -1031,7 +1170,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					actor_run_id: actorRunId,
 					payload: {
 						run_id: actorRunId,
-						fencing_token: token,
+						fencing_token: heartbeatToken,
 						previous_status: previousStatus,
 						status: "running",
 					},
@@ -1043,7 +1182,8 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);
 			liveRun(db, actorRunId);
-			const resultJson = resultFile === undefined ? "{}" : ctx.services.fs.readText(resultFile);
+			const resultJson =
+				resultFile === undefined ? "{}" : Effect.runSync(ctx.services.fs.readText(resultFile));
 			db.transaction(() => {
 				const result = db
 					.prepare(sql`
@@ -1099,7 +1239,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const task = db.prepare(sql`SELECT 1 FROM tasks WHERE id=?`).get(taskId);
 			if (task === undefined) fail("NOT_FOUND", `task not found: ${taskId}`);
 			liveRun(db, actorRunId);
-			const artifactId = ctx.services.ids.make("artifact");
+			const artifactId = Effect.runSync(ctx.services.ids.make("artifact"));
 			db.transaction(() => {
 				db.prepare(
 					sql`INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)`,
@@ -1109,7 +1249,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					actorRunId,
 					requireNonEmpty(kind, "--kind"),
 					requireNonEmpty(title, "--title"),
-					bodyFile === undefined ? "" : ctx.services.fs.readText(bodyFile),
+					bodyFile === undefined ? "" : Effect.runSync(ctx.services.fs.readText(bodyFile)),
 				);
 				event(ctx, db, "task.artifact_added", {
 					task_id: taskId,
@@ -1156,17 +1296,20 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				.prepare(
 					`${taskSummarySelect} WHERE id IN (SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?) ORDER BY created_at ASC, id ASC`,
 				)
-				.all(taskId);
+				.all(taskId)
+				.map((row) => parseTaskDetail(row, "malformed dependency task row"));
 			const dependents = db
 				.prepare(
 					`${taskSummarySelect} WHERE id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id=?) ORDER BY created_at ASC, id ASC`,
 				)
-				.all(taskId);
+				.all(taskId)
+				.map((row) => parseTaskDetail(row, "malformed dependent task row"));
 			const artifacts = db
 				.prepare(
 					sql`SELECT id, kind, title, body, created_at FROM artifacts WHERE task_id=? ORDER BY created_at ASC, id ASC`,
 				)
-				.all(taskId);
+				.all(taskId)
+				.map(parseArtifact);
 			return {
 				ok: true,
 				task: {
@@ -1240,7 +1383,8 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				fail("VALIDATION_ERROR", `unknown or unclaiming agent: ${agent}`);
 			const queued = db
 				.prepare(`${taskSummarySelect} WHERE status='queued' ORDER BY created_at ASC, id ASC`)
-				.all() as TaskSummary[];
+				.all()
+				.map((row) => parseTaskSummary(row, "malformed queued task row"));
 			const visible =
 				caps === undefined ? queued : queued.filter((t) => caps.includes(t.capability));
 			return {
@@ -1262,7 +1406,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const actorRunId = resolveRunId(ctx, runId);
 			liveRun(db, actorRunId);
 			const nonEmptyReason = requireNonEmpty(reason, "--reason");
-			const replacementId = ctx.services.ids.make("task");
+			const replacementId = Effect.runSync(ctx.services.ids.make("task"));
 			const old =
 				(db.prepare(sql`SELECT * FROM tasks WHERE id=?`).get(taskId) as
 					| (TaskSummary & { body: string; max_attempts: number })
@@ -1356,10 +1500,10 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				});
 				assertAcyclic(db);
 				return {
-					ok: true,
+					ok: true as const,
 					task: {
 						id: replacementId,
-						status: "queued",
+						status: "queued" as const,
 						scope_id: replacementScope,
 						capability: replacementCap,
 					},

@@ -117,88 +117,75 @@ const json = (value: unknown): string => `${JSON.stringify(value)}\n`;
 const resolveConfig = (config: Config | (() => Config)): Config =>
 	typeof config === "function" ? config() : config;
 
+const fromEngine = <A>(thunk: () => A): Effect.Effect<A, PithosError> =>
+	Effect.try({
+		try: thunk,
+		catch: (error) =>
+			error instanceof PithosError
+				? error
+				: new PithosError({
+						code: "INTERNAL_ERROR",
+						message: error instanceof Error ? error.message : inspect(error),
+					}),
+	});
+
 const runCommand = (ctx: CliContext, input: CommandInput) =>
-	Effect.sync(() => {
-		try {
-			const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
+	Effect.gen(function* () {
+		const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
+		const writeJson = (value: unknown) => ctx.services.output.write(json(value));
+		const result = yield* fromEngine(() => {
 			switch (input.command) {
 				case "init":
-					ctx.services.output.write(json(engine.init({ fresh: input.fresh })));
-					return;
+					return engine.init({ fresh: input.fresh });
 				case "scope.upsert":
-					ctx.services.output.write(
-						json(engine.scopeUpsert({ kind: input.kind, path: input.path })),
-					);
-					return;
+					return engine.scopeUpsert({ kind: input.kind, path: input.path });
 				case "run.upsert":
-					ctx.services.output.write(json(engine.runUpsert(input)));
-					return;
+					return engine.runUpsert(input);
 				case "run.inspect":
-					ctx.services.output.write(json(engine.runInspect({ runId: input.runId })));
-					return;
+					return engine.runInspect({ runId: input.runId });
 				case "run.cleanup":
-					ctx.services.output.write(json(engine.runCleanup(input)));
-					return;
+					return engine.runCleanup(input);
 				case "run.interrupt":
-					ctx.services.output.write(json(engine.runInterrupt(input)));
-					return;
+					return engine.runInterrupt(input);
 				case "run.timeout":
-					ctx.services.output.write(json(engine.runTimeout(input)));
-					return;
+					return engine.runTimeout(input);
 				case "events.tail":
-					ctx.services.output.write(json(engine.eventsTail({ limit: input.limit })));
-					return;
+					return engine.eventsTail({ limit: input.limit });
 				case "task.enqueue":
-					ctx.services.output.write(json(engine.enqueue(input)));
-					return;
+					return engine.enqueue(input);
 				case "task.claim":
-					ctx.services.output.write(json(engine.claim(input)));
-					return;
+					return engine.claim(input);
 				case "task.heartbeat":
-					ctx.services.output.write(json(engine.heartbeat(input)));
-					return;
+					return engine.heartbeat(input);
 				case "task.complete":
-					ctx.services.output.write(json(engine.complete(input)));
-					return;
+					return engine.complete(input);
 				case "task.fail":
-					ctx.services.output.write(json(engine.failTask(input)));
-					return;
+					return engine.failTask(input);
 				case "task.artifact.add":
-					ctx.services.output.write(json(engine.artifactAdd(input)));
-					return;
+					return engine.artifactAdd(input);
 				case "task.inspect":
-					ctx.services.output.write(json(engine.taskInspect({ taskId: input.taskId })));
-					return;
+					return engine.taskInspect({ taskId: input.taskId });
 				case "task.cancel":
-					ctx.services.output.write(json(engine.cancel(input)));
-					return;
+					return engine.cancel(input);
 				case "task.supersede":
-					ctx.services.output.write(json(engine.supersede(input)));
-					return;
-				case "graph.inspect": {
-					const result = engine.graphInspect(input);
-					ctx.services.output.write(typeof result === "string" ? result : json(result));
-					return;
-				}
+					return engine.supersede(input);
+				case "graph.inspect":
+					return engine.graphInspect(input);
 				case "briefing":
-					ctx.services.output.write(json(engine.briefing({ agent: input.agent })));
-					return;
+					return engine.briefing({ agent: input.agent });
 			}
-		} catch (error) {
-			if (error instanceof PithosError) {
-				ctx.services.output.writeError(
+		});
+		yield* typeof result === "string" ? ctx.services.output.write(result) : writeJson(result);
+	}).pipe(
+		Effect.catchAll((error) =>
+			Effect.gen(function* () {
+				yield* ctx.services.output.writeError(
 					json({ ok: false, error: { code: error.code, message: error.message } }),
 				);
 				process.exitCode = exitCodeFor(error.code);
-				return;
-			}
-			const message = error instanceof Error ? error.message : inspect(error);
-			ctx.services.output.writeError(
-				json({ ok: false, error: { code: "INTERNAL_ERROR", message } }),
-			);
-			process.exitCode = 1;
-		}
-	});
+			}),
+		),
+	);
 
 export const makePithosCommand = (ctx: CliContext) => {
 	const init = Command.make("init", { fresh: Options.boolean("fresh") }, ({ fresh }) =>

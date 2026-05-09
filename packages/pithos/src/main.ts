@@ -17,11 +17,13 @@ const program = cli(process.argv).pipe(
 	Effect.catchAll((error) =>
 		Effect.sync(() => {
 			const message = error instanceof Error ? error.message : inspect(error);
-			liveServices.output.writeError(
-				`${JSON.stringify({
-					ok: false,
-					error: { code: "VALIDATION_ERROR", message },
-				})}\n`,
+			Effect.runSync(
+				liveServices.output.writeError(
+					`${JSON.stringify({
+						ok: false,
+						error: { code: "VALIDATION_ERROR", message },
+					})}\n`,
+				),
 			);
 			process.exitCode = 2;
 		}),

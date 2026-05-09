@@ -15,10 +15,16 @@ const services = (): Services & { stdout: string[]; stderr: string[] } => {
 	return {
 		stdout,
 		stderr,
-		fs: { readText: () => "body", removeFile: (path) => rmSync(path, { force: true }) },
-		output: { write: (text) => stdout.push(text), writeError: (text) => stderr.push(text) },
-		ids: { make: (prefix) => `${prefix}_cli_${stdout.length}_${stderr.length}` },
-		clock: { nowIso: () => "2026-05-08T00:00:00.000Z" },
+		fs: {
+			readText: () => Effect.succeed("body"),
+			removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
+		},
+		output: {
+			write: (text) => Effect.sync(() => void stdout.push(text)),
+			writeError: (text) => Effect.sync(() => void stderr.push(text)),
+		},
+		ids: { make: (prefix) => Effect.succeed(`${prefix}_cli_${stdout.length}_${stderr.length}`) },
+		clock: { nowIso: () => Effect.succeed("2026-05-08T00:00:00.000Z") },
 	};
 };
 

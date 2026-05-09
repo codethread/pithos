@@ -1,24 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import process from "node:process";
-import { Context, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
+import { PithosError } from "./errors.js";
 
 export interface FsService {
-	readonly readText: (path: string) => string;
-	readonly removeFile: (path: string) => void;
+	readonly readText: (path: string) => Effect.Effect<string, PithosError>;
+	readonly removeFile: (path: string) => Effect.Effect<void, PithosError>;
 }
 
 export interface IdService {
-	readonly make: (prefix: string) => string;
+	readonly make: (prefix: string) => Effect.Effect<string>;
 }
 
 export interface ClockService {
-	readonly nowIso: () => string;
+	readonly nowIso: () => Effect.Effect<string>;
 }
 
 export interface OutputService {
-	readonly write: (text: string) => void;
-	readonly writeError: (text: string) => void;
+	readonly write: (text: string) => Effect.Effect<void>;
+	readonly writeError: (text: string) => Effect.Effect<void>;
 }
 
 export interface Services {
@@ -32,18 +33,35 @@ export class PithosServices extends Context.Tag("PithosServices")<PithosServices
 
 export const liveServices: Services = {
 	fs: {
-		readText: (path) => readFileSync(path, "utf8"),
-		removeFile: (path) => rmSync(path, { force: true }),
+		readText: (path) =>
+			Effect.try({
+				try: () => readFileSync(path, "utf8"),
+				catch: (error) =>
+					new PithosError({
+						code: "USER_ERROR",
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			}),
+		removeFile: (path) =>
+			Effect.try({
+				try: () => rmSync(path, { force: true }),
+				catch: (error) =>
+					new PithosError({
+						code: "USER_ERROR",
+						message: error instanceof Error ? error.message : String(error),
+					}),
+			}),
 	},
 	output: {
-		write: (text) => process.stdout.write(text),
-		writeError: (text) => process.stderr.write(text),
+		write: (text) => Effect.sync(() => void process.stdout.write(text)),
+		writeError: (text) => Effect.sync(() => void process.stderr.write(text)),
 	},
 	ids: {
-		make: (prefix) => `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
+		make: (prefix) =>
+			Effect.sync(() => `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 16)}`),
 	},
 	clock: {
-		nowIso: () => new Date().toISOString(),
+		nowIso: () => Effect.sync(() => new Date().toISOString()),
 	},
 };
 

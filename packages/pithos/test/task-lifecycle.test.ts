@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { PithosError, makeEngine, type Services } from "../src/index.js";
 
@@ -10,12 +11,14 @@ const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-next-task-")), "pit
 
 const services = (): Services => ({
 	fs: {
-		readText: () => JSON.stringify({ ok: true }),
-		removeFile: (path) => rmSync(path, { force: true }),
+		readText: () => Effect.succeed(JSON.stringify({ ok: true })),
+		removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
 	},
-	output: { write: () => undefined, writeError: () => undefined },
-	ids: { make: (prefix) => `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 8)}` },
-	clock: { nowIso: () => "2026-05-08T00:00:00.000Z" },
+	output: { write: () => Effect.void, writeError: () => Effect.void },
+	ids: {
+		make: (prefix) => Effect.succeed(`${prefix}_${randomUUID().replaceAll("-", "").slice(0, 8)}`),
+	},
+	clock: { nowIso: () => Effect.succeed("2026-05-08T00:00:00.000Z") },
 });
 
 const setup = (runIdEnv?: string) => {

@@ -12,7 +12,7 @@ Central dependency map for implementation slices. Individual task files describe
   - **Status:** complete
   - **Blocked by:** [task-001a](./task-001a.md)
 - [ ] [task-001c — Slice 1c: Task write lifecycle, authorization, fencing](./task-001c.md)
-  - **Status:** pending
+  - **Status:** complete
   - **Blocked by:** [task-001b](./task-001b.md)
 - [ ] [task-001d — Slice 1d: Graph, supersession, read surfaces](./task-001d.md)
   - **Status:** pending

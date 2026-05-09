@@ -12,19 +12,24 @@ import { makeSupervisorLog } from "../src/log.js";
 import {
 	Clock,
 	FileSystem,
+	Ids,
 	makeRegistry,
 	PithosClient,
 	Process,
 	Registry,
+	Spawner,
 	SupervisorLog,
 	Tmux,
 } from "../src/services.js";
 import { makeTmux } from "../src/tmux.js";
 import {
 	DAEMON_TARGET,
+	PANDORA_TARGET,
 	logsShowPdx,
 	openPdx,
 	PDX_SYSTEM_RUN_ID,
+	isAfkAlive,
+	reconcileTick,
 	runDaemon,
 	statusPdx,
 } from "../src/controller.js";
@@ -57,6 +62,7 @@ describe("pdx substrate", () => {
 					calls.push({ file, args, cwd: options?.cwd });
 					return { exitCode: 0, stdout: "", stderr: "" };
 				}),
+			isAlive: () => Effect.succeed(true),
 		});
 		const tmux = await run(makeTmux.pipe(Effect.provideService(Process, process)));
 		await run(tmux.sendLiteralLine("pdx--pandora", "hello; rm -rf /"));
@@ -118,7 +124,7 @@ describe("pdx substrate", () => {
 		});
 		await expect(
 			run(
-				openPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 4).pipe(
+				openPdx(parsePdxConfig(configInput("/tmp/pdx-home")), 4, 5).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(PithosClient, pithos),
@@ -127,7 +133,7 @@ describe("pdx substrate", () => {
 		).rejects.toThrow(`${DAEMON_TARGET} already exists`);
 	});
 
-	it("daemon startup creates runs dir and upserts pdx system run without Pandora", async () => {
+	it("daemon startup creates runs dir, system run, and Pandora singleton", async () => {
 		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const mkdirs: string[] = [];
 		const pithosCalls: string[][] = [];
@@ -144,11 +150,36 @@ describe("pdx substrate", () => {
 				}),
 		});
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const registry = await run(makeRegistry);
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_pandora_1"),
+			nextSessionId: Effect.succeed("session_pandora_1"),
+		});
+		const spawner = Spawner.of({
+			launchAgent: (input) =>
+				Effect.succeed({
+					...input,
+					logicalName: PANDORA_TARGET,
+					hitl: { tmuxTarget: PANDORA_TARGET, panePid: 123 },
+				}),
+		});
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
 		const handle = await run(
-			runDaemon(parsePdxConfig(configInput(home)), 4).pipe(
+			runDaemon(parsePdxConfig(configInput(home)), 4, 5).pipe(
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(Registry, registry),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
 			),
 		);
 		await run(handle.close);
@@ -170,7 +201,22 @@ describe("pdx substrate", () => {
 			"--run",
 			PDX_SYSTEM_RUN_ID,
 		]);
-		expect(pithosCalls.some((args) => args.includes("pandora"))).toBe(false);
+		expect(pithosCalls).toContainEqual([
+			"run",
+			"upsert",
+			"--agent",
+			"pandora",
+			"--mode",
+			"hitl",
+			"--scope",
+			"global",
+			"--cwd",
+			home,
+			"--session-id",
+			"session_pandora_1",
+			"--run",
+			"run_pandora_1",
+		]);
 	});
 
 	it("daemon stop replies after cleanup and closes the IPC socket explicitly", async () => {
@@ -189,12 +235,38 @@ describe("pdx substrate", () => {
 				}),
 		});
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const registry = await run(makeRegistry);
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_pandora_1"),
+			nextSessionId: Effect.succeed("session_pandora_1"),
+		});
+		const spawner = Spawner.of({
+			launchAgent: (input) =>
+				Effect.succeed({
+					...input,
+					logicalName: PANDORA_TARGET,
+					hitl: { tmuxTarget: PANDORA_TARGET, panePid: 123 },
+				}),
+		});
+		const killed: string[] = [];
+		const tmux = Tmux.of({
+			hasSession: (target) => Effect.succeed(!killed.includes(target)),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: (target) => Effect.sync(() => killed.push(target)),
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
 		const config = parsePdxConfig(configInput(home));
 		const handle = await run(
-			runDaemon(config, 4).pipe(
+			runDaemon(config, 4, 5).pipe(
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(Registry, registry),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
 			),
 		);
 		const response = await run(requestIpc(config.socketPath, { kind: "stop" }));
@@ -395,6 +467,89 @@ describe("pdx substrate", () => {
 		).rejects.toThrow("corrupt supervisor log JSONL");
 	});
 
+	it("AFK liveness probe delegates to process kill-zero boundary", async () => {
+		const liveProcess = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(true),
+		});
+		const deadProcess = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(false),
+		});
+		await expect(
+			run(isAfkAlive(123).pipe(Effect.provideService(Process, liveProcess))),
+		).resolves.toBe(true);
+		await expect(
+			run(isAfkAlive(456).pipe(Effect.provideService(Process, deadProcess))),
+		).resolves.toBe(false);
+	});
+
+	it("reconcile cleans dead Pandora and respawns with a fresh run id", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_old",
+				agent: "pandora",
+				scopeId: "global",
+				mode: "hitl",
+				state: "live",
+				logicalName: PANDORA_TARGET,
+				tmuxTarget: PANDORA_TARGET,
+			}),
+		);
+		const pithosCalls: string[][] = [];
+		const pithos = PithosClient.of({
+			run: (args) =>
+				Effect.sync(() => {
+					pithosCalls.push([...args]);
+					return { exitCode: 0, stdout: "{}", stderr: "" };
+				}),
+		});
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_new"),
+			nextSessionId: Effect.succeed("session_new"),
+		});
+		const spawner = Spawner.of({
+			launchAgent: (input) =>
+				Effect.succeed({
+					...input,
+					logicalName: PANDORA_TARGET,
+					hitl: { tmuxTarget: PANDORA_TARGET, panePid: 123 },
+				}),
+		});
+		let probes = 0;
+		const tmux = Tmux.of({
+			hasSession: () => Effect.sync(() => ++probes > 1),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		await run(
+			reconcileTick(parsePdxConfig(configInput(home))).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		const entries = await run(registry.list);
+		expect(entries.map((entry) => entry.runId)).toEqual(["run_new"]);
+		expect(pithosCalls).toContainEqual([
+			"run",
+			"cleanup",
+			"--run",
+			"run_old",
+			"--reason",
+			"natural_death",
+		]);
+	});
+
 	it("starts registry empty and supports typed operations", async () => {
 		const registryContext = await run(makeRegistry);
 		const listEmpty = await run(
@@ -413,6 +568,7 @@ describe("pdx substrate", () => {
 						scopeId: "scope_1",
 						mode: "afk",
 						state: "live",
+						logicalName: "pdx--war",
 					}),
 				),
 				Effect.provideService(Registry, registryContext),

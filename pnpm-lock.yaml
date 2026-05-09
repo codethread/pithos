@@ -84,6 +84,9 @@ importers:
 
   packages/pdx:
     dependencies:
+      '@pithos/spawner':
+        specifier: workspace:*
+        version: link:../spawner
       effect:
         specifier: ^3.21.2
         version: 3.21.2

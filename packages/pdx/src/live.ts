@@ -1,8 +1,18 @@
 import { Effect } from "effect";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { launchAgent } from "../../spawner/src/index.ts";
 import { PdxError } from "./errors.js";
-import { FileSystem, Clock, PithosClient, Process, type ProcessResult } from "./services.js";
+import {
+	FileSystem,
+	Clock,
+	Ids,
+	PithosClient,
+	Process,
+	Spawner,
+	type ProcessResult,
+} from "./services.js";
 
 const execFileEffect = (
 	file: string,
@@ -37,7 +47,18 @@ const execFileEffect = (
 		);
 	});
 
-export const ProcessLive = Process.of({ execFile: execFileEffect });
+export const ProcessLive = Process.of({
+	execFile: execFileEffect,
+	isAlive: (pid) =>
+		Effect.sync(() => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		}),
+});
 const fsError = (operation: string, error: unknown) =>
 	new PdxError({ code: "FS_ERROR", message: `${operation} failed: ${String(error)}` });
 
@@ -59,6 +80,18 @@ export const FileSystemLive = FileSystem.of({
 		}).pipe(Effect.asVoid),
 });
 export const ClockLive = Clock.of({ nowIso: Effect.sync(() => new Date().toISOString()) });
+export const IdsLive = Ids.of({
+	nextRunId: Effect.sync(() => `run_${randomUUID().replaceAll("-", "")}`),
+	nextSessionId: Effect.sync(() => `session_${randomUUID().replaceAll("-", "")}`),
+});
 export const PithosClientLive = PithosClient.of({
 	run: (args, options) => execFileEffect("pithos-next", args, options),
+});
+export const SpawnerLive = Spawner.of({
+	launchAgent: (input) =>
+		Effect.try({
+			try: () => launchAgent(input),
+			catch: (error) =>
+				new PdxError({ code: "PROCESS_ERROR", message: `spawner launch failed: ${String(error)}` }),
+		}),
 });

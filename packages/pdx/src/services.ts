@@ -13,6 +13,7 @@ export interface ProcessService {
 		args: readonly string[],
 		options?: { readonly cwd?: string; readonly env?: Record<string, string> },
 	) => Effect.Effect<ProcessResult, PdxError>;
+	readonly isAlive: (pid: number) => Effect.Effect<boolean, PdxError>;
 }
 export class Process extends Context.Tag("pdx/Process")<Process, ProcessService>() {}
 
@@ -27,6 +28,12 @@ export interface ClockService {
 	readonly nowIso: Effect.Effect<string>;
 }
 export class Clock extends Context.Tag("pdx/Clock")<Clock, ClockService>() {}
+
+export interface IdsService {
+	readonly nextRunId: Effect.Effect<string, PdxError>;
+	readonly nextSessionId: Effect.Effect<string, PdxError>;
+}
+export class Ids extends Context.Tag("pdx/Ids")<Ids, IdsService>() {}
 
 export interface TmuxService {
 	readonly hasSession: (target: string) => Effect.Effect<boolean, PdxError>;
@@ -53,12 +60,40 @@ export class PithosClient extends Context.Tag("pdx/PithosClient")<
 	PithosClientService
 >() {}
 
+export interface LaunchAgentInput {
+	readonly agent: "pandora" | "toil" | "greed" | "war";
+	readonly mode: "afk" | "hitl";
+	readonly runId: string;
+	readonly sessionId: string;
+	readonly scopeId: string;
+	readonly cwd: string;
+}
+
+export interface LaunchAgentResult {
+	readonly agent: "pandora" | "toil" | "greed" | "war";
+	readonly mode: "afk" | "hitl";
+	readonly runId: string;
+	readonly sessionId: string;
+	readonly scopeId: string;
+	readonly logicalName: string;
+	readonly hitl?: { readonly tmuxTarget: string; readonly panePid: number | null };
+	readonly afk?: { readonly pid: number; readonly processStartTime: string };
+}
+
+export interface SpawnerService {
+	readonly launchAgent: (input: LaunchAgentInput) => Effect.Effect<LaunchAgentResult, PdxError>;
+}
+export class Spawner extends Context.Tag("pdx/Spawner")<Spawner, SpawnerService>() {}
+
 export interface RegistryEntry {
 	readonly runId: string;
 	readonly agent: "pandora" | "toil" | "greed" | "war";
 	readonly scopeId: string;
 	readonly mode: "afk" | "hitl";
 	readonly state: "launching" | "live" | "terminating";
+	readonly logicalName: string;
+	readonly pid?: number;
+	readonly tmuxTarget?: string;
 }
 
 export interface RegistryService {

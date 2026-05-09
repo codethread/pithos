@@ -15,6 +15,7 @@
 		"start": "node scripts/build.mjs --dev --run --"
 	},
 	"dependencies": {
+		"@pithos/spawner": "workspace:*",
 		"effect": "^3.21.2"
 	}
 }

@@ -1,10 +1,28 @@
 import { Effect, Layer } from "effect";
 import { parsePdxConfigOrThrow } from "./config.js";
 import { PdxError } from "./errors.js";
-import { ClockLive, FileSystemLive, PithosClientLive, ProcessLive } from "./live.js";
+import {
+	ClockLive,
+	FileSystemLive,
+	IdsLive,
+	PithosClientLive,
+	ProcessLive,
+	SpawnerLive,
+} from "./live.js";
 import { makeSupervisorLog } from "./log.js";
 import { makeTmux } from "./tmux.js";
-import { Clock, FileSystem, PithosClient, Process, SupervisorLog, Tmux } from "./services.js";
+import {
+	Clock,
+	FileSystem,
+	Ids,
+	makeRegistry,
+	PithosClient,
+	Process,
+	Registry,
+	Spawner,
+	SupervisorLog,
+	Tmux,
+} from "./services.js";
 import { closePdx, logsShowPdx, openPdx, runDaemon, statusPdx } from "./controller.js";
 
 const takeOption = (args: readonly string[], name: string): string | undefined => {
@@ -51,7 +69,11 @@ try {
 		daemonEntrypoint: process.argv[1],
 	});
 	const command = commandArgs.find((arg) => !arg.startsWith("--"));
-	parsePositiveInt(takeOption(args, "--interval-seconds"), "--interval-seconds", 5);
+	const intervalSeconds = parsePositiveInt(
+		takeOption(args, "--interval-seconds"),
+		"--interval-seconds",
+		5,
+	);
 	const maxAfk = parsePositiveInt(takeOption(args, "--max-afk"), "--max-afk", 4);
 	const limit = takeOption(args, "--limit");
 	const since = takeOption(args, "--since");
@@ -66,15 +88,23 @@ try {
 		Layer.succeed(FileSystem, FileSystemLive),
 		Layer.succeed(Clock, ClockLive),
 		Layer.succeed(PithosClient, PithosClientLive),
+		Layer.succeed(Ids, IdsLive),
+		Layer.succeed(Spawner, SpawnerLive),
 	);
 	const program = Effect.gen(function* () {
 		const tmux = yield* makeTmux;
 		const supervisorLog = yield* makeSupervisorLog(config.logPath);
+		const registry = yield* makeRegistry;
 		const provided = Layer.mergeAll(
 			Layer.succeed(Tmux, tmux),
 			Layer.succeed(SupervisorLog, supervisorLog),
+			Layer.succeed(Registry, registry),
 		);
-		if (command === "open") return yield* openPdx(config, maxAfk).pipe(Effect.provide(provided));
+		if (command === "open") {
+			yield* openPdx(config, maxAfk, intervalSeconds).pipe(Effect.provide(provided));
+			process.stdout.write("tmux attach -t pdx--pandora\n");
+			return;
+		}
 		if (command === "close") return yield* closePdx(config).pipe(Effect.provide(provided));
 		if (command === "status") {
 			const status = yield* statusPdx(config, maxAfk).pipe(Effect.provide(provided));
@@ -91,7 +121,9 @@ try {
 			return;
 		}
 		if (command === "daemon") {
-			const handle = yield* runDaemon(config, maxAfk).pipe(Effect.provide(provided));
+			const handle = yield* runDaemon(config, maxAfk, intervalSeconds).pipe(
+				Effect.provide(provided),
+			);
 			yield* handle.shutdown;
 			yield* handle.close;
 			return;

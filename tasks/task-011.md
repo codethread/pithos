@@ -6,6 +6,7 @@ Mechanical cutover from the legacy CLI package to the new Pithos package built i
 
 - Delete `packages/cli/` in its entirety (sources, tests, README, CONTRIBUTING).
 - Move the `pithos` bin name from the old package to `packages/pithos/`. The temporary `pithos-next` bin is renamed/dropped.
+- Keep pdx on direct `@pithos/pithos` library reuse; this slice changes agent/operator bin naming, not pdx's internal Pithos boundary.
 - Update spawner `claim_command` rendering so the emitted command line uses `pithos` (not `pithos-next`).
 - Update workspace plumbing: `pnpm-workspace.yaml`, root `package.json` scripts, any `pnpm --filter @pithos/cli ...` references.
 - Update docs that reference the old package path: root `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `packages/spawner/README.md`, `packages/pdx/README.md`, `specs/README.md` code-reference column for the task-graph spec.

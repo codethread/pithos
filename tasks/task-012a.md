@@ -30,6 +30,7 @@ Cover the kill path:
 - Cross-package happy path works without raw SQL.
 - The daemon never injects task content into prompts.
 - Agents claim through Pithos, not pdx pre-claim.
+- pdx reuses `@pithos/pithos` directly for supervisor-owned Pithos operations; only agent recipes exercise the CLI surface.
 - Kill mutates Pithos before killing resources.
 - Close order matches spec.
 

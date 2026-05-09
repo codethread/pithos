@@ -44,15 +44,18 @@ Central dependency map for implementation slices. Individual task files describe
 - [ ] [task-006 — Slice 6: Pandora singleton + death detection + DEMO GATE 2](./task-006.md)
   - **Status:** complete
   - **Blocked by:** [task-002](./task-002.md), [task-004](./task-004.md), [task-005c](./task-005c.md)
+- [ ] [task-006a — Slice 6a: Refactor pdx to reuse `@pithos/pithos` directly](./task-006a.md)
+  - **Status:** pending
+  - **Blocked by:** [task-006](./task-006.md)
 - [ ] [task-007 — Slice 7: pdx kill flow](./task-007.md)
   - **Status:** pending
-  - **Blocked by:** [task-002](./task-002.md), [task-006](./task-006.md)
+  - **Blocked by:** [task-002](./task-002.md), [task-006a](./task-006a.md)
 - [ ] [task-008 — Slice 8: Agent spawning epic](./task-008.md)
   - **Status:** split_required
   - **Blocked by:** [task-008a](./task-008a.md), [task-008b](./task-008b.md), [task-008c](./task-008c.md), [task-008d](./task-008d.md)
 - [ ] [task-008a — Slice 8a: Spawn policy for Toil/Greed/War](./task-008a.md)
   - **Status:** pending
-  - **Blocked by:** [task-006](./task-006.md)
+  - **Blocked by:** [task-006a](./task-006a.md)
 - [ ] [task-008b — Slice 8b: Registry cap accounting](./task-008b.md)
   - **Status:** pending
   - **Blocked by:** [task-008a](./task-008a.md)
@@ -64,10 +67,10 @@ Central dependency map for implementation slices. Individual task files describe
   - **Blocked by:** [task-008b](./task-008b.md), [task-008c](./task-008c.md)
 - [ ] [task-009 — Slice 9: Wakeup transport + Pandora marker recognition](./task-009.md)
   - **Status:** pending
-  - **Blocked by:** [task-006](./task-006.md)
+  - **Blocked by:** [task-006a](./task-006a.md)
 - [ ] [task-010 — Slice 10: Orphan discovery on `pdx open`](./task-010.md)
   - **Status:** pending
-  - **Blocked by:** [task-002](./task-002.md), [task-005b](./task-005b.md)
+  - **Blocked by:** [task-002](./task-002.md), [task-005b](./task-005b.md), [task-006a](./task-006a.md)
 - [ ] [task-011 — Slice 11: Cutover: retire `packages/cli/`, point `pithos` bin at new package](./task-011.md)
   - **Status:** pending
   - **Blocked by:** [task-001e](./task-001e.md), [task-002](./task-002.md), [task-003](./task-003.md), [task-004](./task-004.md), [task-005c](./task-005c.md), [task-006](./task-006.md), [task-007](./task-007.md), [task-008d](./task-008d.md), [task-009](./task-009.md), [task-010](./task-010.md)

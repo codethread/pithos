@@ -1,7 +1,7 @@
 # Control Plane Design Notes
 
 **Status:** Discussion notes
-**Last Updated:** 2026-05-07
+**Last Updated:** 2026-05-09
 
 Informal working notes for the control-plane rewrite. This is not the final spec; it is a shared reference for the design discussion.
 
@@ -23,6 +23,7 @@ Three layers:
 3. **pdx** — local supervisor/control plane.
    - Owns reconcile loop, registry, caps, lifecycle policy, process/tmux ownership.
    - Uses spawner as a launcher library/module, not as an operator API.
+   - Reuses `@pithos/pithos` directly for queue inspection and durable state changes; the `pithos`/`pithos-next` CLI is for agents/operators, not pdx's internal boundary.
    - Exposes Pandora/operator introspection and immediate kill.
 
 ## Agent roster and capabilities
@@ -99,6 +100,8 @@ task1 done -> task2 failed
 Queued direct dependents are rewired to the replacement. Cancelled direct dependents are ignored. Any other non-queued dependent forces explicit replan.
 
 ## Minimal CLI surface
+
+This is the external CLI contract. `pdx` should call the corresponding `@pithos/pithos` library surface directly rather than shelling out.
 
 Clean-break nested command shape.
 

@@ -2,7 +2,7 @@
 
 ## What to build
 
-Add daemon startup settlement to `pdx open` in `packages/pdx/`, matching the supervision spec order:
+Add daemon startup settlement to `pdx open` in `packages/pdx/`, matching the supervision spec order. All Pithos reads/writes in this slice go through pdx's direct `@pithos/pithos` boundary, not the CLI.
 
 1. `pdx open` starts the new `pdx--daemon` tmux session.
 2. During daemon startup, before the `pdx` system run or Pandora are created, the daemon settles old execution resources.
@@ -41,7 +41,7 @@ Defer: race conditions between probe and kill (MVP); operator-created tmux sessi
 
 ## Implementation primitives
 
-Builds on task-005a Tmux/FileSystem services, task-005b daemon startup, and task-002 `pithos run cleanup`.
+Builds on task-005a Tmux/FileSystem services, task-005b daemon startup, task-002 `pithos run cleanup`, and task-006a's direct Pithos library adapter.
 
 - **Order:** daemon startup settlement runs after `pdx--daemon` exists, before `pdx` system run upsert and Pandora launch.
 - **HITL orphans:** `Tmux.lsSessions()` returns all session names; filter by `^pdx--`, then exclude the current daemon target. For each match: `Tmux.killSession(name)`.
@@ -49,8 +49,8 @@ Builds on task-005a Tmux/FileSystem services, task-005b daemon startup, and task
   - Parse `runId` from filename (`<run-id>.pid`).
   - Read pid via `FileSystem.readFileString` and parse as integer; malformed → fail loud with `VALIDATION_ERROR`.
   - Probe alive via the `Process` service (`kill(pid, 0)` semantics). ESRCH → dead.
-  - Alive: send `SIGTERM`, confirm gone, retry `SIGKILL` if needed; then `pithos.run.cleanup({ run: runId, reason: "daemon_start" })`; remove pidfile.
-  - Dead: only `pithos.run.cleanup({ run: runId, reason: "daemon_start" })`; remove pidfile. No kill attempt.
+  - Alive: send `SIGTERM`, confirm gone, retry `SIGKILL` if needed; then `pithos.run.cleanup({ run: runId, reason: "daemon_start" })` through the direct library adapter; remove pidfile.
+  - Dead: only `pithos.run.cleanup({ run: runId, reason: "daemon_start" })` through the direct library adapter; remove pidfile. No kill attempt.
 - **Pidfile persistence is intentional:** crashed-pdx leaves pidfiles in place so the next `pdx open` finds and reaps them. No auto-cleanup-on-process-exit helper.
 - **Idempotency:** running orphan discovery twice in a row is safe. After the first pass clears everything, the second is a no-op.
 

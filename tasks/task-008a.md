@@ -6,10 +6,10 @@ Extend the pdx reconcile loop from task 006 to spawn non-Pandora agents when Pit
 
 After lifecycle settlement and Pandora singleton maintenance, each reconcile tick:
 
-1. Inspect claimable tasks from Pithos.
+1. Inspect claimable tasks from Pithos through the direct `@pithos/pithos` adapter (briefing or equivalent typed read), not by spawning the CLI.
 2. Iterate seeded spawn order: `toil`, `greed`, `war`.
 3. For the first eligible agent kind with claimable work, derive the run scope/cwd and launch via `spawnerLib.launchAgent`.
-4. Upsert a fresh Pithos run before launch with caller-supplied `runId`, `sessionId`, `agent`, `mode`, `scope`, and `cwd`.
+4. Upsert a fresh Pithos run before launch through the same direct Pithos adapter with caller-supplied `runId`, `sessionId`, `agent`, `mode`, `scope`, and `cwd`.
 5. Add a Registry entry with state `launching`, then mark `live` once launch metadata is available.
 6. Spawn at most one non-Pandora agent per tick.
 

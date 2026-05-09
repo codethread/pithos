@@ -24,14 +24,14 @@ Each reconcile tick:
 3. If `everClaimed === false` and `now - launchedAt >= 30s`:
    - kill the registered process/tmux session
    - confirm the execution resource is gone
-   - call `pithos run timeout --run <id> --reason no_claim_timeout`
+   - call the direct `@pithos/pithos` operation equivalent to `pithos run timeout --run <id> --reason no_claim_timeout`
    - remove the Registry entry and release caps
 
 Rules:
 
 - No task is mutated by timeout.
 - If the run holds a task at timeout check time, fail loudly or mark `everClaimed`; do not call `run timeout` on a held task.
-- Cleanup is not the timeout transition; use Pithos `run timeout`.
+- Cleanup is not the timeout transition; use the direct Pithos `run timeout` library operation.
 
 ## Test focus
 

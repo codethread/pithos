@@ -8,7 +8,7 @@ Behavior:
 
 - On AFK launch, write `<home>/runs/<run-id>.pid` containing the pid.
 - Write atomically using tmp + rename.
-- On Pithos `run cleanup` for that run, remove the pidfile.
+- On Pithos `run cleanup` for that run through pdx's direct `@pithos/pithos` boundary, remove the pidfile.
 - Do not remove the pidfile merely because the process exits; crashed pdx must leave pidfiles for task 010 orphan discovery.
 - HITL runs do not get pidfiles.
 

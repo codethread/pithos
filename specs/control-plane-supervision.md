@@ -1,7 +1,7 @@
 # Control Plane Supervision
 
 **Status:** Planned
-**Last Updated:** 2026-05-07
+**Last Updated:** 2026-05-09
 
 ## 1. Overview
 
@@ -70,6 +70,9 @@ This is a destructive pre-v1 rewrite.
 - **Decision:** Only pdx finalizes runs.
   - **Rationale:** Agent/harness code can complete or fail held tasks, but run terminalization depends on observed process/tmux lifecycle. Keeping run finalization in pdx prevents races between harness hooks and supervisor observations.
 
+- **Decision:** `pdx` integrates with Pithos through the `@pithos/pithos` library, not by spawning the `pithos` CLI.
+  - **Rationale:** CLI argv/stdout handling is the agent/operator contract. The supervisor needs typed in-process reuse of the same Pithos semantics so queue inspection and durable state transitions stay fast, testable, and schema-shaped without subprocess parsing or env plumbing.
+
 - **Decision:** Pithos seeds and enforces built-in agents/capabilities.
   - **Rationale:** Claim authorization is a durable invariant, not a template convention. Pre-v1 roster changes can be clean-break schema/seed updates.
 
@@ -135,6 +138,8 @@ Layer responsibilities:
 | Pithos  | DB schema, seeded agents/capabilities, task/runs state transitions, graph repair, artifacts/events  | OS processes, tmux supervision, harness argv        |
 | Spawner | templates, prompt rendering, harness argv/env, AFK launch, HITL tmux creation, launch metadata      | registration, cleanup, status, kill, nudge, reclaim |
 | pdx     | reconcile, in-memory registry, caps, process/tmux ownership, status, kill, wakeups, supervisor logs | DB invariants, prompt/task content injection        |
+
+`@pithos/pithos` is the supervisor-facing integration boundary. `pdx` calls typed library operations directly for queue inspection and run/task mutations. The `pithos` CLI is the agent/operator boundary only; when this spec says `pithos run cleanup`, `pithos briefing`, or similar in pdx flows, it names the corresponding Pithos operation and semantics, not a required subprocess invocation.
 
 `pdx` has no persisted registry in MVP. On startup it does not adopt old sessions. It kills and confirms deterministic old tmux/process leftovers, cleans active built-in Pithos runs, and begins with a fresh in-memory registry. HITL leftovers are discovered with `tmux ls -F '#S'` filtered by `^pdx--`. AFK leftovers are discovered from pdx-owned pidfiles under `<home>/runs/<run-id>.pid`; pdx writes pidfiles at AFK launch and removes them during cleanup.
 
@@ -335,6 +340,8 @@ Rules:
 - If the old task was `queued`, it becomes `cancelled` in the same transaction.
 
 ## 7. CLI Interfaces
+
+These commands are the public CLI contract for agents and operators. `pdx` does not shell out to this surface; it uses the corresponding `@pithos/pithos` library operations directly.
 
 Clean-break nested command surface:
 
@@ -737,14 +744,12 @@ Pithos events are durable audit records. Payloads may grow, but these event name
 
 ## 12. Implementation Locations
 
-| Area                                   | Files                                                                                  |
-| -------------------------------------- | -------------------------------------------------------------------------------------- |
-| Pithos CLI nesting and command changes | `packages/cli/src/cli/commands.ts`, `packages/cli/src/commands/`                       |
-| Pithos schema/seed data                | `packages/cli/src/db/migrate.ts`, `packages/cli/src/db/rows.ts`                        |
-| Graph repair/validation                | `packages/cli/src/domain/task-graph.ts`, `packages/cli/src/commands/supersede.ts`      |
-| Spawner launcher-only refactor         | `packages/spawner/src/`, `packages/spawner/templates/`                                 |
-| pdx package                            | `packages/pdx/`                                                                        |
-| Docs                                   | `README.md`, `packages/cli/README.md`, `packages/spawner/README.md`, `specs/README.md` |
+| Area                           | Files                                                                                     |
+| ------------------------------ | ----------------------------------------------------------------------------------------- |
+| Pithos library + CLI surface   | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md`              |
+| Spawner launcher-only refactor | `packages/spawner/src/`, `packages/spawner/templates/`                                    |
+| pdx package                    | `packages/pdx/`                                                                           |
+| Docs                           | `README.md`, `packages/pithos/README.md`, `packages/spawner/README.md`, `specs/README.md` |
 
 ## 13. Open Questions
 

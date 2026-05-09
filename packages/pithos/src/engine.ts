@@ -3,7 +3,7 @@ import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import { migrate, openDb, sql, type Capability, type Mode, type ScopeKind } from "./db.js";
 import { fail } from "./errors.js";
-import { decodeRow, RunRowSchema, ScopeRowSchema, type RunRow } from "./rows.js";
+import { decodeRow, RunRowSchema, ScopeRowSchema, TaskRowSchema, type RunRow } from "./rows.js";
 import type { Services } from "./services.js";
 
 export interface EngineContext {
@@ -81,6 +81,25 @@ export interface Engine {
 		readonly title: string;
 		readonly bodyFile: string | undefined;
 	}) => { readonly ok: true; readonly artifact: { readonly id: string } };
+	readonly taskInspect: (input: { readonly taskId: string }) => unknown;
+	readonly graphInspect: (input: {
+		readonly taskId: string | undefined;
+		readonly scope: string | undefined;
+		readonly all: boolean;
+		readonly flat: boolean;
+		readonly dump: boolean;
+	}) => unknown;
+	readonly briefing: (input: { readonly agent: string | undefined }) => unknown;
+	readonly supersede: (input: {
+		readonly taskId: string;
+		readonly runId: string | undefined;
+		readonly reason: string;
+		readonly title: string | undefined;
+		readonly body: string | undefined;
+		readonly bodyFile: string | undefined;
+		readonly scope: string | undefined;
+		readonly capability: Capability | undefined;
+	}) => unknown;
 }
 
 export interface RunOutput {
@@ -286,6 +305,227 @@ const authorized = (
 	return r;
 };
 
+type TaskSummary = {
+	readonly id: string;
+	readonly scope_id: string;
+	readonly capability: Capability;
+	readonly status: string;
+	readonly title: string;
+	readonly created_at: string;
+};
+
+const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
+	(
+		db
+			.prepare(sql`
+			SELECT td.depends_on_task_id AS id
+			FROM task_dependencies td
+			JOIN tasks dep ON dep.id = td.depends_on_task_id
+			WHERE td.task_id = ?
+			  AND dep.status <> 'done'
+			ORDER BY td.created_at ASC, td.depends_on_task_id ASC
+		`)
+			.all(taskId) as { readonly id: string }[]
+	).map((r) => r.id);
+
+const taskSummarySelect = sql`
+SELECT id, scope_id, capability, title, body, status, fencing_token, attempts, max_attempts, created_at
+FROM tasks
+`;
+
+const parseTaskSummary = (value: unknown, message: string): TaskSummary => {
+	const row = decodeRow(TaskRowSchema, value, message);
+	return {
+		id: row.id,
+		scope_id: row.scope_id,
+		capability: row.capability,
+		status: row.status,
+		title: row.title,
+		created_at: row.created_at,
+	};
+};
+
+const taskSummary = (db: Db, taskId: string): TaskSummary =>
+	parseTaskSummary(
+		db.prepare(`${taskSummarySelect} WHERE id = ?`).get(taskId),
+		`task not found: ${taskId}`,
+	);
+
+const isClaimable = (db: Db, task: { readonly id: string; readonly status: string }): boolean =>
+	task.status === "queued" && unresolvedDependencies(db, task.id).length === 0;
+
+const assertAcyclic = (db: Db): void => {
+	const edges = db
+		.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`)
+		.all() as {
+		readonly task_id: string;
+		readonly depends_on_task_id: string;
+	}[];
+	const outgoing = new Map<string, string[]>();
+	for (const edge of edges) {
+		outgoing.set(edge.task_id, [...(outgoing.get(edge.task_id) ?? []), edge.depends_on_task_id]);
+	}
+	const visiting = new Set<string>();
+	const visited = new Set<string>();
+	const visit = (id: string): void => {
+		if (visiting.has(id)) fail("VALIDATION_ERROR", "task dependency cycle detected");
+		if (visited.has(id)) return;
+		visiting.add(id);
+		for (const next of outgoing.get(id) ?? []) visit(next);
+		visiting.delete(id);
+		visited.add(id);
+	};
+	for (const id of outgoing.keys()) visit(id);
+};
+
+const renderFlatGraph = (
+	graph: {
+		readonly nodes: readonly {
+			readonly id: string;
+			readonly title: string;
+			readonly status: string;
+			readonly supersedes_task_id: string | null;
+			readonly superseded_by_task_id: string | null;
+		}[];
+	},
+	dump: boolean,
+): string => {
+	const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+	const replacementIds = new Set(
+		graph.nodes.map((node) => node.superseded_by_task_id).filter((id): id is string => id !== null),
+	);
+	const roots = graph.nodes.filter(
+		(node) => node.supersedes_task_id === null || !byId.has(node.supersedes_task_id),
+	);
+	const lines: string[] = [];
+	const writeChain = (node: (typeof graph.nodes)[number], depth: number): void => {
+		lines.push(`${"  ".repeat(depth)}- ${node.id} [${node.status}] ${node.title}`);
+		const replacement =
+			node.superseded_by_task_id === null ? undefined : byId.get(node.superseded_by_task_id);
+		if (replacement !== undefined) writeChain(replacement, depth + 1);
+	};
+	for (const root of roots) {
+		const chain = graph.nodes.filter((node) => {
+			let current: typeof node | undefined = node;
+			while (current !== undefined) {
+				if (current.id === root.id) return true;
+				current =
+					current.supersedes_task_id === null ? undefined : byId.get(current.supersedes_task_id);
+			}
+			return false;
+		});
+		if (!dump && chain.every((node) => node.status === "done" || node.status === "cancelled"))
+			continue;
+		writeChain(root, 0);
+	}
+	for (const node of graph.nodes) {
+		if (node.supersedes_task_id !== null || replacementIds.has(node.id) || roots.includes(node))
+			continue;
+		if (!dump && (node.status === "done" || node.status === "cancelled")) continue;
+		lines.push(`- ${node.id} [${node.status}] ${node.title}`);
+	}
+	return `${lines.join("\n")}\n`;
+};
+
+const graphForIds = (
+	db: Db,
+	selector: { readonly kind: string; readonly value?: string },
+	seedIds: readonly string[],
+) => {
+	const ids = new Set(seedIds);
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const row of db
+			.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`)
+			.all() as { task_id: string; depends_on_task_id: string }[]) {
+			if (ids.has(row.task_id) || ids.has(row.depends_on_task_id)) {
+				if (!ids.has(row.task_id)) {
+					ids.add(row.task_id);
+					changed = true;
+				}
+				if (!ids.has(row.depends_on_task_id)) {
+					ids.add(row.depends_on_task_id);
+					changed = true;
+				}
+			}
+		}
+		for (const row of db
+			.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`)
+			.all() as { old_task_id: string; new_task_id: string }[]) {
+			if (ids.has(row.old_task_id) || ids.has(row.new_task_id)) {
+				if (!ids.has(row.old_task_id)) {
+					ids.add(row.old_task_id);
+					changed = true;
+				}
+				if (!ids.has(row.new_task_id)) {
+					ids.add(row.new_task_id);
+					changed = true;
+				}
+			}
+		}
+	}
+	const nodes = [...ids]
+		.map((id) => taskSummary(db, id))
+		.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+		.map((task) => ({
+			id: task.id,
+			scope_id: task.scope_id,
+			capability: task.capability,
+			status: task.status,
+			title: task.title,
+			claimable: isClaimable(db, task),
+			unresolved_dependency_ids: unresolvedDependencies(db, task.id),
+			supersedes_task_id:
+				(db
+					.prepare(sql`SELECT old_task_id FROM task_supersessions WHERE new_task_id=?`)
+					.pluck()
+					.get(task.id) as string | undefined) ?? null,
+			superseded_by_task_id:
+				(db
+					.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
+					.pluck()
+					.get(task.id) as string | undefined) ?? null,
+		}));
+	const edges = [
+		...(
+			db.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`).all() as {
+				task_id: string;
+				depends_on_task_id: string;
+			}[]
+		)
+			.filter((e) => ids.has(e.task_id) && ids.has(e.depends_on_task_id))
+			.map((e) => ({
+				kind: "depends_on" as const,
+				from_task_id: e.task_id,
+				to_task_id: e.depends_on_task_id,
+				satisfied:
+					(db
+						.prepare(sql`SELECT status FROM tasks WHERE id=?`)
+						.pluck()
+						.get(e.depends_on_task_id) as string) === "done",
+			})),
+		...(
+			db.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`).all() as {
+				old_task_id: string;
+				new_task_id: string;
+			}[]
+		)
+			.filter((e) => ids.has(e.old_task_id) && ids.has(e.new_task_id))
+			.map((e) => ({
+				kind: "supersedes" as const,
+				from_task_id: e.new_task_id,
+				to_task_id: e.old_task_id,
+			})),
+	].sort(
+		(a, b) =>
+			a.kind.localeCompare(b.kind) ||
+			a.from_task_id.localeCompare(b.from_task_id) ||
+			a.to_task_id.localeCompare(b.to_task_id),
+	);
+	return { ok: true, graph: { selector, nodes, edges } };
+};
+
 export const makeEngine = (ctx: EngineContext): Engine => ({
 	init: ({ fresh }) => {
 		if (fresh) ctx.services.fs.removeFile(ctx.config.dbPath);
@@ -407,6 +647,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				for (const depId of dependsOn) {
 					const dep = db.prepare(sql`SELECT 1 FROM tasks WHERE id = ?`).get(depId);
 					if (dep === undefined) fail("NOT_FOUND", `dependency task not found: ${depId}`);
+					const replacement = db
+						.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id = ?`)
+						.pluck()
+						.get(depId) as string | undefined;
+					if (replacement !== undefined)
+						fail("VALIDATION_ERROR", `dependency task ${depId} was superseded by ${replacement}`);
 				}
 				db.prepare(
 					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
@@ -416,6 +662,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
 					).run(taskId, depId);
 				}
+				assertAcyclic(db);
 				event(ctx, db, "task.created", {
 					task_id: taskId,
 					actor_run_id: actorRunId,
@@ -591,6 +838,228 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				});
 			})();
 			return { ok: true, artifact: { id: artifactId } };
+		}),
+	taskInspect: ({ taskId }) =>
+		withDb(ctx, (db) => {
+			const task = taskSummary(db, taskId);
+			const dependencies = db
+				.prepare(
+					`${taskSummarySelect} WHERE id IN (SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?) ORDER BY created_at ASC, id ASC`,
+				)
+				.all(taskId);
+			const dependents = db
+				.prepare(
+					`${taskSummarySelect} WHERE id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id=?) ORDER BY created_at ASC, id ASC`,
+				)
+				.all(taskId);
+			const artifacts = db
+				.prepare(
+					sql`SELECT id, kind, title, body, created_at FROM artifacts WHERE task_id=? ORDER BY created_at ASC, id ASC`,
+				)
+				.all(taskId);
+			return {
+				ok: true,
+				task: {
+					...task,
+					claimable: isClaimable(db, task),
+					unresolved_dependency_ids: unresolvedDependencies(db, taskId),
+				},
+				dependencies,
+				dependents,
+				supersedes:
+					(db
+						.prepare(sql`SELECT old_task_id FROM task_supersessions WHERE new_task_id=?`)
+						.pluck()
+						.get(taskId) as string | undefined) ?? null,
+				superseded_by:
+					(db
+						.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
+						.pluck()
+						.get(taskId) as string | undefined) ?? null,
+				artifacts,
+			};
+		}),
+	graphInspect: ({ taskId, scope, all, flat, dump }) =>
+		withDb(ctx, (db) => {
+			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
+				(v) => v !== undefined,
+			).length;
+			if (selectorCount !== 1) fail("VALIDATION_ERROR", "provide exactly one graph selector");
+			if (taskId !== undefined) {
+				const result = graphForIds(db, { kind: "task", value: taskId }, [
+					taskSummary(db, taskId).id,
+				]);
+				return flat ? renderFlatGraph(result.graph, dump) : result;
+			}
+			if (scope !== undefined) {
+				const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id=?`).get(scope);
+				if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
+				const result = graphForIds(
+					db,
+					{ kind: "scope", value: scope },
+					(
+						db
+							.prepare(sql`SELECT id FROM tasks WHERE scope_id=? AND status <> 'cancelled'`)
+							.all(scope) as { id: string }[]
+					).map((r) => r.id),
+				);
+				return flat ? renderFlatGraph(result.graph, dump) : result;
+			}
+			const result = graphForIds(
+				db,
+				{ kind: "all" },
+				(
+					db.prepare(sql`SELECT id FROM tasks WHERE status <> 'cancelled'`).all() as {
+						id: string;
+					}[]
+				).map((r) => r.id),
+			);
+			return flat ? renderFlatGraph(result.graph, dump) : result;
+		}),
+	briefing: ({ agent }) =>
+		withDb(ctx, (db) => {
+			const caps =
+				agent === undefined
+					? undefined
+					: (
+							db
+								.prepare(sql`SELECT capability FROM agent_claims WHERE agent_kind=?`)
+								.all(agent) as { capability: string }[]
+						).map((r) => r.capability);
+			if (agent !== undefined && caps?.length === 0)
+				fail("VALIDATION_ERROR", `unknown or unclaiming agent: ${agent}`);
+			const queued = db
+				.prepare(`${taskSummarySelect} WHERE status='queued' ORDER BY created_at ASC, id ASC`)
+				.all() as TaskSummary[];
+			const visible =
+				caps === undefined ? queued : queued.filter((t) => caps.includes(t.capability));
+			return {
+				ok: true,
+				ready: visible.filter((t) => isClaimable(db, t)),
+				blocked: visible
+					.filter((t) => !isClaimable(db, t))
+					.map((t) => {
+						const blockers = unresolvedDependencies(db, t.id).map((id) => {
+							const blocker = taskSummary(db, id);
+							return { id: blocker.id, scope_id: blocker.scope_id, status: blocker.status };
+						});
+						return { ...t, unresolved_dependency_ids: blockers.map((b) => b.id), blockers };
+					}),
+			};
+		}),
+	supersede: ({ taskId, runId, reason, title, body, bodyFile, scope, capability }) =>
+		withDb(ctx, (db) => {
+			const actorRunId = resolveRunId(ctx, runId);
+			liveRun(db, actorRunId);
+			const nonEmptyReason = requireNonEmpty(reason, "--reason");
+			const replacementId = ctx.services.ids.make("task");
+			const old =
+				(db.prepare(sql`SELECT * FROM tasks WHERE id=?`).get(taskId) as
+					| (TaskSummary & { body: string; max_attempts: number })
+					| undefined) ?? fail("NOT_FOUND", `task not found: ${taskId}`);
+			if (!["queued", "failed", "dead_letter", "cancelled"].includes(old.status)) {
+				fail("VALIDATION_ERROR", `task status cannot be superseded: ${old.status}`);
+			}
+			const replacementScope = scope ?? old.scope_id;
+			const replacementCap = capability ?? old.capability;
+			authorized(db, "agent_enqueues", actorRunId, replacementCap);
+			enforceCapScope(db, replacementScope, replacementCap);
+			const replacementBody =
+				body === undefined && bodyFile === undefined ? old.body : resolveBody(ctx, body, bodyFile);
+			const replacementTitle = title ?? old.title;
+			return db.transaction(() => {
+				if (
+					db.prepare(sql`SELECT 1 FROM task_supersessions WHERE old_task_id=?`).get(taskId) !==
+					undefined
+				)
+					fail("VALIDATION_ERROR", "task has already been superseded");
+				const dependents = db
+					.prepare(
+						sql`SELECT t.id, t.status FROM tasks t JOIN task_dependencies td ON td.task_id=t.id WHERE td.depends_on_task_id=?`,
+					)
+					.all(taskId) as { id: string; status: string }[];
+				const retargeted = dependents.filter((d) => d.status === "queued").map((d) => d.id);
+				const invalid = dependents.find((d) => d.status !== "queued" && d.status !== "cancelled");
+				if (invalid !== undefined)
+					fail("VALIDATION_ERROR", `dependent task is not queued: ${invalid.id}`);
+				if (replacementScope !== old.scope_id && retargeted.length > 0)
+					fail("VALIDATION_ERROR", "cannot change scope while retargeting queued dependents");
+				db.prepare(
+					sql`INSERT INTO tasks(id,scope_id,capability,title,body,max_attempts,created_by_run_id) VALUES (?,?,?,?,?,?,?)`,
+				).run(
+					replacementId,
+					replacementScope,
+					replacementCap,
+					replacementTitle,
+					replacementBody,
+					old.max_attempts,
+					actorRunId,
+				);
+				for (const dep of db
+					.prepare(sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`)
+					.all(taskId) as { id: string }[])
+					db.prepare(
+						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
+					).run(replacementId, dep.id);
+				for (const id of retargeted)
+					db.prepare(
+						sql`UPDATE task_dependencies SET depends_on_task_id=? WHERE task_id=? AND depends_on_task_id=?`,
+					).run(replacementId, id, taskId);
+				db.prepare(
+					sql`INSERT INTO task_supersessions(old_task_id,new_task_id,created_by_run_id,reason) VALUES (?,?,?,?)`,
+				).run(taskId, replacementId, actorRunId, nonEmptyReason);
+				if (old.status === "queued") {
+					db.prepare(
+						sql`UPDATE tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+					).run(taskId);
+					event(ctx, db, "task.cancelled", {
+						task_id: taskId,
+						actor_run_id: actorRunId,
+						payload: { reason: nonEmptyReason, superseded_by_task_id: replacementId },
+					});
+				}
+				event(ctx, db, "task.created", {
+					task_id: replacementId,
+					actor_run_id: actorRunId,
+					payload: {
+						scope_id: replacementScope,
+						capability: replacementCap,
+						title: replacementTitle,
+						depends_on_task_ids: (
+							db
+								.prepare(
+									sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`,
+								)
+								.all(replacementId) as { id: string }[]
+						).map((r) => r.id),
+						supersedes_task_id: taskId,
+					},
+				});
+				event(ctx, db, "task.superseded", {
+					task_id: taskId,
+					actor_run_id: actorRunId,
+					payload: {
+						new_task_id: replacementId,
+						reason: nonEmptyReason,
+						retargeted_dependent_task_ids: retargeted,
+					},
+				});
+				assertAcyclic(db);
+				return {
+					ok: true,
+					task: {
+						id: replacementId,
+						status: "queued",
+						scope_id: replacementScope,
+						capability: replacementCap,
+					},
+					supersession: {
+						old_task_id: taskId,
+						new_task_id: replacementId,
+						retargeted_dependent_task_ids: retargeted,
+					},
+				};
+			})();
 		}),
 });
 

@@ -18,7 +18,7 @@ Central dependency map for implementation slices. Individual task files describe
   - **Status:** complete
   - **Blocked by:** [task-001c](./task-001c.md)
 - [ ] [task-001e — Slice 1e: Foundation contract hardening + acceptance](./task-001e.md)
-  - **Status:** pending
+  - **Status:** complete
   - **Blocked by:** [task-001a](./task-001a.md), [task-001b](./task-001b.md), [task-001c](./task-001c.md), [task-001d](./task-001d.md)
 - [ ] [task-002 — Slice 2: Run lifecycle transitions: cleanup, interrupt, timeout](./task-002.md)
   - **Status:** pending

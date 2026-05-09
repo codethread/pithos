@@ -74,7 +74,28 @@ type CommandInput =
 			readonly kind: string;
 			readonly title: string;
 			readonly bodyFile: string | undefined;
-	  };
+	  }
+	| { readonly command: "task.inspect"; readonly taskId: string }
+	| {
+			readonly command: "task.supersede";
+			readonly taskId: string;
+			readonly runId: string | undefined;
+			readonly reason: string;
+			readonly title: string | undefined;
+			readonly body: string | undefined;
+			readonly bodyFile: string | undefined;
+			readonly scope: string | undefined;
+			readonly capability: Capability | undefined;
+	  }
+	| {
+			readonly command: "graph.inspect";
+			readonly taskId: string | undefined;
+			readonly scope: string | undefined;
+			readonly all: boolean;
+			readonly flat: boolean;
+			readonly dump: boolean;
+	  }
+	| { readonly command: "briefing"; readonly agent: string | undefined };
 
 const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
 const json = (value: unknown): string => `${JSON.stringify(value)}\n`;
@@ -121,6 +142,20 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 					return;
 				case "task.artifact.add":
 					ctx.services.output.write(json(engine.artifactAdd(input)));
+					return;
+				case "task.inspect":
+					ctx.services.output.write(json(engine.taskInspect({ taskId: input.taskId })));
+					return;
+				case "task.supersede":
+					ctx.services.output.write(json(engine.supersede(input)));
+					return;
+				case "graph.inspect": {
+					const result = engine.graphInspect(input);
+					ctx.services.output.write(typeof result === "string" ? result : json(result));
+					return;
+				}
+				case "briefing":
+					ctx.services.output.write(json(engine.briefing({ agent: input.agent })));
 					return;
 			}
 		} catch (error) {
@@ -292,6 +327,34 @@ export const makePithosCommand = (ctx: CliContext) => {
 			}),
 	);
 	const taskArtifact = Command.make("artifact").pipe(Command.withSubcommands([artifactAdd]));
+	const taskInspect = Command.make("inspect", { taskId: Args.text({ name: "task-id" }) }, (o) =>
+		runCommand(ctx, { command: "task.inspect", taskId: o.taskId }),
+	);
+	const taskSupersede = Command.make(
+		"supersede",
+		{
+			taskId: Args.text({ name: "task-id" }),
+			runId: Options.text("run").pipe(Options.optional),
+			reason: Options.text("reason"),
+			title: Options.text("title").pipe(Options.optional),
+			body: Options.text("body").pipe(Options.optional),
+			bodyFile: Options.text("body-file").pipe(Options.optional),
+			scope: Options.text("scope").pipe(Options.optional),
+			capability: capability.pipe(Options.optional),
+		},
+		(o) =>
+			runCommand(ctx, {
+				command: "task.supersede",
+				taskId: o.taskId,
+				runId: opt(o.runId),
+				reason: o.reason,
+				title: opt(o.title),
+				body: opt(o.body),
+				bodyFile: opt(o.bodyFile),
+				scope: opt(o.scope),
+				capability: opt(o.capability),
+			}),
+	);
 	const task = Command.make("task").pipe(
 		Command.withSubcommands([
 			taskEnqueue,
@@ -299,10 +362,37 @@ export const makePithosCommand = (ctx: CliContext) => {
 			taskHeartbeat,
 			taskComplete,
 			taskFail,
+			taskInspect,
+			taskSupersede,
 			taskArtifact,
 		]),
 	);
+	const graphInspect = Command.make(
+		"inspect",
+		{
+			taskId: Options.text("task").pipe(Options.optional),
+			scope: Options.text("scope").pipe(Options.optional),
+			all: Options.boolean("all"),
+			flat: Options.boolean("flat"),
+			dump: Options.boolean("dump"),
+		},
+		(o) =>
+			runCommand(ctx, {
+				command: "graph.inspect",
+				taskId: opt(o.taskId),
+				scope: opt(o.scope),
+				all: o.all,
+				flat: o.flat,
+				dump: o.dump,
+			}),
+	);
+	const graph = Command.make("graph").pipe(Command.withSubcommands([graphInspect]));
+	const briefing = Command.make(
+		"briefing",
+		{ agent: Options.text("agent").pipe(Options.optional) },
+		(o) => runCommand(ctx, { command: "briefing", agent: opt(o.agent) }),
+	);
 	return Command.make("pithos-next").pipe(
-		Command.withSubcommands([init, scope, runParent, task, events]),
+		Command.withSubcommands([init, scope, runParent, task, graph, events, briefing]),
 	);
 };

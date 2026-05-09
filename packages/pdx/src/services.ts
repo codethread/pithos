@@ -78,12 +78,16 @@ export const makeRegistry = Effect.gen(function* () {
 	});
 });
 
+type JsonObject = { readonly [K in string]: JsonValue };
+
+export type JsonValue = string | number | boolean | null | readonly JsonValue[] | JsonObject;
+
 export interface SupervisorLogRecord {
 	readonly ts: string;
 	readonly level: "debug" | "info" | "warn" | "error";
 	readonly span: string;
 	readonly msg: string;
-	readonly data?: Record<string, unknown>;
+	readonly data?: JsonObject;
 }
 
 export interface SupervisorLogService {

@@ -1,9 +1,8 @@
 import { Effect } from "effect";
 import { appendFile, mkdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { PdxError } from "./errors.js";
-import { FileSystem, Clock, Ids, PithosClient, Process, type ProcessResult } from "./services.js";
+import { FileSystem, Clock, PithosClient, Process, type ProcessResult } from "./services.js";
 
 const execFileEffect = (
 	file: string,
@@ -50,5 +49,6 @@ export const FileSystemLive = FileSystem.of({
 		}).pipe(Effect.asVoid),
 });
 export const ClockLive = Clock.of({ nowIso: Effect.sync(() => new Date().toISOString()) });
-export const IdsLive = Ids.of({ next: (prefix) => Effect.sync(() => `${prefix}_${randomUUID()}`) });
-export const PithosClientLive = PithosClient.of({ run: (args) => execFileEffect("pithos", args) });
+export const PithosClientLive = PithosClient.of({
+	run: (args) => execFileEffect("pithos-next", args),
+});

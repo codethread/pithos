@@ -4,6 +4,7 @@ import { PdxError } from "./errors.js";
 export const IpcRequestSchema = Schema.Union(
 	Schema.Struct({ kind: Schema.Literal("ping") }),
 	Schema.Struct({ kind: Schema.Literal("status") }),
+	Schema.Struct({ kind: Schema.Literal("stop") }),
 );
 export type IpcRequest = Schema.Schema.Type<typeof IpcRequestSchema>;
 

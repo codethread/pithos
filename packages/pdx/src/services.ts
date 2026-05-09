@@ -27,11 +27,6 @@ export interface ClockService {
 }
 export class Clock extends Context.Tag("pdx/Clock")<Clock, ClockService>() {}
 
-export interface IdsService {
-	readonly next: (prefix: string) => Effect.Effect<string>;
-}
-export class Ids extends Context.Tag("pdx/Ids")<Ids, IdsService>() {}
-
 export interface TmuxService {
 	readonly hasSession: (target: string) => Effect.Effect<boolean, PdxError>;
 	readonly lsSessions: () => Effect.Effect<readonly string[], PdxError>;

@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { parsePdxConfig } from "../src/config.js";
 import { parseIpcRequest } from "../src/ipc.js";
 import { makeSupervisorLog } from "../src/log.js";
-import { Clock, FileSystem, makeRegistry, Process, Registry } from "../src/services.js";
+import {
+	Clock,
+	FileSystem,
+	makeRegistry,
+	PithosClient,
+	Process,
+	Registry,
+	SupervisorLog,
+	Tmux,
+} from "../src/services.js";
 import { makeTmux } from "../src/tmux.js";
+import { DAEMON_TARGET, PDX_SYSTEM_RUN_ID, openPdx, runDaemon } from "../src/controller.js";
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
@@ -67,6 +80,75 @@ describe("pdx substrate", () => {
 		expect(() => parseIpcRequest("{")).toThrow(/Malformed IPC request JSON/);
 		expect(() => parseIpcRequest(JSON.stringify({ kind: "kill" }))).toThrow(/Invalid IPC request/);
 		expect(parseIpcRequest(JSON.stringify({ kind: "ping" }))).toEqual({ kind: "ping" });
+	});
+
+	it("open rejects when daemon tmux session already exists", async () => {
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const fs = FileSystem.of({ appendFile: () => Effect.void, mkdir: () => Effect.void });
+		const pithos = PithosClient.of({
+			run: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+		});
+		await expect(
+			run(
+				openPdx(parsePdxConfig({ home: "/tmp/pdx-home" })).pipe(
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(FileSystem, fs),
+					Effect.provideService(PithosClient, pithos),
+				),
+			),
+		).rejects.toThrow(`${DAEMON_TARGET} already exists`);
+	});
+
+	it("daemon startup creates runs dir and upserts pdx system run without Pandora", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const mkdirs: string[] = [];
+		const pithosCalls: string[][] = [];
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			mkdir: (path) => Effect.sync(() => mkdirs.push(path)),
+		});
+		const pithos = PithosClient.of({
+			run: (args) =>
+				Effect.sync(() => {
+					pithosCalls.push([...args]);
+					return { exitCode: 0, stdout: "{}", stderr: "" };
+				}),
+		});
+		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const handle = await run(
+			runDaemon(parsePdxConfig({ home })).pipe(
+				Effect.provideService(FileSystem, fs),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(SupervisorLog, log),
+			),
+		);
+		await run(handle.close);
+		expect(mkdirs).toEqual([`${home}/runs`]);
+		expect(pithosCalls).toContainEqual(["scope", "upsert", "--kind", "global"]);
+		expect(pithosCalls).toContainEqual([
+			"run",
+			"upsert",
+			"--agent",
+			"pdx",
+			"--mode",
+			"afk",
+			"--scope",
+			"global",
+			"--cwd",
+			home,
+			"--session-id",
+			DAEMON_TARGET,
+			"--run",
+			PDX_SYSTEM_RUN_ID,
+		]);
+		expect(pithosCalls.some((args) => args.includes("pandora"))).toBe(false);
 	});
 
 	it("starts registry empty and supports typed operations", async () => {

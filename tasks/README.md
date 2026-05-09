@@ -36,7 +36,7 @@ Central dependency map for implementation slices. Individual task files describe
   - **Status:** complete
   - **Blocked by:** [task-001e](./task-001e.md)
 - [ ] [task-005b — Slice 5b: pdx open/close + pdx system run](./task-005b.md)
-  - **Status:** pending
+  - **Status:** complete
   - **Blocked by:** [task-005a](./task-005a.md), [task-002](./task-002.md)
 - [ ] [task-005c — Slice 5c: pdx status + logs show](./task-005c.md)
   - **Status:** pending

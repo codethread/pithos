@@ -31,6 +31,8 @@ class DirectDependencyIdRow extends Schema.Class<DirectDependencyIdRow>("DirectD
 	depends_on_task_id: Schema.String,
 }) {}
 
+const CapabilitySchema = Schema.Literal("triage", "design", "execute", "escalate");
+
 interface TaskCreatedEventPayload {
 	readonly scope_id: string;
 	readonly capability: string;
@@ -178,6 +180,19 @@ export const supersedeCommand = (
 		const db = yield* DbService;
 		const output = yield* OutputService;
 
+		const capabilityOverride =
+			opts.capability === undefined
+				? undefined
+				: yield* Schema.decodeUnknown(CapabilitySchema)(opts.capability).pipe(
+						Effect.mapError(
+							() =>
+								new PithosError({
+									code: "VALIDATION_ERROR",
+									message: `Invalid --capability value: '${opts.capability}'. Valid values: triage, design, execute, escalate`,
+								}),
+						),
+					);
+
 		let bodyOverride = opts.body;
 		if (opts.bodyFile !== undefined) {
 			bodyOverride = yield* fs.readFile(opts.bodyFile);
@@ -205,7 +220,12 @@ export const supersedeCommand = (
 				}
 				yield* decodeIdRow(runRows[0]!);
 
-				if (oldTask.status === "claimed" || oldTask.status === "running") {
+				if (
+					oldTask.status !== "queued" &&
+					oldTask.status !== "failed" &&
+					oldTask.status !== "dead_letter" &&
+					oldTask.status !== "cancelled"
+				) {
 					yield* Effect.fail(
 						new PithosError({
 							code: "USER_ERROR",
@@ -283,6 +303,18 @@ export const supersedeCommand = (
 					.filter((dependent) => dependent.status === "queued")
 					.map((dependent) => dependent.id);
 
+				if (replacementScopeId !== oldTask.scope_id && retargetedDependentTaskIds.length > 0) {
+					yield* Effect.fail(
+						new PithosError({
+							code: "USER_ERROR",
+							message:
+								`Cannot supersede task ${taskId} into scope ${replacementScopeId} because queued direct dependents would be retargeted: ` +
+								retargetedDependentTaskIds.join(", "),
+						}),
+					);
+					return yield* Effect.never;
+				}
+
 				const dependencyRows = yield* db.query(
 					sql`SELECT td.depends_on_task_id
            FROM task_dependencies td
@@ -296,7 +328,7 @@ export const supersedeCommand = (
 					decodeDirectDependencyIdRow,
 				).pipe(Effect.map((rows) => rows.map((row) => row.depends_on_task_id)));
 
-				const replacementCapability = opts.capability ?? oldTask.capability;
+				const replacementCapability = capabilityOverride ?? oldTask.capability;
 				const replacementTitle = opts.title ?? oldTask.title;
 				const replacementBody = bodyOverride ?? oldTask.body;
 
@@ -334,11 +366,6 @@ export const supersedeCommand = (
 						[replacementTaskId, dependencyId],
 					);
 				}
-
-				// Remove the old task's direct upstream dependency rows so the current-state
-				// graph no longer includes obsolete old->blocker edges.
-				// Supersession history is preserved via task_supersessions and events.
-				yield* db.run(sql`DELETE FROM task_dependencies WHERE task_id = ?`, [taskId]);
 
 				for (const dependentTaskId of retargetedDependentTaskIds) {
 					const rewiredRows = yield* db.query(
@@ -494,7 +521,7 @@ Output (JSON):
       "id": "task_...",
       "status": "queued",
       "scope_id": "repo:...",
-      "capability": "build"
+      "capability": "execute"
     },
     "supersession": {
       "old_task_id": "task_old",
@@ -511,7 +538,7 @@ Notes:
 
 Examples:
   pithos supersede task_api --run run_pandora --reason "Wrong interface; replacing with corrected task"
-  pithos supersede task_api --run run_pandora --reason "Need a repo-local replacement" --scope repo:work/repo --capability build --title "Fix API contract"
+  pithos supersede task_api --run run_pandora --reason "Need a repo-local replacement" --scope repo:work/repo --capability execute --title "Fix API contract"
 
 Exit codes: 0 success | 1 user error | 2 validation error | 3 not found
 `;

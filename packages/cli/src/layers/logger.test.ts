@@ -212,14 +212,17 @@ describe("claim command emits diagnostic breadcrumbs", () => {
 		const cap = makeLogCapture(LogLevel.Debug);
 		// Seed run validation to pass, but no task rows from the UPDATE RETURNING
 		const db = makeDbServiceTest(
-			new Map([["SELECT id FROM runs WHERE id = ?", [{ id: "run_1" }]]]),
+			new Map([
+				["SELECT id FROM runs WHERE id = ?", [{ id: "run_1" }]],
+				["SELECT task_id FROM runs WHERE id = ?", [{ task_id: null }]],
+			]),
 		);
 
 		const exit = await Effect.runPromiseExit(
 			claimCommand({
 				run: "run_1",
 				scope: "global",
-				capability: "watch",
+				capability: "execute",
 			}).pipe(
 				Effect.provide(Layer.merge(db, makeOutputServiceSilent())),
 				Effect.provide(cap.layer),

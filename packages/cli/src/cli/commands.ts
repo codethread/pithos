@@ -20,6 +20,7 @@ import {
 import { runRegisterCommand, runEndCommand } from "../commands/run.ts";
 import { enqueueCommand } from "../commands/enqueue.ts";
 import { supersedeCommand } from "../commands/supersede.ts";
+import { cancelCommand } from "../commands/cancel.ts";
 import { claimCommand } from "../commands/claim.ts";
 import { heartbeatCommand } from "../commands/heartbeat.ts";
 import { completeCommand } from "../commands/complete.ts";
@@ -211,7 +212,7 @@ const enqueue = Command.make(
 		),
 		capability: Options.text("capability").pipe(
 			Options.optional,
-			Options.withDescription("Capability label for matching workers, e.g. triage, watch"),
+			Options.withDescription("Capability: triage, design, execute, or escalate"),
 		),
 		title: Options.text("title").pipe(
 			Options.optional,
@@ -251,7 +252,7 @@ const enqueue = Command.make(
 			"pithos enqueue",
 			[
 				"pithos enqueue --scope global --capability triage --title 'Review PR #42'",
-				"pithos enqueue --scope repo:work/repo --capability watch --title 'Watch build' --depends-on task_design --depends-on task_api",
+				"pithos enqueue --scope repo:work/repo --capability execute --title 'Run build' --depends-on task_design --depends-on task_api",
 			],
 			"0 success | 1 user error | 2 validation error | 3 not found",
 		),
@@ -315,8 +316,42 @@ const supersede = Command.make(
 			"pithos supersede",
 			[
 				"pithos supersede task_api --run run_pandora --reason 'Wrong interface; replacing with corrected task'",
-				"pithos supersede task_api --run run_pandora --reason 'Need repo-local fix' --scope repo:work/repo --capability build --title 'Fix API contract'",
+				"pithos supersede task_api --run run_pandora --reason 'Need repo-local fix' --scope repo:work/repo --capability execute --title 'Fix API contract'",
 			],
+			"0 success | 1 user error | 2 validation error | 3 not found",
+		),
+	),
+);
+
+// ---------------------------------------------------------------------------
+// pithos cancel
+// ---------------------------------------------------------------------------
+
+const cancel = Command.make(
+	"cancel",
+	{
+		taskId: Args.text({ name: "task-id" }),
+		run: Options.text("run").pipe(
+			Options.optional,
+			Options.withDescription("Run ID performing the cancellation [required]"),
+		),
+		reason: Options.text("reason").pipe(
+			Options.optional,
+			Options.withDescription("Human-readable cancellation reason [required]"),
+		),
+	},
+	({ taskId, run, reason }) =>
+		cancelCommand({
+			taskId,
+			run: opt(run),
+			reason: opt(reason),
+		}),
+).pipe(
+	Command.withDescription(
+		desc(
+			"Cancel queued, failed, or dead-lettered work and emit task.cancelled",
+			"pithos cancel",
+			["pithos cancel task_old --run run_pandora --reason 'No longer needed'"],
 			"0 success | 1 user error | 2 validation error | 3 not found",
 		),
 	),
@@ -360,7 +395,7 @@ const claim = Command.make(
 			"pithos claim",
 			[
 				"pithos claim --run run_abc --scope global --capability triage",
-				"pithos claim --run run_abc --scope repo:work/repo --capability watch --lease-minutes 15",
+				"pithos claim --run run_abc --scope repo:work/repo --capability execute --lease-minutes 15",
 			],
 			"0 success with fencing_token in output | 2 validation error | 5 no ready work",
 		),
@@ -640,7 +675,7 @@ const inspectGraph = Command.make(
 			HelpDoc.p("Choose exactly one selector: --task <id>, --scope <scope-id>, or --all."),
 			HelpDoc.p("Output (default JSON, machine-readable):"),
 			HelpDoc.p(
-				'  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "current" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }',
+				'  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "all" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }',
 			),
 			HelpDoc.p(
 				"Output with --flat (plain-text supersession-chain tree, human/agent-readable prose):",
@@ -683,6 +718,95 @@ const inspect = Command.make("inspect").pipe(
 );
 
 // ---------------------------------------------------------------------------
+// pithos task inspect / supersede / cancel
+// ---------------------------------------------------------------------------
+
+const task = Command.make("task").pipe(
+	Command.withDescription(
+		HelpDoc.blocks([
+			HelpDoc.p("Manage task graph entries."),
+			HelpDoc.p("Examples:"),
+			HelpDoc.p("  pithos task inspect task_abc"),
+			HelpDoc.p("  pithos task supersede task_abc --run run_pandora --reason 'Wrong interface'"),
+			HelpDoc.p("  pithos task cancel task_abc --run run_pandora --reason 'No longer needed'"),
+			HelpDoc.p("Exit codes: 0 success | 1 user error | 2 validation error | 3 not found"),
+		]),
+	),
+	Command.withSubcommands([
+		Command.make("inspect", { id: Args.text({ name: "task-id" }) }, ({ id }) =>
+			inspectTaskCommand(id),
+		),
+		Command.make(
+			"supersede",
+			{
+				taskId: Args.text({ name: "task-id" }),
+				run: Options.text("run").pipe(Options.optional),
+				reason: Options.text("reason").pipe(Options.optional),
+				title: Options.text("title").pipe(Options.optional),
+				body: Options.text("body").pipe(Options.optional),
+				bodyFile: Options.text("body-file").pipe(Options.optional),
+				scope: Options.text("scope").pipe(Options.optional),
+				capability: Options.text("capability").pipe(Options.optional),
+			},
+			({ taskId, run, reason, title, body, bodyFile, scope, capability }) =>
+				supersedeCommand({
+					taskId,
+					run: opt(run),
+					reason: opt(reason),
+					title: opt(title),
+					body: opt(body),
+					bodyFile: opt(bodyFile),
+					scope: opt(scope),
+					capability: opt(capability),
+				}),
+		),
+		Command.make(
+			"cancel",
+			{
+				taskId: Args.text({ name: "task-id" }),
+				run: Options.text("run").pipe(Options.optional),
+				reason: Options.text("reason").pipe(Options.optional),
+			},
+			({ taskId, run, reason }) => cancelCommand({ taskId, run: opt(run), reason: opt(reason) }),
+		),
+	]),
+);
+
+// ---------------------------------------------------------------------------
+// pithos graph inspect
+// ---------------------------------------------------------------------------
+
+const graph = Command.make("graph").pipe(
+	Command.withDescription(
+		HelpDoc.blocks([
+			HelpDoc.p("Inspect dependency/supersession graphs."),
+			HelpDoc.p("Examples:"),
+			HelpDoc.p("  pithos graph inspect --task task_abc"),
+			HelpDoc.p("  pithos graph inspect --scope repo:work/repo"),
+			HelpDoc.p("  pithos graph inspect --all"),
+			HelpDoc.p("Exit codes: 0 success | 2 validation error | 3 not found"),
+		]),
+	),
+	Command.withSubcommands([
+		Command.make(
+			"inspect",
+			{
+				task: Options.text("task").pipe(Options.optional),
+				scope: Options.text("scope").pipe(Options.optional),
+				all: Options.boolean("all"),
+				current: Options.boolean("current"),
+				flat: Options.boolean("flat"),
+				dump: Options.boolean("dump"),
+			},
+			({ task, scope, all, current, flat, dump }) =>
+				decodeInspectGraphSelector({ taskId: opt(task), scopeId: opt(scope), all, current }).pipe(
+					Effect.flatMap((selector) => inspectGraphCommand(selector, flat, dump)),
+				),
+		),
+	]),
+);
+
+// ---------------------------------------------------------------------------
 // pithos tail
 // ---------------------------------------------------------------------------
 
@@ -703,7 +827,7 @@ const tail = Command.make(
 			HelpDoc.p(
 				"  task.created     => scope_id, capability, title, depends_on_task_ids, optional supersedes_task_id",
 			),
-			HelpDoc.p("  task.cancelled   => reason, superseded_by_task_id"),
+			HelpDoc.p("  task.cancelled   => reason, optional superseded_by_task_id"),
 			HelpDoc.p("  task.superseded  => new_task_id, reason, retargeted_dependent_task_ids"),
 			HelpDoc.p("Examples:"),
 			HelpDoc.p("  pithos tail"),
@@ -808,6 +932,9 @@ export const pithosCommand = Command.make("pithos").pipe(
 		run,
 		enqueue,
 		supersede,
+		cancel,
+		task,
+		graph,
 		claim,
 		heartbeat,
 		complete,

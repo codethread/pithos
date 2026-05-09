@@ -207,8 +207,8 @@ describe("briefingCommand (integration — real SQLite)", () => {
 			dependsOn: ["task_blocker_br"],
 		});
 		await registerRun("run_claimed_order");
-		await enqueue("task_claimed_br", { title: "Claimed task", capability: "watch" });
-		await claim("run_claimed_order", { capability: "watch" });
+		await enqueue("task_claimed_br", { title: "Claimed task", capability: "execute" });
+		await claim("run_claimed_order", { capability: "execute" });
 
 		const text = await runBriefing();
 		const readyIndex = text.indexOf("[queued] `task_ready_br`");

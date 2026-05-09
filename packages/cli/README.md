@@ -19,13 +19,14 @@ pithos <command> --help              # per-command flags + examples + exit codes
 - `pithos scope upsert --kind {global|repo|worktree} --path <path>` — register the unit-of-work scope.
 - `pithos run register|end` — agent session lifecycle.
 - `pithos enqueue` — add a task to a scope with a capability and optional repeatable `--depends-on` blockers.
-- `pithos supersede <task-id> --run <run-id> --reason <text>` — replace a task with a fresh queued task, preserve supersession history, and retarget direct queued dependents.
+- `pithos task supersede <task-id> --run <run-id> --reason <text>` — replace a task with a fresh queued task, preserve supersession history, and retarget direct queued dependents.
+- `pithos task cancel <task-id> --run <run-id> --reason <text>` — cancel queued, failed, or dead-lettered work and emit `task.cancelled`.
 - `pithos claim` — atomic claim of the oldest ready queued task in the requested scope/capability, with lease + fencing token.
 - `pithos heartbeat` — extend lease while working; throttled.
 - `pithos complete|fail` — terminate a claim, fenced.
 - `pithos artifact add` — attach a worker-completion or other artifact to a task.
-- `pithos inspect scope|run|task|graph` — read structured state; `inspect task` includes direct dependencies, dependents, unresolved blockers, supersession links, and artifacts, while `inspect graph --task <id> | --scope <scope-id> | --current` returns a closed dependency/supersession graph for one task, one scope, or all non-cancelled work. Graph nodes include `claimable`, `unresolved_dependency_ids`, `supersedes_task_id`, and `superseded_by_task_id`; graph edges are `depends_on`/`supersedes` records with dependency `satisfied` state.
-- `pithos tail [--limit N]` — recent events, including graph-history payloads for `task.created` (`depends_on_task_ids`, optional `supersedes_task_id`), `task.cancelled` (`reason`, `superseded_by_task_id`), and `task.superseded` (`new_task_id`, `reason`, `retargeted_dependent_task_ids`).
+- `pithos inspect scope|run|task|graph` / `pithos task inspect` / `pithos graph inspect` — read structured state; task inspection includes direct dependencies, dependents, unresolved blockers, supersession links, and artifacts, while graph inspection with `--task <id> | --scope <scope-id> | --all` returns a closed dependency/supersession graph for one task, one scope, or all non-cancelled work. Graph nodes include `claimable`, `unresolved_dependency_ids`, `supersedes_task_id`, and `superseded_by_task_id`; graph edges are `depends_on`/`supersedes` records with dependency `satisfied` state.
+- `pithos tail [--limit N]` — recent events, including graph-history payloads for `task.created` (`depends_on_task_ids`, optional `supersedes_task_id`), `task.cancelled` (`reason`, optional `superseded_by_task_id`), and `task.superseded` (`new_task_id`, `reason`, `retargeted_dependent_task_ids`).
 - `pithos sweep` — requeue expired leases, dead-letter exhausted tasks, mark stale runs.
 - `pithos briefing --agent pandora` — markdown briefing with `as_of_event_id` watermark plus ready vs blocked queued work.
 

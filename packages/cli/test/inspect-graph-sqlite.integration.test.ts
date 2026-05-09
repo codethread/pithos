@@ -46,7 +46,7 @@ type GraphEdge =
 type GraphSelector =
 	| { readonly kind: "task"; readonly value: string }
 	| { readonly kind: "scope"; readonly value: string }
-	| { readonly kind: "current" };
+	| { readonly kind: "all" };
 
 interface GraphResponse {
 	readonly ok: boolean;
@@ -190,13 +190,13 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 		});
 		await enqueue("task_b", {
 			scope: backendScopeId,
-			capability: "build",
+			capability: "execute",
 			title: "Original API task",
 			dependsOn: ["task_a"],
 		});
 		await enqueue("task_c", {
 			scope: frontendScopeId,
-			capability: "build",
+			capability: "execute",
 			title: "Update FE client",
 			dependsOn: ["task_b"],
 		});
@@ -243,7 +243,7 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 				{
 					id: "task_b",
 					scope_id: backendScopeId,
-					capability: "build",
+					capability: "execute",
 					status: "cancelled",
 					title: "Original API task",
 					claimable: false,
@@ -254,7 +254,7 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 				{
 					id: "task_c",
 					scope_id: frontendScopeId,
-					capability: "build",
+					capability: "execute",
 					status: "queued",
 					title: "Update FE client",
 					claimable: false,
@@ -265,7 +265,7 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 				{
 					id: "task_d",
 					scope_id: backendScopeId,
-					capability: "build",
+					capability: "execute",
 					status: "queued",
 					title: "Fix API",
 					claimable: true,
@@ -275,6 +275,12 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 				},
 			],
 			expectedEdges: [
+				{
+					kind: "depends_on",
+					from_task_id: "task_b",
+					to_task_id: "task_a",
+					satisfied: true,
+				},
 				{
 					kind: "depends_on",
 					from_task_id: "task_c",
@@ -330,10 +336,10 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 		});
 		markTaskStatus("task_f", "cancelled");
 
-		const parsed = await inspectGraph({ kind: "current" });
+		const parsed = await inspectGraph({ kind: "all" });
 
 		expect(parsed.ok).toBe(true);
-		expect(parsed.graph.selector).toEqual({ kind: "current" });
+		expect(parsed.graph.selector).toEqual({ kind: "all" });
 		expect(parsed.graph.nodes).toEqual(fixture.expectedNodes);
 		expect(parsed.graph.edges).toEqual(fixture.expectedEdges);
 		expect(parsed.graph.nodes.some((node) => node.id === "task_e")).toBe(false);
@@ -353,7 +359,7 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 	});
 
 	it("--flat --current over an empty DB prints empty string", async () => {
-		const result = await inspectGraphFlat({ kind: "current" });
+		const result = await inspectGraphFlat({ kind: "all" });
 		expect(result).toBe("");
 	});
 
@@ -383,7 +389,7 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 		markTaskStatus("task_d", "done");
 
 		// --flat without dump should hide the completed chain and standalone done nodes
-		const result = await inspectGraphFlat({ kind: "current" });
+		const result = await inspectGraphFlat({ kind: "all" });
 		// task_a (done, standalone) filtered out
 		// task_b→task_d chain (cancelled→done) filtered out (fully terminal)
 		// task_c (done, standalone) filtered out
@@ -396,7 +402,7 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 		markTaskStatus("task_d", "done");
 
 		// --flat with dump should show everything
-		const result = await inspectGraphFlat({ kind: "current" }, true);
+		const result = await inspectGraphFlat({ kind: "all" }, true);
 		expect(result).toContain("[done] Finalize API sketch");
 		expect(result).toContain("[cancelled] Original API task");
 		expect(result).toContain("  [done] Fix API");
@@ -409,8 +415,8 @@ describe("inspectGraphCommand (integration — real SQLite)", () => {
 		markTaskStatus("task_d", "done");
 
 		// JSON with dump=true should produce same output as dump=false (dump no-op in JSON)
-		const parsedDump = await inspectGraph({ kind: "current" }, true);
-		const parsedNoDump = await inspectGraph({ kind: "current" }, false);
+		const parsedDump = await inspectGraph({ kind: "all" }, true);
+		const parsedNoDump = await inspectGraph({ kind: "all" }, false);
 
 		expect(parsedDump.graph.nodes).toEqual(parsedNoDump.graph.nodes);
 		expect(parsedDump.graph.edges).toEqual(parsedNoDump.graph.edges);

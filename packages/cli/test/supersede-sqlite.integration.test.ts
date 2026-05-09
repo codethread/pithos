@@ -97,7 +97,6 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 
 	it("rewrites a -> b -> c to a -> d -> c, cancels queued old task, and exposes supersession links in inspect", async () => {
 		const oldScopeId = await upsertRepoScope("repo-old");
-		const newScopeId = await upsertRepoScope("repo-new");
 		const bodyPath = join(tempDir, "replacement.md");
 		writeFileSync(bodyPath, "Replacement body from file");
 
@@ -109,19 +108,19 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 		});
 		await enqueue("task_b", {
 			scope: oldScopeId,
-			capability: "build",
+			capability: "execute",
 			title: "Original middle task",
 			body: "Old body",
 		});
 		await enqueue("task_c", {
 			scope: "global",
-			capability: "build",
+			capability: "execute",
 			title: "Downstream queued dependent",
 			dependsOn: ["task_b"],
 		});
 		await enqueue("task_cancelled_child", {
 			scope: "global",
-			capability: "build",
+			capability: "execute",
 			title: "Cancelled dependent",
 			dependsOn: ["task_b"],
 		});
@@ -161,8 +160,7 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 					reason: "Wrong middle task",
 					title: "Replacement middle task",
 					bodyFile: bodyPath,
-					scope: newScopeId,
-					capability: "review",
+					capability: "execute",
 				}),
 				Layer.mergeAll(dbLayer, makeIdServiceTest(["task_d"]), FsServiceLive, out.layer),
 			),
@@ -183,8 +181,8 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 			task: {
 				id: "task_d",
 				status: "queued",
-				scope_id: newScopeId,
-				capability: "review",
+				scope_id: oldScopeId,
+				capability: "execute",
 			},
 			supersession: {
 				old_task_id: "task_b",
@@ -276,8 +274,8 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 		expect(newTask).toMatchObject({
 			id: "task_d",
 			status: "queued",
-			scope_id: newScopeId,
-			capability: "review",
+			scope_id: oldScopeId,
+			capability: "execute",
 			title: "Replacement middle task",
 			body: "Replacement body from file",
 			payload_json: '{"source":"old"}',
@@ -291,6 +289,7 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 			completed_at: null,
 		});
 		expect(dependencyRows).toEqual([
+			{ task_id: "task_b", depends_on_task_id: "task_a" },
 			{ task_id: "task_c", depends_on_task_id: "task_d" },
 			{ task_id: "task_cancelled_child", depends_on_task_id: "task_b" },
 			{ task_id: "task_d", depends_on_task_id: "task_a" },
@@ -314,8 +313,8 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 
 		expect(createdEvent).toBeDefined();
 		expect(JSON.parse(createdEvent?.payload_json ?? "{}")).toEqual({
-			scope_id: newScopeId,
-			capability: "review",
+			scope_id: oldScopeId,
+			capability: "execute",
 			title: "Replacement middle task",
 			depends_on_task_ids: ["task_a"],
 			supersedes_task_id: "task_b",
@@ -359,7 +358,7 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 
 		expect(oldInspect.superseded_by).toEqual({
 			id: "task_d",
-			scope_id: newScopeId,
+			scope_id: oldScopeId,
 			status: "queued",
 			title: "Replacement middle task",
 		});
@@ -374,11 +373,97 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 		expect(childInspect.dependencies).toEqual([
 			{
 				id: "task_d",
-				scope_id: newScopeId,
+				scope_id: oldScopeId,
 				status: "queued",
 				title: "Replacement middle task",
 			},
 		]);
+	});
+
+	it("rejects scope changes when queued direct dependents would be retargeted", async () => {
+		const oldScopeId = await upsertRepoScope("repo-old");
+		const newScopeId = await upsertRepoScope("repo-new");
+		await registerRun("run_actor");
+		await enqueue("task_old", { scope: oldScopeId });
+		await enqueue("task_child", { dependsOn: ["task_old"] });
+
+		const exit = await runEff(
+			Effect.provide(
+				supersedeCommand({
+					taskId: "task_old",
+					run: "run_actor",
+					reason: "Move replacement to another scope",
+					scope: newScopeId,
+				}),
+				makeLayer(["task_new"]),
+			),
+		);
+
+		expect(Exit.isFailure(exit)).toBe(true);
+		const cause = Exit.isFailure(exit) ? String(exit.cause) : "";
+		expect(cause).toContain("Cannot supersede task task_old into scope");
+		expect(cause).toContain("queued direct dependents would be retargeted: task_child");
+
+		const db = new Database(dbPath);
+		const taskIds = db.prepare(`SELECT id FROM tasks ORDER BY id ASC`).all() as { id: string }[];
+		const dependencyRows = db
+			.prepare(`SELECT task_id, depends_on_task_id FROM task_dependencies`)
+			.all() as { task_id: string; depends_on_task_id: string }[];
+		const supersessionCount = db
+			.prepare(`SELECT COUNT(*) AS count FROM task_supersessions`)
+			.get() as { count: number };
+		db.close();
+
+		expect(taskIds).toEqual([{ id: "task_child" }, { id: "task_old" }]);
+		expect(dependencyRows).toEqual([{ task_id: "task_child", depends_on_task_id: "task_old" }]);
+		expect(supersessionCount.count).toBe(0);
+	});
+
+	it("fails USER_ERROR when the old task is done", async () => {
+		await registerRun("run_actor");
+		await enqueue("task_done");
+
+		const db = new Database(dbPath);
+		db.prepare(`UPDATE tasks SET status = 'done' WHERE id = 'task_done'`).run();
+		db.close();
+
+		const exit = await runEff(
+			Effect.provide(
+				supersedeCommand({
+					taskId: "task_done",
+					run: "run_actor",
+					reason: "Cannot replace completed work",
+				}),
+				makeLayer(["task_new"]),
+			),
+		);
+
+		expect(Exit.isFailure(exit)).toBe(true);
+		const cause = Exit.isFailure(exit) ? String(exit.cause) : "";
+		expect(cause).toContain("Cannot supersede task task_done while it is done");
+	});
+
+	it("fails VALIDATION_ERROR for invalid capability overrides", async () => {
+		await registerRun("run_actor");
+		await enqueue("task_old");
+
+		const exit = await runEff(
+			Effect.provide(
+				supersedeCommand({
+					taskId: "task_old",
+					run: "run_actor",
+					reason: "Invalid capability",
+					capability: "exectue",
+				}),
+				makeLayer(["task_new"]),
+			),
+		);
+
+		expect(Exit.isFailure(exit)).toBe(true);
+		const cause = Exit.isFailure(exit) ? String(exit.cause) : "";
+		expect(cause).toContain(
+			"Invalid --capability value: 'exectue'. Valid values: triage, design, execute, escalate",
+		);
 	});
 
 	it("fails USER_ERROR when the old task is claimed", async () => {
@@ -604,6 +689,7 @@ describe("supersedeCommand (integration — real SQLite)", () => {
 		expect(dependencyRows).toEqual([
 			{ task_id: "task_child", depends_on_task_id: "task_new" },
 			{ task_id: "task_new", depends_on_task_id: "task_upstream" },
+			{ task_id: "task_old", depends_on_task_id: "task_upstream" },
 		]);
 	});
 });

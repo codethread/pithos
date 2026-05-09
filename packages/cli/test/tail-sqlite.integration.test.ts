@@ -163,7 +163,7 @@ describe("tailCommand (integration — real SQLite)", () => {
 		await registerRun("run_tail_creator");
 		await enqueue("task_tail_parent", { title: "Parent task" });
 		await enqueue("task_tail_child", {
-			capability: "build",
+			capability: "execute",
 			title: "Child task",
 			dependsOn: ["task_tail_parent"],
 			run: "run_tail_creator",
@@ -196,7 +196,7 @@ describe("tailCommand (integration — real SQLite)", () => {
 		};
 		expect(payload).toEqual({
 			scope_id: "global",
-			capability: "build",
+			capability: "execute",
 			title: "Child task",
 			depends_on_task_ids: ["task_tail_parent"],
 		});
@@ -220,12 +220,12 @@ describe("tailCommand (integration — real SQLite)", () => {
 		await registerRun("run_tail_actor");
 		await enqueue("task_tail_a", { title: "Task A" });
 		await enqueue("task_tail_b", {
-			capability: "build",
+			capability: "execute",
 			title: "Task B",
 			dependsOn: ["task_tail_a"],
 		});
 		await enqueue("task_tail_c", {
-			capability: "build",
+			capability: "execute",
 			title: "Task C",
 			dependsOn: ["task_tail_b"],
 		});
@@ -278,7 +278,7 @@ describe("tailCommand (integration — real SQLite)", () => {
 		expect(supersededEvent?.actor_run_id).toBe("run_tail_actor");
 		expect(JSON.parse(createdEvent?.payload_json ?? "{}")).toEqual({
 			scope_id: "global",
-			capability: "build",
+			capability: "execute",
 			title: "Task D",
 			depends_on_task_ids: ["task_tail_a"],
 			supersedes_task_id: "task_tail_b",

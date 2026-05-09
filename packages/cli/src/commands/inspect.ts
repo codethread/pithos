@@ -140,7 +140,7 @@ export const inspectTaskCommand = (
 export type InspectGraphSelector =
 	| { readonly kind: "task"; readonly value: string }
 	| { readonly kind: "scope"; readonly value: string }
-	| { readonly kind: "current" };
+	| { readonly kind: "all" };
 
 export interface InspectGraphSelectorArgs {
 	readonly taskId: string | undefined;
@@ -177,7 +177,7 @@ export const decodeInspectGraphSelector = (
 		if (args.scopeId !== undefined) {
 			return { kind: "scope", value: args.scopeId } as const;
 		}
-		return { kind: "current" } as const;
+		return { kind: "all" } as const;
 	});
 
 /**
@@ -311,7 +311,7 @@ export const renderGraphFlat = (graph: TaskGraph): string => {
 };
 
 /**
- * `pithos inspect graph --task <id> | --scope <scope-id> | --current`
+ * `pithos inspect graph --task <id> | --scope <scope-id> | --all`
  *
  * Returns a closed transitive dependency/supersession graph for the selected seed set.
  */
@@ -396,7 +396,7 @@ Output (JSON):
   { "ok": true, "scope": { "id": "...", "kind": "...", ... } }
   { "ok": true, "run": { "id": "...", "agent_kind": "...", ... } }
   { "ok": true, "task": { "id": "...", "status": "queued", "claimable": false, "unresolved_dependency_ids": [ ... ], ... }, "dependencies": [ ... ], "dependents": [ ... ], "unresolved_blockers": [ { "id": "...", "scope_id": "...", "status": "queued", "title": "Blocker title" } ], "supersedes": null, "superseded_by": null, "artifacts": [ ... ] }
-  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "current" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }
+  { "ok": true, "graph": { "selector": { "kind": "task", "value": "task_..." } | { "kind": "scope", "value": "repo:..." } | { "kind": "all" }, "nodes": [ { "id": "...", "scope_id": "...", "capability": "...", "status": "...", "title": "...", "claimable": false, "unresolved_dependency_ids": [ ... ], "supersedes_task_id": null, "superseded_by_task_id": null } ], "edges": [ { "kind": "depends_on", "from_task_id": "...", "to_task_id": "...", "satisfied": true }, { "kind": "supersedes", "from_task_id": "...", "to_task_id": "..." } ] } }
 
 Examples:
   pithos inspect scope global

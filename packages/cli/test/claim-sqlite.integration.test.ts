@@ -214,6 +214,45 @@ describe("claimCommand (integration — real SQLite)", () => {
 		expect(queued.id).toBe("task_fifo_b");
 	});
 
+	it("rejects a second claim while the run already holds a task", async () => {
+		await enqueue("task_held_a");
+		await enqueue("task_held_b");
+		await registerRun("run_held");
+
+		await Effect.runPromise(
+			Effect.provide(
+				claimCommand({ run: "run_held", scope: "global", capability: "triage" }),
+				Layer.merge(dbLayer, silentOutput),
+			),
+		);
+
+		const exit = await runEff(
+			Effect.provide(
+				claimCommand({ run: "run_held", scope: "global", capability: "triage" }),
+				Layer.merge(dbLayer, silentOutput),
+			),
+		);
+
+		expect(Exit.isFailure(exit)).toBe(true);
+		const cause = Exit.isFailure(exit) ? String(exit.cause) : "";
+		expect(cause).toContain("Run run_held already holds task task_held_a");
+
+		const db = new Database(dbPath);
+		const tasks = db
+			.prepare(`SELECT id, status, lease_owner_run_id FROM tasks ORDER BY id ASC`)
+			.all() as { id: string; status: string; lease_owner_run_id: string | null }[];
+		const run = db.prepare(`SELECT task_id FROM runs WHERE id = 'run_held'`).get() as {
+			task_id: string | null;
+		};
+		db.close();
+
+		expect(tasks).toEqual([
+			{ id: "task_held_a", status: "claimed", lease_owner_run_id: "run_held" },
+			{ id: "task_held_b", status: "queued", lease_owner_run_id: null },
+		]);
+		expect(run.task_id).toBe("task_held_a");
+	});
+
 	it("fails NO_CLAIMABLE_WORK when no queued tasks exist", async () => {
 		await registerRun("run_nowork1");
 
@@ -228,7 +267,7 @@ describe("claimCommand (integration — real SQLite)", () => {
 	});
 
 	it("fails NO_CLAIMABLE_WORK when scope/capability has no matching tasks", async () => {
-		await enqueue("task_cap_mismatch", { capability: "watch" }); // different capability
+		await enqueue("task_cap_mismatch", { capability: "execute" }); // different capability
 		await registerRun("run_cap_mismatch");
 
 		const exit = await runEff(

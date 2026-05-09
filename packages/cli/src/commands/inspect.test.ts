@@ -35,7 +35,7 @@ describe("decodeInspectGraphSelector", () => {
 		expect(Exit.isFailure(exit)).toBe(true);
 	});
 
-	it("returns { kind: 'current' } when --all is provided", async () => {
+	it("returns { kind: 'all' } when --all is provided", async () => {
 		const result = await Effect.runPromise(
 			decodeInspectGraphSelector({
 				taskId: undefined,
@@ -45,7 +45,7 @@ describe("decodeInspectGraphSelector", () => {
 			}),
 		);
 
-		expect(result).toEqual({ kind: "current" });
+		expect(result).toEqual({ kind: "all" });
 	});
 });
 

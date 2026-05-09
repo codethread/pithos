@@ -74,6 +74,8 @@ describe("pithos --help (top-level)", () => {
 			"fail",
 			"artifact",
 			"inspect",
+			"task",
+			"graph",
 			"briefing",
 			"tail",
 			"sweep",

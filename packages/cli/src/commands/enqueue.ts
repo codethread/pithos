@@ -22,6 +22,8 @@ class SupersededDependencyRow extends Schema.Class<SupersededDependencyRow>(
 	title: Schema.String,
 }) {}
 
+const CapabilitySchema = Schema.Literal("triage", "design", "execute", "escalate");
+
 interface TaskCreatedEventPayload {
 	readonly scope_id: string;
 	readonly capability: string;
@@ -103,7 +105,15 @@ export const enqueueCommand = (
 		}
 
 		const scope = opts.scope;
-		const capability = opts.capability;
+		const capability = yield* Schema.decodeUnknown(CapabilitySchema)(opts.capability).pipe(
+			Effect.mapError(
+				() =>
+					new PithosError({
+						code: "VALIDATION_ERROR",
+						message: `Invalid --capability value: '${opts.capability}'. Valid values: triage, design, execute, escalate`,
+					}),
+			),
+		);
 		const title = opts.title;
 		const dependsOnTaskIds = opts.dependsOn ?? [];
 
@@ -252,7 +262,7 @@ Usage:
 
 Options:
   --scope <scope-id>       Scope ID for this task [required]
-  --capability <cap>       Task capability, e.g. watch, triage [required]
+  --capability <cap>       Task capability: triage, design, execute, or escalate [required]
   --title <title>          Human-readable task title [required]
   --body-file <path>       File path for task body/description (mutually exclusive with --body)
   --body <text>            Inline task body (mutually exclusive with --body-file)
@@ -265,7 +275,7 @@ Output (JSON):
 
 Examples:
   pithos enqueue --scope global --capability triage --title "Review PR #42"
-  pithos enqueue --scope repo:work/perkbox-services/protobuf --capability watch --title "Watch worker" --depends-on task_api --depends-on task_design
+  pithos enqueue --scope repo:work/perkbox-services/protobuf --capability execute --title "Run worker" --depends-on task_api --depends-on task_design
 
 Exit codes: 0 success | 1 user error | 2 validation error | 3 not found
 `;

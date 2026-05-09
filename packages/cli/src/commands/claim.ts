@@ -18,6 +18,11 @@ export interface ClaimOptions {
 }
 
 const DEFAULT_LEASE_MINUTES = 10;
+const CapabilitySchema = Schema.Literal("triage", "design", "execute", "escalate");
+
+class RunHeldTaskRow extends Schema.Class<RunHeldTaskRow>("RunHeldTaskRow")({
+	task_id: Schema.NullOr(Schema.String),
+}) {}
 
 // ---------------------------------------------------------------------------
 // pithos claim
@@ -61,7 +66,15 @@ export const claimCommand = (
 
 		const runId = opts.run;
 		const scope = opts.scope;
-		const capability = opts.capability;
+		const capability = yield* Schema.decodeUnknown(CapabilitySchema)(opts.capability).pipe(
+			Effect.mapError(
+				() =>
+					new PithosError({
+						code: "VALIDATION_ERROR",
+						message: `Invalid --capability value: '${opts.capability}'. Valid values: triage, design, execute, escalate`,
+					}),
+			),
+		);
 		const leaseMinutes = opts.leaseMinutes ?? DEFAULT_LEASE_MINUTES;
 
 		if (!Number.isFinite(leaseMinutes) || leaseMinutes <= 0) {
@@ -99,6 +112,35 @@ export const claimCommand = (
 		// or the UPDATE RETURNING atomicity would not be caught.
 		const claimedTask = yield* db.withTransaction(
 			Effect.gen(function* () {
+				const runStateRows = yield* db.query(sql`SELECT task_id FROM runs WHERE id = ?`, [runId]);
+				if (runStateRows.length !== 1) {
+					yield* Effect.fail(
+						new PithosError({
+							code: "INTERNAL_ERROR",
+							message: `Run precondition query returned ${runStateRows.length} rows for ${runId}`,
+						}),
+					);
+					return yield* Effect.never;
+				}
+				const runState = yield* Schema.decodeUnknown(RunHeldTaskRow)(runStateRows[0]!).pipe(
+					Effect.mapError(
+						() =>
+							new PithosError({
+								code: "INTERNAL_ERROR",
+								message: "Run held-task row shape violation from DB",
+							}),
+					),
+				);
+				if (runState.task_id !== null) {
+					yield* Effect.fail(
+						new PithosError({
+							code: "USER_ERROR",
+							message: `Run ${runId} already holds task ${runState.task_id}`,
+						}),
+					);
+					return yield* Effect.never;
+				}
+
 				const rows = yield* db.query(
 					sql`UPDATE tasks
            SET
@@ -141,10 +183,32 @@ export const claimCommand = (
 					),
 				);
 
-				yield* db.run(sql`UPDATE runs SET task_id = ?, updated_at = datetime('now') WHERE id = ?`, [
-					task.id,
-					runId,
-				]);
+				const runUpdateRows = yield* db.query(
+					sql`UPDATE runs
+           SET task_id = ?, updated_at = datetime('now')
+           WHERE id = ?
+             AND task_id IS NULL
+           RETURNING task_id`,
+					[task.id, runId],
+				);
+				if (runUpdateRows.length !== 1) {
+					yield* Effect.fail(
+						new PithosError({
+							code: "USER_ERROR",
+							message: `Run ${runId} already holds a task; claim rolled back`,
+						}),
+					);
+					return yield* Effect.never;
+				}
+				yield* Schema.decodeUnknown(RunHeldTaskRow)(runUpdateRows[0]!).pipe(
+					Effect.mapError(
+						() =>
+							new PithosError({
+								code: "INTERNAL_ERROR",
+								message: "Run update row shape violation from DB",
+							}),
+					),
+				);
 
 				yield* db.run(
 					sql`INSERT INTO events (task_id, actor_run_id, type, payload_json)
@@ -205,11 +269,12 @@ Notes:
   - Claims the oldest ready queued task matching the scope and capability (FIFO among claimable work).
   - Queued tasks with unresolved dependencies stay queued and are skipped until every direct blocker is done.
   - The fencing_token must be passed to complete/fail/heartbeat commands.
+  - A run can hold only one task at a time; complete/fail the held task before claiming again.
   - A task can only be held by one run; concurrent claims are safe.
 
 Examples:
   pithos claim --run run_abc --scope global --capability triage
-  pithos claim --run run_abc --scope repo:work/perkbox/protobuf --capability watch --lease-minutes 20
+  pithos claim --run run_abc --scope repo:work/perkbox/protobuf --capability execute --lease-minutes 20
 
 Exit codes: 0 success | 2 validation error | 3 not found (run) | 5 no claimable work
 `;

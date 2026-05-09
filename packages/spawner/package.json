@@ -14,7 +14,6 @@
 		"lint": "eslint .",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"test": "vitest run --config vitest.config.ts",
-		"test:watch": "vitest --config vitest.config.ts",
 		"build": "node scripts/build.mjs",
 		"start": "node scripts/build.mjs --dev --run --"
 	},
@@ -22,11 +21,7 @@
 		"@effect/cli": "0.75.1",
 		"@effect/platform": "^0.96.1",
 		"@effect/platform-node": "^0.106.0",
+		"@pithos/pithos": "workspace:*",
 		"effect": "^3.21.2"
-	},
-	"pi": {
-		"extensions": [
-			"./pi-extension"
-		]
 	}
 }

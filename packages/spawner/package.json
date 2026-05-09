@@ -18,10 +18,10 @@
 		"start": "node scripts/build.mjs --dev --run --"
 	},
 	"dependencies": {
-		"@effect/cli": "0.75.1",
-		"@effect/platform": "^0.96.1",
-		"@effect/platform-node": "^0.106.0",
+		"@effect/cli": "catalog:",
+		"@effect/platform": "catalog:",
+		"@effect/platform-node": "catalog:",
 		"@pithos/pithos": "workspace:*",
-		"effect": "^3.21.2"
+		"effect": "catalog:"
 	}
 }

@@ -19,7 +19,9 @@ await esbuild.build({
 	format: "esm",
 	bundle: true,
 	sourcemap: dev ? "inline" : false,
-	banner: { js: "#!/usr/bin/env node" },
+	banner: {
+		js: '#!/usr/bin/env node\nimport { createRequire } from "node:module"; const require = createRequire(import.meta.url);',
+	},
 });
 
 await chmod(outfile, 0o755);

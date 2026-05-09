@@ -1,8 +1,11 @@
-import { Effect, Layer } from "effect";
-import * as nodeProcess from "node:process";
+import { CliConfig, Command, Options } from "@effect/cli";
+import { NodeContext, NodeRuntime } from "@effect/platform-node";
+import { Effect, Layer, Option } from "effect";
+import process from "node:process";
+import { inspect } from "node:util";
+import { closePdx, logsShowPdx, openPdx, runDaemon, statusPdx } from "./controller.js";
 import { parsePdxConfig } from "./config.js";
 import { PdxError } from "./errors.js";
-import { parsePdxArgs } from "./args.js";
 import {
 	ClockLive,
 	FileSystemLive,
@@ -12,7 +15,6 @@ import {
 	SpawnerLive,
 } from "./live.js";
 import { makeSupervisorLog } from "./log.js";
-import { makeTmux } from "./tmux.js";
 import {
 	Clock,
 	FileSystem,
@@ -25,26 +27,32 @@ import {
 	SupervisorLog,
 	Tmux,
 } from "./services.js";
-import { closePdx, logsShowPdx, openPdx, runDaemon, statusPdx } from "./controller.js";
+import { makeTmux } from "./tmux.js";
 
 interface RuntimeInput {
-	readonly args: readonly string[];
 	readonly envHome: string | undefined;
 	readonly daemonEntrypoint: string | undefined;
 }
 
-interface RuntimeOutput {
-	readonly writeStdout: (value: string) => Effect.Effect<void>;
-	readonly writeStderr: (value: string) => Effect.Effect<void>;
-	readonly setExitCode: (code: number) => Effect.Effect<void>;
-}
+type CommandInput =
+	| { readonly command: "open"; readonly home: string | undefined }
+	| { readonly command: "close"; readonly home: string | undefined }
+	| { readonly command: "status"; readonly home: string | undefined }
+	| {
+			readonly command: "logs.show";
+			readonly home: string | undefined;
+			readonly limit: number | undefined;
+			readonly all: boolean;
+			readonly since: string | undefined;
+	  }
+	| { readonly command: "daemon"; readonly home: string | undefined };
 
-const parsePositiveInt = (
-	raw: string | undefined,
-	name: string,
-): Effect.Effect<number | undefined, PdxError> => {
-	if (raw === undefined) return Effect.succeed(undefined);
-	const value = Number(raw);
+const intervalSeconds = 5;
+const maxAfk = 4;
+
+const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
+
+const parsePositiveInt = (value: number, name: string): Effect.Effect<number, PdxError> => {
 	if (!Number.isInteger(value) || value <= 0) {
 		return Effect.fail(
 			new PdxError({ code: "VALIDATION_ERROR", message: `${name} must be a positive integer` }),
@@ -54,117 +62,157 @@ const parsePositiveInt = (
 };
 
 const captureRuntimeInput = Effect.sync<RuntimeInput>(() => ({
-	args: nodeProcess.argv.slice(2),
-	envHome: nodeProcess.env.HOME,
-	daemonEntrypoint: nodeProcess.argv[1],
+	envHome: process.env.HOME,
+	daemonEntrypoint: process.argv[1],
 }));
 
-const createRuntimeOutput = Effect.sync<RuntimeOutput>(() => ({
-	writeStdout: (value) =>
-		Effect.sync(() => {
-			nodeProcess.stdout.write(value);
-		}),
-	writeStderr: (value) =>
-		Effect.sync(() => {
-			nodeProcess.stderr.write(value);
-		}),
-	setExitCode: (code) =>
-		Effect.sync(() => {
-			process.exitCode = code;
-		}),
-}));
+const baseLayer = Layer.mergeAll(
+	Layer.succeed(Process, ProcessLive),
+	Layer.succeed(FileSystem, FileSystemLive),
+	Layer.succeed(Clock, ClockLive),
+	Layer.succeed(PithosClient, PithosClientLive),
+	Layer.succeed(Ids, IdsLive),
+	Layer.succeed(Spawner, SpawnerLive),
+);
 
-const runCommand = (input: RuntimeInput, output: RuntimeOutput) =>
+const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 	Effect.gen(function* () {
-		const args = input.args;
-		const parsed = yield* parsePdxArgs(args);
-		const intervalSeconds = yield* parsePositiveInt(
-			parsed.intervalSecondsRaw,
-			"--interval-seconds",
-		).pipe(Effect.map((value) => value ?? 5));
-		const maxAfk = yield* parsePositiveInt(parsed.maxAfkRaw, "--max-afk").pipe(
-			Effect.map((value) => value ?? 4),
-		);
-
 		const config = yield* parsePdxConfig({
-			home: parsed.home,
-			envHome: input.envHome,
-			daemonEntrypoint: input.daemonEntrypoint,
+			home: input.home,
+			envHome: runtime.envHome,
+			daemonEntrypoint: runtime.daemonEntrypoint,
 		});
-		const command = parsed.command;
-
-		const base = Layer.mergeAll(
-			Layer.succeed(Process, ProcessLive),
-			Layer.succeed(FileSystem, FileSystemLive),
-			Layer.succeed(Clock, ClockLive),
-			Layer.succeed(PithosClient, PithosClientLive),
-			Layer.succeed(Ids, IdsLive),
-			Layer.succeed(Spawner, SpawnerLive),
+		const tmux = yield* makeTmux;
+		const supervisorLog = yield* makeSupervisorLog(config.logPath);
+		const registry = yield* makeRegistry;
+		const provided = Layer.mergeAll(
+			Layer.succeed(Tmux, tmux),
+			Layer.succeed(SupervisorLog, supervisorLog),
+			Layer.succeed(Registry, registry),
 		);
-		const commandProgram = Effect.gen(function* () {
-			const tmux = yield* makeTmux;
-			const supervisorLog = yield* makeSupervisorLog(config.logPath);
-			const registry = yield* makeRegistry;
-			const provided = Layer.mergeAll(
-				Layer.succeed(Tmux, tmux),
-				Layer.succeed(SupervisorLog, supervisorLog),
-				Layer.succeed(Registry, registry),
-			);
-			switch (command.kind) {
-				case "help":
-					yield* output.writeStdout("pdx commands: open, close, status, logs show\n");
-					return;
-				case "open":
-					yield* openPdx(config, maxAfk, intervalSeconds).pipe(Effect.provide(provided));
-					yield* output.writeStdout("tmux attach -t pdx--pandora\n");
-					return;
-				case "close":
-					return yield* closePdx(config).pipe(Effect.provide(provided));
-				case "status": {
-					const status = yield* statusPdx(config, maxAfk).pipe(Effect.provide(provided));
-					yield* output.writeStdout(`${JSON.stringify(status)}\n`);
-					return;
-				}
-				case "logs-show": {
-					const outputText = yield* logsShowPdx(config, {
-						limit: command.limit,
-						all: command.all,
-						since: command.since,
-					}).pipe(Effect.provide(provided));
-					yield* output.writeStdout(outputText);
-					return;
-				}
-				case "daemon": {
-					const handle = yield* runDaemon(config, maxAfk, intervalSeconds).pipe(
-						Effect.provide(provided),
-					);
-					yield* handle.shutdown;
-					yield* handle.close;
-					return;
-				}
+
+		switch (input.command) {
+			case "open":
+				yield* openPdx(config, maxAfk, intervalSeconds).pipe(Effect.provide(provided));
+				yield* Effect.sync(() => process.stdout.write("tmux attach -t pdx--pandora\n"));
+				return;
+			case "close":
+				return yield* closePdx(config).pipe(Effect.provide(provided));
+			case "status": {
+				const status = yield* statusPdx(config, maxAfk).pipe(Effect.provide(provided));
+				yield* Effect.sync(() => process.stdout.write(`${JSON.stringify(status)}\n`));
+				return;
 			}
-		}).pipe(Effect.provide(base));
+			case "logs.show": {
+				const outputText = yield* logsShowPdx(config, {
+					limit: input.limit,
+					all: input.all,
+					since: input.since,
+				}).pipe(Effect.provide(provided));
+				yield* Effect.sync(() => process.stdout.write(outputText));
+				return;
+			}
+			case "daemon": {
+				const handle = yield* runDaemon(config, maxAfk, intervalSeconds).pipe(
+					Effect.provide(provided),
+				);
+				yield* handle.shutdown;
+				yield* handle.close;
+				return;
+			}
+		}
+	}).pipe(Effect.provide(baseLayer));
 
-		yield* commandProgram;
-	});
-
-const handleError = (error: unknown, output: RuntimeOutput): Effect.Effect<void, unknown> => {
+const handleError = (error: unknown): Effect.Effect<void, unknown> => {
 	if (error instanceof PdxError) {
-		return output
-			.writeStderr(`${error.code}: ${error.message}\n`)
-			.pipe(Effect.zipRight(output.setExitCode(2)));
+		return Effect.sync(() => {
+			process.stderr.write(`${error.code}: ${error.message}\n`);
+			process.exitCode = 2;
+		});
 	}
 	return Effect.fail(error);
 };
 
+const makeCommand = (runtime: RuntimeInput) => {
+	const open = Command.make(
+		"open",
+		{
+			home: Options.text("home").pipe(Options.optional),
+		},
+		({ home }) => runCommand(runtime, { command: "open", home: opt(home) }),
+	);
+
+	const close = Command.make(
+		"close",
+		{
+			home: Options.text("home").pipe(Options.optional),
+		},
+		({ home }) => runCommand(runtime, { command: "close", home: opt(home) }),
+	);
+
+	const status = Command.make(
+		"status",
+		{
+			home: Options.text("home").pipe(Options.optional),
+			json: Options.boolean("json"),
+		},
+		({ home }) => runCommand(runtime, { command: "status", home: opt(home) }),
+	);
+
+	const logsShow = Command.make(
+		"show",
+		{
+			home: Options.text("home").pipe(Options.optional),
+			limit: Options.integer("limit").pipe(Options.optional),
+			since: Options.text("since").pipe(Options.optional),
+			all: Options.boolean("all"),
+		},
+		({ home, limit, since, all }) =>
+			Effect.gen(function* () {
+				const parsedLimit = opt(limit);
+				if (parsedLimit !== undefined) {
+					yield* parsePositiveInt(parsedLimit, "--limit");
+				}
+				yield* runCommand(runtime, {
+					command: "logs.show",
+					home: opt(home),
+					limit: parsedLimit,
+					all,
+					since: opt(since),
+				});
+			}),
+	);
+
+	const logs = Command.make("logs").pipe(Command.withSubcommands([logsShow]));
+
+	const daemon = Command.make(
+		"daemon",
+		{
+			home: Options.text("home").pipe(Options.optional),
+		},
+		({ home }) => runCommand(runtime, { command: "daemon", home: opt(home) }),
+	);
+
+	return Command.make("pdx").pipe(Command.withSubcommands([open, close, status, logs, daemon]));
+};
+
 const program = captureRuntimeInput.pipe(
-	Effect.flatMap((input) =>
-		createRuntimeOutput.pipe(
-			Effect.flatMap((output) =>
-				runCommand(input, output).pipe(Effect.catchAll((error) => handleError(error, output))),
-			),
-		),
+	Effect.flatMap((runtime) => {
+		const cli = Command.run(makeCommand(runtime), {
+			name: "Pdx",
+			version: "0.1.0",
+			executable: "pdx",
+		});
+		return cli(process.argv).pipe(Effect.catchAll((error) => handleError(error)));
+	}),
+	Effect.catchAll((error) =>
+		Effect.sync(() => {
+			const message = error instanceof Error ? error.message : inspect(error);
+			process.stderr.write(`VALIDATION_ERROR: ${message}\n`);
+			process.exitCode = 2;
+		}),
 	),
+	Effect.provide(Layer.mergeAll(NodeContext.layer, CliConfig.layer({ showBuiltIns: false }))),
 );
 
-void Effect.runPromise(program);
+NodeRuntime.runMain(program);

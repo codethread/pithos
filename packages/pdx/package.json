@@ -15,7 +15,9 @@
 		"start": "node scripts/build.mjs --dev --run --"
 	},
 	"dependencies": {
+		"@effect/cli": "catalog:",
+		"@effect/platform-node": "catalog:",
 		"@pithos/spawner": "workspace:*",
-		"effect": "^3.21.2"
+		"effect": "catalog:"
 	}
 }

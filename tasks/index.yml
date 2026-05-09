@@ -129,7 +129,7 @@ tasks:
   - id: task-008b
     title: "Slice 8b: Registry cap accounting"
     file: ./task-008b.md
-    status: pending
+    status: complete
     blocked_by:
       - task-008a
   - id: task-008c

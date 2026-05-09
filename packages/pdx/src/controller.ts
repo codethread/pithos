@@ -345,7 +345,16 @@ const agentPolicy = {
 	war: { capability: "execute", mode: "afk" },
 } as const;
 
-const spawnReadyAgent = (config: PdxConfig) =>
+const hasAgentScopeCap = (
+	entries: readonly RegistryEntry[],
+	agent: "toil" | "greed" | "war",
+	scopeId: string,
+): boolean => entries.some((entry) => entry.agent === agent && entry.scopeId === scopeId);
+
+const hasAfkCapacity = (entries: readonly RegistryEntry[], maxAfk: number): boolean =>
+	entries.filter((entry) => entry.agent !== "pandora" && entry.mode === "afk").length < maxAfk;
+
+const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 	Effect.gen(function* () {
 		const registry = yield* Registry;
 		const pithos = yield* PithosClient;
@@ -359,7 +368,8 @@ const spawnReadyAgent = (config: PdxConfig) =>
 			const task = ready.find(
 				(candidate) =>
 					candidate.capability === policy.capability &&
-					!entries.some((entry) => entry.agent === agent && entry.scopeId === candidate.scope_id),
+					!hasAgentScopeCap(entries, agent, candidate.scope_id) &&
+					(policy.mode !== "afk" || hasAfkCapacity(entries, maxAfk)),
 			);
 			if (task === undefined) continue;
 			const cwd = task.scope_kind === "global" ? config.home : task.canonical_path;
@@ -442,7 +452,7 @@ const spawnReadyAgent = (config: PdxConfig) =>
 		}
 	});
 
-export const reconcileTick = (config: PdxConfig) =>
+export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 	Effect.gen(function* () {
 		const registry = yield* Registry;
 		const pithos = yield* PithosClient;
@@ -540,7 +550,7 @@ export const reconcileTick = (config: PdxConfig) =>
 				data: { run_id: runId },
 			});
 		}
-		yield* spawnReadyAgent(config);
+		yield* spawnReadyAgent(config, maxAfk);
 	});
 
 const escalationBody = (input: {
@@ -681,8 +691,8 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 				yield* confirmTmuxGone(tmux, session);
 			}
 		}
-		yield* reconcileTick(config);
-		const loop = yield* reconcileTick(config).pipe(
+		yield* reconcileTick(config, maxAfk);
+		const loop = yield* reconcileTick(config, maxAfk).pipe(
 			Effect.repeat(Schedule.spaced(`${intervalSeconds} seconds`)),
 			Effect.fork,
 		);

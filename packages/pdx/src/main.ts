@@ -35,7 +35,12 @@ interface RuntimeInput {
 }
 
 type CommandInput =
-	| { readonly command: "open"; readonly home: string | undefined }
+	| {
+			readonly command: "open";
+			readonly home: string | undefined;
+			readonly maxAfk: number;
+			readonly intervalSeconds: number;
+	  }
 	| { readonly command: "close"; readonly home: string | undefined }
 	| { readonly command: "status"; readonly home: string | undefined }
 	| {
@@ -52,10 +57,15 @@ type CommandInput =
 			readonly all: boolean;
 			readonly since: string | undefined;
 	  }
-	| { readonly command: "daemon"; readonly home: string | undefined };
+	| {
+			readonly command: "daemon";
+			readonly home: string | undefined;
+			readonly maxAfk: number;
+			readonly intervalSeconds: number;
+	  };
 
-const intervalSeconds = 5;
-const maxAfk = 4;
+const defaultIntervalSeconds = 5;
+const defaultMaxAfk = 4;
 
 const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
 
@@ -100,13 +110,13 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 
 		switch (input.command) {
 			case "open":
-				yield* openPdx(config, maxAfk, intervalSeconds).pipe(Effect.provide(provided));
+				yield* openPdx(config, input.maxAfk, input.intervalSeconds).pipe(Effect.provide(provided));
 				yield* Effect.sync(() => process.stdout.write("tmux attach -t pdx--pandora\n"));
 				return;
 			case "close":
 				return yield* closePdx(config).pipe(Effect.provide(provided));
 			case "status": {
-				const status = yield* statusPdx(config, maxAfk).pipe(Effect.provide(provided));
+				const status = yield* statusPdx(config, defaultMaxAfk).pipe(Effect.provide(provided));
 				yield* Effect.sync(() => process.stdout.write(`${JSON.stringify(status)}\n`));
 				return;
 			}
@@ -126,7 +136,7 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 				return;
 			}
 			case "daemon": {
-				const handle = yield* runDaemon(config, maxAfk, intervalSeconds).pipe(
+				const handle = yield* runDaemon(config, input.maxAfk, input.intervalSeconds).pipe(
 					Effect.provide(provided),
 				);
 				yield* handle.shutdown;
@@ -151,8 +161,22 @@ const makeCommand = (runtime: RuntimeInput) => {
 		"open",
 		{
 			home: Options.text("home").pipe(Options.optional),
+			maxAfk: Options.integer("max-afk").pipe(Options.withDefault(defaultMaxAfk)),
+			intervalSeconds: Options.integer("interval-seconds").pipe(
+				Options.withDefault(defaultIntervalSeconds),
+			),
 		},
-		({ home }) => runCommand(runtime, { command: "open", home: opt(home) }),
+		({ home, maxAfk, intervalSeconds }) =>
+			Effect.gen(function* () {
+				yield* parsePositiveInt(maxAfk, "--max-afk");
+				yield* parsePositiveInt(intervalSeconds, "--interval-seconds");
+				yield* runCommand(runtime, {
+					command: "open",
+					home: opt(home),
+					maxAfk,
+					intervalSeconds,
+				});
+			}),
 	);
 
 	const close = Command.make(
@@ -220,8 +244,22 @@ const makeCommand = (runtime: RuntimeInput) => {
 		"daemon",
 		{
 			home: Options.text("home").pipe(Options.optional),
+			maxAfk: Options.integer("max-afk").pipe(Options.withDefault(defaultMaxAfk)),
+			intervalSeconds: Options.integer("interval-seconds").pipe(
+				Options.withDefault(defaultIntervalSeconds),
+			),
 		},
-		({ home }) => runCommand(runtime, { command: "daemon", home: opt(home) }),
+		({ home, maxAfk, intervalSeconds }) =>
+			Effect.gen(function* () {
+				yield* parsePositiveInt(maxAfk, "--max-afk");
+				yield* parsePositiveInt(intervalSeconds, "--interval-seconds");
+				yield* runCommand(runtime, {
+					command: "daemon",
+					home: opt(home),
+					maxAfk,
+					intervalSeconds,
+				});
+			}),
 	);
 
 	return Command.make("pdx").pipe(

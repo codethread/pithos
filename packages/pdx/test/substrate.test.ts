@@ -22,6 +22,7 @@ import {
 	SupervisorLog,
 	Tmux,
 	type PithosClientService,
+	type RegistryService,
 } from "../src/services.js";
 import { makeTmux } from "../src/tmux.js";
 import {
@@ -49,14 +50,16 @@ const configInput = (home: string | undefined, envHome: string | undefined) => (
 const parseConfig = (home: string, envHome = "/tmp/user-home") =>
 	run(parsePdxConfig(configInput(home, envHome)));
 
+interface ReadyTaskInput {
+	readonly scope_id: string;
+	readonly capability: string;
+	readonly scope_kind?: "global" | "repo" | "worktree";
+	readonly canonical_path?: string | null;
+}
+
 const makePithos = (
 	calls: string[] = [],
-	ready: readonly {
-		readonly scope_id: string;
-		readonly capability: string;
-		readonly scope_kind?: "global" | "repo" | "worktree";
-		readonly canonical_path?: string | null;
-	}[] = [],
+	ready: readonly ReadyTaskInput[] = [],
 	overrides: Partial<PithosClientService> = {},
 ) => {
 	const base: PithosClientService = {
@@ -124,6 +127,80 @@ const makePithos = (
 	};
 	return PithosClient.of({ ...base, ...overrides });
 };
+
+const alwaysLiveTmux = Tmux.of({
+	hasSession: () => Effect.succeed(true),
+	lsSessions: () => Effect.succeed([]),
+	newSession: () => Effect.void,
+	killSession: () => Effect.void,
+	sendLiteralLine: () => Effect.void,
+	pasteBuffer: () => Effect.void,
+});
+
+const alwaysLiveProcess = Process.of({
+	execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+	isAlive: () => Effect.succeed(true),
+	kill: () => Effect.void,
+});
+
+const testLog = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+
+const upsertPandora = (registry: RegistryService) =>
+	registry.upsert({
+		runId: "run_pandora",
+		agent: "pandora",
+		scopeId: "global",
+		mode: "hitl",
+		state: "live",
+		logicalName: PANDORA_TARGET,
+		tmuxTarget: PANDORA_TARGET,
+	});
+
+const runSpawnTick = async (input: {
+	readonly home: string;
+	readonly registry: RegistryService;
+	readonly pithos: PithosClientService;
+	readonly launches: unknown[];
+	readonly maxAfk?: number;
+	readonly runId?: string;
+	readonly sessionId?: string;
+}) =>
+	run(
+		reconcileTick(await parseConfig(input.home), input.maxAfk).pipe(
+			Effect.provideService(Registry, input.registry),
+			Effect.provideService(PithosClient, PithosClient.of(input.pithos)),
+			Effect.provideService(
+				Ids,
+				Ids.of({
+					nextRunId: Effect.succeed(input.runId ?? "run_war"),
+					nextSessionId: Effect.succeed(input.sessionId ?? "session_war"),
+				}),
+			),
+			Effect.provideService(
+				Spawner,
+				Spawner.of({
+					launchAgent: (launch) =>
+						Effect.sync(() => {
+							input.launches.push(launch);
+							return launch.mode === "hitl"
+								? {
+										...launch,
+										logicalName: `pdx--${launch.agent}`,
+										hitl: { tmuxTarget: `pdx--${launch.agent}`, panePid: 1 },
+									}
+								: {
+										...launch,
+										logicalName: `pdx--${launch.agent}`,
+										afk: { pid: 456, processStartTime: "now" },
+									};
+						}),
+				}),
+			),
+			Effect.provideService(Tmux, alwaysLiveTmux),
+			Effect.provideService(Process, alwaysLiveProcess),
+			Effect.provideService(SupervisorLog, testLog),
+		),
+	);
 
 describe("pdx substrate", () => {
 	it("derives config paths from home", async () => {
@@ -334,7 +411,7 @@ describe("pdx substrate", () => {
 			],
 		});
 	});
-	it("daemon startup creates runs dir, system run, and Pandora singleton", async () => {
+	it("daemon startup creates runs dir, system run, Pandora singleton, and excludes pdx from caps", async () => {
 		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const mkdirs: string[] = [];
 		const pithosCalls: string[] = [];
@@ -343,20 +420,32 @@ describe("pdx substrate", () => {
 			readFile: () => Effect.succeed(""),
 			mkdir: (path) => Effect.sync(() => mkdirs.push(path)),
 		});
-		const pithos = makePithos(pithosCalls);
+		const pithos = makePithos(pithosCalls, [
+			{ scope_id: "global", capability: "triage", scope_kind: "global", canonical_path: null },
+		]);
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		const registry = await run(makeRegistry);
+		const runIds = ["run_pandora_1", "run_toil_1"];
+		const sessionIds = ["session_pandora_1", "session_toil_1"];
 		const ids = Ids.of({
-			nextRunId: Effect.succeed("run_pandora_1"),
-			nextSessionId: Effect.succeed("session_pandora_1"),
+			nextRunId: Effect.sync(() => runIds.shift() ?? "run_unexpected"),
+			nextSessionId: Effect.sync(() => sessionIds.shift() ?? "session_unexpected"),
 		});
 		const spawner = Spawner.of({
 			launchAgent: (input) =>
-				Effect.succeed({
-					...input,
-					logicalName: PANDORA_TARGET,
-					hitl: { tmuxTarget: PANDORA_TARGET, panePid: 123 },
-				}),
+				Effect.succeed(
+					input.agent === "pandora"
+						? {
+								...input,
+								logicalName: PANDORA_TARGET,
+								hitl: { tmuxTarget: PANDORA_TARGET, panePid: 123 },
+							}
+						: {
+								...input,
+								logicalName: "pdx--toil",
+								afk: { pid: 123, processStartTime: "now" },
+							},
+				),
 		});
 		const tmux = Tmux.of({
 			hasSession: () => Effect.succeed(true),
@@ -373,7 +462,7 @@ describe("pdx substrate", () => {
 		});
 		const config = await parseConfig(home);
 		const handle = await run(
-			runDaemon(config, 4, 5).pipe(
+			runDaemon(config, 1, 5).pipe(
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
@@ -389,6 +478,8 @@ describe("pdx substrate", () => {
 		expect(pithosCalls).toContain("scopeUpsert:global");
 		expect(pithosCalls).toContain(`runUpsert:pdx:${PDX_SYSTEM_RUN_ID}`);
 		expect(pithosCalls).toContain("runUpsert:pandora:run_pandora_1");
+		expect(pithosCalls).toContain("runUpsert:toil:run_toil_1");
+		expect((await run(registry.list)).map((entry) => entry.agent)).not.toContain("pdx");
 	});
 
 	it("daemon stop replies after cleanup and closes the IPC socket explicitly", async () => {
@@ -1016,6 +1107,138 @@ describe("pdx substrate", () => {
 		expect(await run(registry.list)).toContainEqual(
 			expect.objectContaining({ runId: "run_toil", agent: "toil", state: "live", pid: 123 }),
 		);
+	});
+
+	it.each(["launching", "live", "terminating"] as const)(
+		"per-agent/scope cap blocks spawn while existing entry is %s",
+		async (state) => {
+			const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+			const registry = await run(makeRegistry);
+			await run(upsertPandora(registry));
+			await run(
+				registry.upsert({
+					runId: "run_existing",
+					agent: "war",
+					scopeId: "scope_repo",
+					mode: "afk",
+					state,
+					logicalName: "pdx--war-existing",
+					pid: 123,
+				}),
+			);
+			const calls: string[] = [];
+			const launches: unknown[] = [];
+			await runSpawnTick({
+				home,
+				registry,
+				pithos: makePithos(calls, [
+					{
+						scope_id: "scope_repo",
+						capability: "execute",
+						scope_kind: "repo",
+						canonical_path: "/repo",
+					},
+				]),
+				launches,
+			});
+			expect(launches).toEqual([]);
+			expect(calls).not.toContain("runUpsert:war:run_war");
+		},
+	);
+
+	it.each(["launching", "live", "terminating"] as const)(
+		"global AFK cap blocks non-Pandora spawns while existing entry is %s",
+		async (state) => {
+			const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+			const registry = await run(makeRegistry);
+			await run(upsertPandora(registry));
+			await run(
+				registry.upsert({
+					runId: "run_toil_existing",
+					agent: "toil",
+					scopeId: "scope_other",
+					mode: "afk",
+					state,
+					logicalName: "pdx--toil-existing",
+					pid: 123,
+				}),
+			);
+			const calls: string[] = [];
+			const launches: unknown[] = [];
+			await runSpawnTick({
+				home,
+				registry,
+				maxAfk: 1,
+				pithos: makePithos(calls, [
+					{
+						scope_id: "scope_repo",
+						capability: "execute",
+						scope_kind: "repo",
+						canonical_path: "/repo",
+					},
+				]),
+				launches,
+			});
+			expect(launches).toEqual([]);
+			expect(calls).not.toContain("runUpsert:war:run_war");
+		},
+	);
+
+	it("global AFK cap releases after entry removal", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_toil_existing",
+				agent: "toil",
+				scopeId: "scope_other",
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--toil-existing",
+				pid: 123,
+			}),
+		);
+		await run(registry.remove("run_toil_existing"));
+		const launches: unknown[] = [];
+		await runSpawnTick({
+			home,
+			registry,
+			maxAfk: 1,
+			pithos: makePithos(
+				[],
+				[
+					{
+						scope_id: "scope_repo",
+						capability: "execute",
+						scope_kind: "repo",
+						canonical_path: "/repo",
+					},
+				],
+			),
+			launches,
+		});
+		expect(launches).toEqual([expect.objectContaining({ agent: "war", scopeId: "scope_repo" })]);
+	});
+
+	it("Pandora does not consume global AFK capacity", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const launches: unknown[] = [];
+		await runSpawnTick({
+			home,
+			registry,
+			maxAfk: 1,
+			runId: "run_toil",
+			sessionId: "session_toil",
+			pithos: makePithos(
+				[],
+				[{ scope_id: "global", capability: "triage", scope_kind: "global", canonical_path: null }],
+			),
+			launches,
+		});
+		expect(launches).toEqual([expect.objectContaining({ agent: "toil" })]);
 	});
 
 	it("derives non-Pandora cwd from repo and worktree scopes", async () => {

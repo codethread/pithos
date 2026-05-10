@@ -185,10 +185,10 @@ pithos task inspect <task-id>
 
 pithos task artifact add \
   --task <task-id> \
-  --run <run-id> \
+  [--run <run-id>] \
   --kind <kind> \
   --title <text> \
-  [--body-file <path>]
+  --stdin
 
 pithos graph inspect \
   (--task <task-id> | --scope <scope-id> | --all) \

@@ -59,3 +59,10 @@ Append notes here. Do not rewrite earlier notes.
 - Public supersede CLI no longer defines `--body` or `--body-file`; the in-process engine API still accepts explicit body/bodyFile for non-CLI callers while the CLI always passes stdin text.
 - Updated normative supersede command contracts in `control-plane-supervision.md` and `task-graph.md`.
 - Validation run: `pnpm verify`.
+
+### Task 017: Artifact add stdin body — 2026-05-10
+
+- `task artifact add` now requires explicit `--stdin`, resolves artifact body through the typed input service before config/DB access, and passes resolved body text to the engine.
+- Public artifact add CLI no longer defines `--body-file`; engine artifact add no longer has file-path indirection or empty-body omission behavior.
+- Updated artifact add command contracts in `control-plane-supervision.md` and `control-plane-design-notes.md`.
+- Validation run: `pnpm verify`.

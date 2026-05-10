@@ -262,7 +262,7 @@ tasks:
   - id: task-017
     description: "Artifact add stdin body"
     task_file: ./task-017.md
-    status: pending
+    status: complete
     blocked_by:
       - task-015
   - id: task-018

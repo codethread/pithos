@@ -123,6 +123,28 @@ const taskBody = (dbPath: string, taskId: string) => {
 	}
 };
 
+const artifactBody = (dbPath: string, artifactId: string) => {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return db.prepare("SELECT body FROM artifacts WHERE id = ?").pluck().get(artifactId);
+	} finally {
+		db.close();
+	}
+};
+
+const artifactAddArgs = (taskId = "task_missing", extra: readonly string[] = []) => [
+	"task",
+	"artifact",
+	"add",
+	"--task",
+	taskId,
+	"--kind",
+	"note",
+	"--title",
+	"evidence",
+	...extra,
+];
+
 afterEach(() => {
 	process.exitCode = undefined;
 });
@@ -347,6 +369,63 @@ describe("pithos cli", () => {
 				),
 			).rejects.toThrow(flag);
 		}
+	});
+
+	it("adds artifact bodies from explicit stdin", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		const taskId = await enqueueGlobalTriage(dbPath, "run_toil", "artifact task", "task body");
+
+		const result = await runCli(artifactAddArgs(taskId, ["--stdin", "--run", "run_toil"]), dbPath, {
+			_tag: "RedirectedText",
+			text: "artifact body\n",
+		});
+		const artifactId = (JSON.parse(result.stdout[0] ?? "") as { artifact: { id: string } }).artifact
+			.id;
+		expect(artifactBody(dbPath, artifactId)).toBe("artifact body\n");
+	});
+
+	it("returns validation JSON when artifact add omits --stdin", async () => {
+		const result = await runCli(artifactAddArgs(), tempDb());
+		expect(JSON.parse(result.stderr[0] ?? "")).toMatchObject({
+			ok: false,
+			error: { code: "VALIDATION_ERROR" },
+		});
+		expect(result.exitCode).toBe(2);
+		expect(result.configRead).toBe(false);
+	});
+
+	it("validates artifact add stdin availability and non-empty content", async () => {
+		for (const stdin of [
+			{ _tag: "NoRedirectedStdin" as const },
+			{ _tag: "RedirectedText" as const, text: "" },
+		]) {
+			const result = await runCli(artifactAddArgs("task_missing", ["--stdin"]), tempDb(), stdin);
+			expect(JSON.parse(result.stderr[0] ?? "")).toMatchObject({
+				ok: false,
+				error: { code: "VALIDATION_ERROR" },
+			});
+			expect(result.exitCode).toBe(2);
+			expect(result.configRead).toBe(false);
+		}
+	});
+
+	it("surfaces artifact add stdin read failures as tagged JSON", async () => {
+		const result = await runCli(artifactAddArgs("task_missing", ["--stdin"]), tempDb(), {
+			_tag: "ReadFailure",
+			error: new PithosError({ code: "USER_ERROR", message: "stdin exploded" }),
+		});
+		expect(JSON.parse(result.stderr[0] ?? "")).toEqual({
+			ok: false,
+			error: { code: "USER_ERROR", message: "stdin exploded" },
+		});
+	});
+
+	it("returns parser errors for removed artifact add body-file flag", async () => {
+		await expect(
+			runCli(artifactAddArgs("task_missing", ["--body-file", "payload.txt"]), tempDb()),
+		).rejects.toThrow("--body-file");
 	});
 
 	it("returns validation JSON when enqueue omits --stdin", async () => {

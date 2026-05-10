@@ -82,7 +82,7 @@ type CommandInput =
 			readonly runId: string | undefined;
 			readonly kind: string;
 			readonly title: string;
-			readonly bodyFile: string | undefined;
+			readonly stdin: boolean;
 	  }
 	| { readonly command: "task.inspect"; readonly taskId: string }
 	| {
@@ -168,6 +168,10 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 			input.command === "task.supersede"
 				? yield* readRequiredStdinBody(ctx, "task supersede", input.stdin)
 				: undefined;
+		const artifactBody =
+			input.command === "task.artifact.add"
+				? yield* readRequiredStdinBody(ctx, "task artifact add", input.stdin)
+				: undefined;
 		const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
 		const result = yield* fromEngine(() => {
 			switch (input.command) {
@@ -198,7 +202,7 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "task.fail":
 					return engine.failTask(input);
 				case "task.artifact.add":
-					return engine.artifactAdd(input);
+					return engine.artifactAdd({ ...input, body: artifactBody! });
 				case "task.inspect":
 					return engine.taskInspect({ taskId: input.taskId });
 				case "task.cancel":
@@ -392,7 +396,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 			runId: Options.text("run").pipe(Options.optional),
 			kind: Options.text("kind"),
 			title: Options.text("title"),
-			bodyFile: Options.text("body-file").pipe(Options.optional),
+			stdin: Options.boolean("stdin"),
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -401,7 +405,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				runId: opt(o.runId),
 				kind: o.kind,
 				title: o.title,
-				bodyFile: opt(o.bodyFile),
+				stdin: o.stdin,
 			}),
 	);
 	const taskArtifact = Command.make("artifact").pipe(Command.withSubcommands([artifactAdd]));

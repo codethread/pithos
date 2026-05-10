@@ -120,7 +120,7 @@ export interface Engine {
 		readonly runId: string | undefined;
 		readonly kind: string;
 		readonly title: string;
-		readonly bodyFile: string | undefined;
+		readonly body: string;
 	}) => { readonly ok: true; readonly artifact: { readonly id: string } };
 	readonly taskInspect: (input: { readonly taskId: string }) => TaskInspectOutput;
 	readonly cancel: (input: {
@@ -1314,7 +1314,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			})();
 			return { ok: true, task: { id: taskId, status: "failed" } };
 		}),
-	artifactAdd: ({ taskId, runId, kind, title, bodyFile }) =>
+	artifactAdd: ({ taskId, runId, kind, title, body }) =>
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);
 			const task = db.prepare(sql`SELECT 1 FROM tasks WHERE id=?`).get(taskId);
@@ -1330,7 +1330,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					actorRunId,
 					requireNonEmpty(kind, "--kind"),
 					requireNonEmpty(title, "--title"),
-					bodyFile === undefined ? "" : Effect.runSync(ctx.services.fs.readText(bodyFile)),
+					requireNonEmpty(body, "stdin body"),
 				);
 				event(ctx, db, "task.artifact_added", {
 					task_id: taskId,

@@ -88,7 +88,7 @@ describe("task lifecycle", () => {
 			runId: "run_war",
 			kind: "note",
 			title: "evidence",
-			bodyFile: undefined,
+			body: "evidence body",
 		});
 		expect(artifact.ok).toBe(true);
 		expect(artifact.artifact.id.startsWith("artifact_")).toBe(true);

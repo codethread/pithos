@@ -141,7 +141,8 @@ tasks:
   - id: task-008d
     title: "Slice 8d: No-claim timeout"
     file: ./task-008d.md
-    status: pending
+    status: in_progress
+    blocked_note: "Slice was already in_progress on entry, so this run did not auto-resume or select another slice. User adjudication is required before continuing."
     blocked_by:
       - task-008b
       - task-008c

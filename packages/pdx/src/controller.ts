@@ -20,6 +20,7 @@ import {
 export const DAEMON_TARGET = "pdx--daemon";
 export const PANDORA_TARGET = "pdx--pandora";
 export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
+const NO_CLAIM_TIMEOUT_MILLIS = 30_000;
 
 const pidfilePath = (config: PdxConfig, runId: string): string => `${config.runsDir}/${runId}.pid`;
 
@@ -370,6 +371,70 @@ const entryAlive = (entry: RegistryEntry) =>
 		return yield* isAfkAlive(pid);
 	});
 
+const noClaimTimedOut = (entry: RegistryEntry, nowIso: string): Effect.Effect<boolean, PdxError> =>
+	Effect.gen(function* () {
+		if (entry.agent === "pandora" || entry.everClaimed === true) return false;
+		const launchedAtIso = entry.launchedAt;
+		if (launchedAtIso === undefined) {
+			return yield* Effect.fail(
+				new PdxError({ code: "VALIDATION_ERROR", message: `${entry.runId} missing launchedAt` }),
+			);
+		}
+		const launchedAt = Date.parse(launchedAtIso);
+		const now = Date.parse(nowIso);
+		if (Number.isNaN(launchedAt) || Number.isNaN(now)) {
+			yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: `${entry.runId} has invalid no-claim timeout timestamp`,
+				}),
+			);
+		}
+		return now - launchedAt >= NO_CLAIM_TIMEOUT_MILLIS;
+	});
+
+const confirmEntryGone = (entry: RegistryEntry) =>
+	entry.mode === "hitl"
+		? Tmux.pipe(
+				Effect.flatMap((tmux) => {
+					if (entry.tmuxTarget === undefined) {
+						return Effect.fail(
+							new PdxError({
+								code: "VALIDATION_ERROR",
+								message: `${entry.runId} missing tmux target`,
+							}),
+						);
+					}
+					return confirmTmuxGone(tmux, entry.tmuxTarget);
+				}),
+			)
+		: entry.pid === undefined
+			? Effect.fail(
+					new PdxError({ code: "VALIDATION_ERROR", message: `${entry.runId} missing pid` }),
+				)
+			: confirmAfkGone(entry.pid);
+
+const settleNoClaimTimeout = (config: PdxConfig, entry: RegistryEntry) =>
+	Effect.gen(function* () {
+		const pithos = yield* PithosClient;
+		const registry = yield* Registry;
+		const log = yield* SupervisorLog;
+		yield* killEntryResource(entry, "SIGTERM");
+		yield* confirmEntryGone(entry);
+		yield* pithos.runTimeout({ runId: entry.runId, reason: "no_claim_timeout" });
+		if (entry.mode === "afk") {
+			const fs = yield* FileSystem;
+			yield* fs.removeFile(pidfilePath(config, entry.runId));
+		}
+		yield* registry.remove(entry.runId);
+		yield* log.write({
+			level: "info",
+			span: "pdx.reconcile",
+			msg: "removed no-claim timed out entry",
+			data: { run_id: entry.runId },
+		});
+	});
+
 const agentPolicy = {
 	toil: { capability: "triage", mode: "afk" },
 	greed: { capability: "design", mode: "hitl" },
@@ -414,6 +479,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			}
 			const runId = yield* ids.nextRunId;
 			const sessionId = yield* ids.nextSessionId;
+			const launchedAt = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
 			yield* pithos.runUpsert({
 				agent,
 				mode: policy.mode,
@@ -429,6 +495,8 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				scopeId: task.scope_id,
 				state: "launching",
 				logicalName: `pdx--${agent}`,
+				launchedAt,
+				everClaimed: false,
 			});
 			const launched = yield* spawner
 				.launchAgent({
@@ -467,6 +535,8 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 								scopeId: task.scope_id,
 								state: "launching",
 								logicalName: launched.logicalName,
+								launchedAt,
+								everClaimed: false,
 								pid: afk.pid,
 							},
 							"SIGTERM",
@@ -496,6 +566,8 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				scopeId: task.scope_id,
 				state: "live",
 				logicalName: launched.logicalName,
+				launchedAt,
+				everClaimed: false,
 				...liveEntry,
 			});
 			yield* log.write({
@@ -515,6 +587,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 		const ids = yield* Ids;
 		const spawner = yield* Spawner;
 		const log = yield* SupervisorLog;
+		const nowIso = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
 		for (const entry of yield* registry.list) {
 			const alive = yield* entryAlive(entry);
 			if (entry.state === "terminating") {
@@ -554,14 +627,24 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					msg: "removed dead entry",
 					data: { run_id: entry.runId },
 				});
-			} else if (entry.mode === "hitl") {
-				yield* pithos.taskHeartbeat({ runId: entry.runId });
+			} else {
+				const run = yield* pithos.runInspect({ runId: entry.runId });
+				const observedEntry = run.task_id === null ? entry : { ...entry, everClaimed: true };
+				if (observedEntry !== entry) {
+					yield* registry.upsert(observedEntry);
+				}
+				if (run.task_id === null && (yield* noClaimTimedOut(observedEntry, nowIso))) {
+					yield* settleNoClaimTimeout(config, observedEntry);
+				} else if (entry.mode === "hitl") {
+					yield* pithos.taskHeartbeat({ runId: entry.runId });
+				}
 			}
 		}
 		const entries = yield* registry.list;
 		if (!entries.some((entry) => entry.agent === "pandora")) {
 			const runId = yield* ids.nextRunId;
 			const sessionId = yield* ids.nextSessionId;
+			const launchedAt = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
 			yield* pithos.runUpsert({
 				agent: "pandora",
 				mode: "hitl",
@@ -598,6 +681,8 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					scopeId: "global",
 					state: "live",
 					logicalName: launched.logicalName,
+					launchedAt,
+					everClaimed: false,
 					tmuxTarget,
 				});
 			}

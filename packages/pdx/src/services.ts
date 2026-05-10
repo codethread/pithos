@@ -145,6 +145,8 @@ export interface RegistryEntry {
 	readonly mode: "afk" | "hitl";
 	readonly state: "launching" | "live" | "terminating";
 	readonly logicalName: string;
+	readonly launchedAt?: string;
+	readonly everClaimed?: boolean;
 	readonly killAttempts?: number;
 	readonly pid?: number;
 	readonly tmuxTarget?: string;

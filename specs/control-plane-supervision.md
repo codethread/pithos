@@ -767,9 +767,11 @@ Every claiming agent follows:
 <claim_command>
 pithos task inspect <task-id>
 # do work
-pithos task artifact add ...
+printf '%s\n' '<artifact body>' | pithos task artifact add --task <task-id> --run <run-id> --kind <kind> --title <text> --stdin
 pithos task complete <task-id> --run <run-id> --token <token>
 ```
+
+`task complete` uses no stdin for the default `{}` result metadata. Use `task complete --stdin` only for JSON object metadata; long-form work products belong in Artifacts.
 
 Pithos invariant: a run may hold at most one active task at a time. After completing/failing a task and clearing `runs.task_id`, the same run may claim another task. Agent behavior is convention: Toil/Greed/War normally claim one task and exit/close for context management; Pandora is long-lived and may repeatedly claim `escalate` tasks sequentially.
 

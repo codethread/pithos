@@ -1,8 +1,13 @@
+import { readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BUILTIN_AGENT_ENQUEUES } from "@pithos/pithos/builtins";
 import { SpawnerError } from "./errors.js";
 import { launchRenderedAgent, renderAgent, renderSessionTranscript } from "./spawner.js";
+
+const templateDir = join(dirname(fileURLToPath(import.meta.url)), "../templates");
 
 const base = {
 	runId: "run_test",
@@ -95,6 +100,21 @@ const makeLaunchServices = (
 			return { status: 0, stdout: tmuxStatus ?? "", stderr: "" };
 		},
 	}) as const;
+
+describe("bundled agent templates", () => {
+	it("document the stdin payload contract", () => {
+		const templateText = readdirSync(templateDir)
+			.filter((entry) => entry.endsWith(".md") || entry.endsWith(".tmpl"))
+			.map((entry) => readFileSync(join(templateDir, entry), "utf8"))
+			.join("\n");
+
+		expect(templateText).not.toContain("--body");
+		expect(templateText).not.toContain("--body-file");
+		expect(templateText).not.toContain("--result-file");
+		expect(templateText).toContain("pithos task artifact add");
+		expect(templateText).toContain("--stdin");
+	});
+});
 
 describe("renderAgent", () => {
 	it.each(["pi", "claude"] as const)("renders required shape for %s", (harnessKind) => {

@@ -73,3 +73,10 @@ Append notes here. Do not rewrite earlier notes.
 - Public complete CLI no longer defines `--result-file`; stdin metadata must parse as a JSON object and non-object JSON is rejected with tagged validation JSON.
 - Updated complete command contracts in `control-plane-supervision.md` and `control-plane-design-notes.md`.
 - Validation run: `pnpm verify`.
+
+### Task 019: Stdin payload docs and prompts sync — 2026-05-10
+
+- Marked the stdin payload API spec implemented and aligned command contract notes across supervision/design specs and Spawner templates.
+- Updated demos to use explicit `--stdin` payload pipes; refreshed the backbone demo run upserts with required transcript metadata while auditing the touched demo.
+- After review, updated touched pdx docs to the current nested `pdx daemon ...` command surface and added a bundled-template regression test for the stdin payload prompt contract.
+- Validation runs: `pnpm verify`; `PITHOS_BIN=packages/pithos/bin/pithos bash docs/demos/pithos-backbone.sh`; post-review `pnpm verify`.

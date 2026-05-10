@@ -274,7 +274,7 @@ tasks:
   - id: task-019
     description: "Stdin payload docs and prompts sync"
     task_file: ./task-019.md
-    status: pending
+    status: complete
     blocked_by:
       - task-016
       - task-017

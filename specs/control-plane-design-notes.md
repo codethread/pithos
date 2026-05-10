@@ -169,12 +169,12 @@ pithos task fail \
 
 pithos task supersede \
   <task-id> \
-  --run <run-id> \
+  [--run <run-id>] \
   --reason <text> \
   [--title <text>] \
-  --stdin \
   [--scope <scope-id>] \
-  [--capability <triage|design|execute|escalate>]
+  [--capability <triage|design|execute|escalate>] \
+  --stdin
 
 pithos task cancel \
   <task-id> \
@@ -200,6 +200,8 @@ pithos events tail [--limit <n>]
 pithos briefing [--agent pandora]
 ```
 
+Payload-bearing task mutations use exactly one stdin document when `--stdin` is present. Enqueue, supersede, and artifact add require `--stdin` with a non-empty text payload. `task complete` uses no stdin for default `{}` metadata; `task complete --stdin` is only for JSON object metadata, and long-form work products belong in Artifacts.
+
 Removed / not exposed:
 
 ```text
@@ -215,9 +217,10 @@ Minimal operator/Pandora-facing API:
 ```text
 pdx open
 pdx close
-pdx status
-pdx kill (--run <run-id> | --task <task-id>) --reason <text>
-pdx logs show [--limit <n> | --all] [--since <when>]
+pdx daemon status
+pdx daemon logs [--limit <n> | --all] [--since <when>]
+pdx run kill <run-id> --reason <text>
+pdx task kill <task-id> --reason <text>
 ```
 
 No restart command initially. Recovery is explicit: kill interrupts and escalates; Pandora/Adam decide whether to supersede, cancel, or replan. Normal death may still result in a fresh run after cleanup when reconcile sees claimable work. There is no same-run resurrection.
@@ -228,7 +231,7 @@ Each pdx reconcile tick settles lifecycle before spawning: observe registry, cle
 
 Default reconcile interval is 5 seconds. Each tick settles lifecycle first, then spawns at most one agent in seeded order (`pandora`, `toil`, `greed`, `war`). HITL death detection uses `tmux has-session`; AFK death detection uses the process handle / `kill(pid, 0)`. HITL startup orphans are `^pdx--` tmux sessions; AFK startup orphans are pidfiles under `<home>/runs/`. On successful `pdx open`, the CLI prints `tmux attach -t pdx--pandora` and exits; it does not auto-attach.
 
-`pdx kill` must be immediate and scheduler-visible:
+`pdx run kill` and `pdx task kill` must be immediate and scheduler-visible:
 
 1. Mutate Pithos first with `pithos run interrupt`.
 2. If `--task` is supplied and no run holds it, reject and point to `pithos task cancel`.
@@ -238,7 +241,7 @@ Default reconcile interval is 5 seconds. Each tick settles lifecycle first, then
 6. Retry kill once per reconcile tick, structured-log failures, no max retry in MVP.
 7. Remove registry entry after kill succeeds.
 
-`pdx logs show` prints raw structured JSONL supervisor log lines. Default limit is 100. `--since` accepts ISO timestamps, durations like `10m`, `1h`, `2d`, `1w`, plus local-time `today` and `yesterday`. Each supervisor log line includes at least `ts`, `level`, `span`, and `msg`.
+`pdx daemon logs` prints raw structured JSONL supervisor log lines. Default limit is 100. `--since` accepts ISO timestamps, durations like `10m`, `1h`, `2d`, `1w`, plus local-time `today` and `yesterday`. Each supervisor log line includes at least `ts`, `level`, `span`, and `msg`.
 
 Wakeups use `tmux send-keys` to `pdx--pandora` with the content-free marker `# wakeup: claimable escalate`.
 
@@ -316,7 +319,7 @@ queued|failed|dead_letter --pithos task cancel--> cancelled
 
 `run cleanup` is for natural lifecycle cleanup after pdx has confirmed the AFK process or HITL tmux target is gone. Harness hooks and agents do not call it.
 
-`run interrupt` is for deliberate operator kill via `pdx kill`.
+`run interrupt` is for deliberate operator kill via `pdx run kill` or `pdx task kill`.
 
 ### `run cleanup`
 
@@ -354,12 +357,12 @@ Resolved in the main supervision spec:
 - `pithos init --fresh` is the destructive clean-break reset command.
 - Leases are removed from the MVP data model; fencing plus `runs.task_id` owns stale-write protection.
 - Pithos seeds `agent_kinds`, `capabilities`, `agent_claims`, and `agent_enqueues`.
-- `pdx status` must provide JSON; exact shape can remain loose for MVP.
+- `pdx daemon status` must provide JSON; exact shape can remain loose for MVP.
 - AFK and HITL session logs use the same underlying harness session-log mechanism as current tty-backed examples.
 - No persisted pdx registry in MVP; startup settlement kills deterministic `pdx--*` tmux/process leftovers first, confirms they are gone, then cleans active built-in runs.
 - Supervisor invalidation increments fencing tokens.
 - Non-Pandora agents are capped to one live entry per `(agent, scope)` for MVP.
-- Supervisor logs are structured JSONL and exposed through `pdx logs show`.
+- Supervisor logs are structured JSONL and exposed through `pdx daemon logs`.
 - Non-Pandora no-claim sessions time out after 30 seconds and become timed-out runs with no task mutation.
 - Pandora direct chat is the bootstrap/human entry path; no bootstrap task is seeded.
 

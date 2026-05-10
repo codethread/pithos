@@ -1,6 +1,6 @@
 # Change Spec: Pithos stdin payload API
 
-**Status:** Pending
+**Status:** Implemented
 **Last Updated:** 2026-05-10
 **Type:** Change spec
 **Scope:** public `pithos` CLI contract, `packages/pithos/src/cli.ts`, `packages/pithos/src/services.ts`, live/test stdin service implementations, downstream agent prompts/docs
@@ -9,37 +9,25 @@
 
 Unify Pithos payload-bearing CLI commands around a single rule: payload text is supplied through stdin only when the caller explicitly opts in with `--stdin`. The CLI stops accepting `--body`, `--body-file`, and `--result-file`.
 
-This is a pending change to the public CLI surface. It does not, by itself, require the typed in-process engine API to adopt stdin semantics. The CLI may continue to resolve stdin into explicit strings at the boundary before calling engine functions.
+This is the implemented public CLI surface. It does not require the typed in-process engine API to adopt stdin semantics: the CLI resolves stdin into explicit strings at the boundary before calling engine functions.
 
 ## Relationship to current specs
 
-Current implemented behavior remains defined by:
+The implemented command contract is shared with:
 
 - `specs/control-plane-supervision.md`
 - `specs/task-graph.md`
 
-This document records the intended future CLI contract. It is not implemented behavior yet.
-
-When this change is implemented, the same implementation change must also update the command-contract sections in those specs so the repo does not retain multiple conflicting normative descriptions.
+Those specs remain normative for supervision and graph semantics; this document is the focused stdin payload contract.
 
 ## Why this change
 
-Current payload APIs are inconsistent:
-
-- `task enqueue` requires one of `--body` or `--body-file`
-- `task supersede` optionally accepts `--body` or `--body-file`
-- `task artifact add` optionally accepts `--body-file`, otherwise stores an empty body
-- `task complete` optionally accepts `--result-file`, otherwise stores `{}`
-
-That inconsistency pushes agents toward scratch files in `.tmp/` just to attach multiline content safely. The command surface also mixes two different ideas for the same field: inline flags for some commands, file indirection for others.
-
-Desired design language:
+The previous payload APIs were inconsistent and pushed agents toward scratch files for multiline content. The current command surface gives every payload-bearing task mutation one explicit stdin contract:
 
 - routing and identity stay in flags/args
 - document payloads come from stdin
 - stdin is only consumed when `--stdin` is explicitly present
 - one command may consume at most one stdin payload
-- if a workflow ever needs two independent payloads, it should be split into two commands rather than inventing multi-payload stdin conventions
 
 ## Goals
 
@@ -77,13 +65,13 @@ Desired design language:
 - **Decision:** This change is a CLI contract change, not necessarily an engine contract change.
   - **Rationale:** Downstream in-process callers already pass explicit strings to engine functions. The CLI can adopt stdin without forcing those call sites onto a stream-based API.
 
-## Proposed CLI contract
+## CLI contract
 
 For all commands below, `--run` behavior remains unchanged: it stays optional at the CLI layer where `PITHOS_RUN_ID` currently applies.
 
 ### `pithos task enqueue`
 
-New shape:
+Shape:
 
 ```sh
 pithos task enqueue \
@@ -104,7 +92,7 @@ Rules:
 
 ### `pithos task supersede`
 
-New shape:
+Shape:
 
 ```sh
 pithos task supersede \
@@ -128,7 +116,7 @@ Rules:
 
 ### `pithos task artifact add`
 
-New shape:
+Shape:
 
 ```sh
 pithos task artifact add \
@@ -149,7 +137,7 @@ Rules:
 
 ### `pithos task complete`
 
-New shape:
+Shape:
 
 ```sh
 pithos task complete <task-id> [--run <run-id>] --token <n> [--stdin]
@@ -245,16 +233,6 @@ printf '%s\n' '{"verified":true,"tests":["substrate.test.ts"]}' | \
   pithos task complete task_123 --run run_war --token 1 --stdin
 ```
 
-## Expected downstream changes when implemented
-
-- Agent prompts can stop instructing temp-file artifact staging
-- CLI tests must be rewritten around explicit `--stdin` payload flows
-- Docs and demos must replace `--body`, `--body-file`, and `--result-file` examples
-- `specs/control-plane-supervision.md` and `specs/task-graph.md` must be updated in the same implementation change
-- `packages/pithos/src/services.ts` plus live/test implementations must grow the stdin/input boundary needed for deterministic CLI behavior
-- Engine inputs for `task complete` and `task artifact add` should be revised to accept explicit resolved payload text rather than file-path indirection, so the CLI does not reintroduce hidden temp-file plumbing
-- Any wrapper or harness helper currently materializing temp files for payload submission can be simplified
-
 ## Explicitly rejected alternatives
 
 - Keep `--body` for short strings and add stdin as another option
@@ -271,7 +249,3 @@ printf '%s\n' '{"verified":true,"tests":["substrate.test.ts"]}' | \
 
 - Allow empty artifacts as metadata-only markers
   - Rejected because the durable artifact surface should bias toward meaningful content
-
-## Implementation note for later
-
-This spec is a pending API change proposal only. It should not be treated as implemented behavior until the CLI, tests, docs, prompts, and the currently normative command-contract specs are updated together.

@@ -154,7 +154,7 @@ tasks:
   - id: task-010
     title: "Slice 10: Orphan discovery on `pdx open`"
     file: ./task-010.md
-    status: pending
+    status: complete
     blocked_by:
       - task-002
       - task-005b

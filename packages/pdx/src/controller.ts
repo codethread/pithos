@@ -39,6 +39,63 @@ const cleanupAfkRun = (config: PdxConfig, runId: string, reason: string) =>
 		yield* fs.removeFile(pidfilePath(config, runId));
 	});
 
+const parsePidfile = (runId: string, raw: string): Effect.Effect<number, PdxError> => {
+	const trimmed = raw.trim();
+	if (!/^\d+$/.test(trimmed)) {
+		return Effect.fail(
+			new PdxError({ code: "VALIDATION_ERROR", message: `${runId} pidfile is malformed` }),
+		);
+	}
+	const pid = Number(trimmed);
+	return pid > 0
+		? Effect.succeed(pid)
+		: Effect.fail(
+				new PdxError({ code: "VALIDATION_ERROR", message: `${runId} pidfile is malformed` }),
+			);
+};
+
+const settleHitlOrphans = () =>
+	Effect.gen(function* () {
+		const tmux = yield* Tmux;
+		for (const session of yield* tmux.lsSessions()) {
+			if (session.startsWith("pdx--") && session !== DAEMON_TARGET) {
+				yield* tmux.killSession(session);
+				yield* confirmTmuxGone(tmux, session);
+			}
+		}
+	});
+
+const settleAfkOrphan = (config: PdxConfig, filename: string) =>
+	Effect.gen(function* () {
+		const runId = filename.slice(0, -".pid".length);
+		const fs = yield* FileSystem;
+		const processService = yield* Process;
+		const path = pidfilePath(config, runId);
+		const pid = yield* parsePidfile(runId, yield* fs.readFile(path));
+		const alive = yield* processService.isAlive(pid);
+		if (alive) {
+			yield* processService.kill(pid, "SIGTERM");
+			const aliveAfterTerm = yield* processService.isAlive(pid);
+			if (aliveAfterTerm) {
+				yield* processService.kill(pid, "SIGKILL");
+			}
+			yield* confirmAfkGone(pid);
+		}
+		yield* cleanupRun(runId, "daemon_start");
+		yield* fs.removeFile(path);
+	});
+
+const settleAfkOrphans = (config: PdxConfig) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem;
+		const entries = yield* fs.readDirectory(config.runsDir);
+		for (const entry of entries) {
+			if (entry.endsWith(".pid")) {
+				yield* settleAfkOrphan(config, entry);
+			}
+		}
+	});
+
 const awaitDaemonReady = (
 	socketPath: string,
 	attemptsRemaining: number,
@@ -836,6 +893,8 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 		const log = yield* SupervisorLog;
 		yield* fs.mkdir(config.runsDir);
 		yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon starting" });
+		yield* settleHitlOrphans();
+		yield* settleAfkOrphans(config);
 		yield* pithos.scopeUpsert({ kind: "global" });
 		yield* pithos.runUpsert({
 			agent: "pdx",
@@ -848,18 +907,6 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 		const registry = yield* Registry;
 		const tmux = yield* Tmux;
 		const processService = yield* Process;
-		for (const session of yield* tmux.lsSessions()) {
-			if (session.startsWith("pdx--") && session !== DAEMON_TARGET) {
-				yield* tmux
-					.killSession(session)
-					.pipe(
-						Effect.catchAll((error) =>
-							isMissingTmuxSessionError(error) ? Effect.void : Effect.fail(error),
-						),
-					);
-				yield* confirmTmuxGone(tmux, session);
-			}
-		}
 		yield* reconcileTick(config, maxAfk);
 		const loop = yield* reconcileTick(config, maxAfk).pipe(
 			Effect.repeat(Schedule.spaced(`${intervalSeconds} seconds`)),

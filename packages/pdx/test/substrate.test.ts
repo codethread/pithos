@@ -151,6 +151,7 @@ const testClock = Clock.of({ nowIso: Effect.succeed("2026-05-09T00:00:31.000Z") 
 const noopFs = FileSystem.of({
 	appendFile: () => Effect.void,
 	readFile: () => Effect.succeed(""),
+	readDirectory: () => Effect.succeed([]),
 	mkdir: () => Effect.void,
 	writeFileAtomic: () => Effect.void,
 	removeFile: () => Effect.void,
@@ -318,6 +319,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: (_path, content) => Effect.sync(() => writes.push(content)),
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -360,6 +362,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -397,6 +400,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -439,6 +443,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: (path) => Effect.sync(() => mkdirs.push(path)),
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -506,6 +511,85 @@ describe("pdx substrate", () => {
 		expect((await run(registry.list)).map((entry) => entry.agent)).not.toContain("pdx");
 	});
 
+	it("daemon startup settles HITL and AFK orphans before creating system run", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const config = await parseConfig(home);
+		const events: string[] = [];
+		const removes: string[] = [];
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: (path) => Effect.succeed(path.endsWith("run_live.pid") ? "456\n" : "789\n"),
+			readDirectory: () => Effect.succeed(["run_live.pid", "run_stale.pid", "note.txt"]),
+			mkdir: () => Effect.void,
+			writeFileAtomic: () => Effect.void,
+			removeFile: (path) => Effect.sync(() => removes.push(path)),
+		});
+		const pithos = makePithos(events);
+		const killedSessions: string[] = [];
+		const tmux = Tmux.of({
+			hasSession: (target) => Effect.succeed(!killedSessions.includes(target)),
+			lsSessions: () => Effect.succeed([DAEMON_TARGET, "pdx--greed", "other"]),
+			newSession: () => Effect.void,
+			killSession: (target) =>
+				Effect.sync(() => {
+					events.push(`killSession:${target}`);
+					killedSessions.push(target);
+				}),
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const killedPids: string[] = [];
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: (pid) => Effect.succeed(pid === 456 && !killedPids.includes("456:SIGKILL")),
+			kill: (pid, signal) =>
+				Effect.sync(() => {
+					events.push(`kill:${pid}:${signal}`);
+					killedPids.push(`${pid}:${signal}`);
+				}),
+		});
+		const registry = await run(makeRegistry);
+		const handle = await run(
+			runDaemon(config, 4, 5).pipe(
+				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(Registry, registry),
+				Effect.provideService(
+					Ids,
+					Ids.of({ nextRunId: Effect.succeed("run_pandora"), nextSessionId: Effect.succeed("s") }),
+				),
+				Effect.provideService(
+					Spawner,
+					Spawner.of({
+						launchAgent: (input) =>
+							Effect.succeed({
+								...input,
+								logicalName: PANDORA_TARGET,
+								hitl: { tmuxTarget: PANDORA_TARGET, panePid: 1 },
+							}),
+					}),
+				),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(Process, process),
+			),
+		);
+		await run(handle.close);
+		expect(events.slice(0, 7)).toEqual([
+			"killSession:pdx--greed",
+			"kill:456:SIGTERM",
+			"kill:456:SIGKILL",
+			"runCleanup:run_live:daemon_start",
+			"runCleanup:run_stale:daemon_start",
+			"scopeUpsert:global",
+			`runUpsert:pdx:${PDX_SYSTEM_RUN_ID}`,
+		]);
+		expect(events).not.toContain(`killSession:${DAEMON_TARGET}`);
+		expect(events).not.toContain("kill:789:SIGTERM");
+		expect(removes).toEqual([`${config.runsDir}/run_live.pid`, `${config.runsDir}/run_stale.pid`]);
+	});
+
 	it("daemon stop replies after cleanup and closes the IPC socket explicitly", async () => {
 		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const pithosCalls: string[] = [];
@@ -513,6 +597,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -598,6 +683,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -633,6 +719,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -661,6 +748,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(`${lines.join("\n")}\n`),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -708,6 +796,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(`${line}\n`),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -743,6 +832,7 @@ describe("pdx substrate", () => {
 		const corruptFs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed("{\n"),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -758,6 +848,7 @@ describe("pdx substrate", () => {
 		const blankLineFs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(`${line}\n\n${line}\n`),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -1464,6 +1555,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: (path, content) => Effect.sync(() => writes.push(`${path}:${content}`)),
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -1592,6 +1684,7 @@ describe("pdx substrate", () => {
 					FileSystem.of({
 						appendFile: () => Effect.void,
 						readFile: () => Effect.succeed(""),
+						readDirectory: () => Effect.succeed([]),
 						mkdir: () => Effect.void,
 						writeFileAtomic: () => Effect.void,
 						removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -1739,6 +1832,7 @@ describe("pdx substrate", () => {
 					FileSystem.of({
 						appendFile: () => Effect.void,
 						readFile: () => Effect.succeed(""),
+						readDirectory: () => Effect.succeed([]),
 						mkdir: () => Effect.void,
 						writeFileAtomic: (path) => Effect.sync(() => writes.push(path)),
 						removeFile: () => Effect.void,
@@ -1799,6 +1893,7 @@ describe("pdx substrate", () => {
 						FileSystem.of({
 							appendFile: () => Effect.void,
 							readFile: () => Effect.succeed(""),
+							readDirectory: () => Effect.succeed([]),
 							mkdir: () => Effect.void,
 							writeFileAtomic: () => Effect.void,
 							removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -1820,6 +1915,7 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () =>
 				Effect.fail(new PdxError({ code: "FS_ERROR", message: "pidfile write failed" })),

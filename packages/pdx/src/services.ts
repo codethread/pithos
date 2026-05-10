@@ -22,6 +22,7 @@ export class Process extends Context.Tag("pdx/Process")<Process, ProcessService>
 export interface FileSystemService {
 	readonly appendFile: (path: string, content: string) => Effect.Effect<void, PdxError>;
 	readonly readFile: (path: string) => Effect.Effect<string, PdxError>;
+	readonly readDirectory: (path: string) => Effect.Effect<readonly string[], PdxError>;
 	readonly mkdir: (path: string) => Effect.Effect<void, PdxError>;
 	readonly writeFileAtomic: (path: string, content: string) => Effect.Effect<void, PdxError>;
 	readonly removeFile: (path: string) => Effect.Effect<void, PdxError>;

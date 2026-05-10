@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { launchAgent } from "../../spawner/src/index.ts";
@@ -53,12 +53,25 @@ const execFileEffect = (
 export const ProcessLive = Process.of({
 	execFile: execFileEffect,
 	isAlive: (pid) =>
-		Effect.sync(() => {
+		Effect.gen(function* () {
 			try {
 				process.kill(pid, 0);
 				return true;
-			} catch {
-				return false;
+			} catch (error) {
+				if (
+					typeof error === "object" &&
+					error !== null &&
+					"code" in error &&
+					error.code === "ESRCH"
+				) {
+					return false;
+				}
+				return yield* Effect.fail(
+					new PdxError({
+						code: "PROCESS_ERROR",
+						message: `probe ${pid} failed: ${String(error)}`,
+					}),
+				);
 			}
 		}),
 	kill: (pid, signal) =>
@@ -84,6 +97,11 @@ export const FileSystemLive = FileSystem.of({
 		Effect.tryPromise({
 			try: () => readFile(path, "utf8"),
 			catch: (error) => fsError("readFile", error),
+		}),
+	readDirectory: (path) =>
+		Effect.tryPromise({
+			try: () => readdir(path),
+			catch: (error) => fsError("readDirectory", error),
 		}),
 	mkdir: (path) =>
 		Effect.tryPromise({

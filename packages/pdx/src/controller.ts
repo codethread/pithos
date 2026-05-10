@@ -138,6 +138,7 @@ export const openPdx = (config: PdxConfig, maxAfk: number, intervalSeconds: numb
 			command: [
 				config.daemonEntrypoint,
 				"daemon",
+				"run",
 				"--data-dir",
 				config.dataDir,
 				"--max-afk",
@@ -357,6 +358,29 @@ export const logsShowPdx = (
 		return output.length === 0 ? "" : `${output.join("\n")}\n`;
 	});
 
+export const runTranscriptPdx = (input: {
+	readonly runId: string;
+	readonly limit: number | undefined;
+}) =>
+	Effect.gen(function* () {
+		const pithos = yield* PithosClient;
+		const spawner = yield* Spawner;
+		const run = yield* pithos.runInspect({ runId: input.runId });
+		if (run.harness_kind === "system") {
+			return yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: `Run ${run.id} is a system run; use 'pdx daemon logs' for supervisor logs.`,
+				}),
+			);
+		}
+		return yield* spawner.renderSessionTranscript({
+			harnessKind: run.harness_kind,
+			sessionLogPath: run.session_log_path,
+			limit: input.limit,
+		});
+	});
+
 const confirmTmuxGone = (tmux: TmuxService, target: string) =>
 	tmux.hasSession(target).pipe(
 		Effect.flatMap((exists) =>
@@ -568,12 +592,22 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			const runId = yield* ids.nextRunId;
 			const sessionId = yield* ids.nextSessionId;
 			const launchedAt = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
+			const rendered = yield* spawner.renderAgent({
+				agent,
+				mode: policy.mode,
+				runId,
+				sessionId,
+				scopeId: task.scope_id,
+				cwd,
+			});
 			yield* pithos.runUpsert({
 				agent,
 				mode: policy.mode,
 				scope: task.scope_id,
 				cwd,
 				sessionId,
+				harnessKind: rendered.harness.kind,
+				sessionLogPath: rendered.sessionLogPath,
 				runId,
 			});
 			yield* registry.upsert({
@@ -582,7 +616,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				mode: policy.mode,
 				scopeId: task.scope_id,
 				state: "launching",
-				logicalName: `pdx--${agent}`,
+				logicalName: rendered.logicalName,
 				launchedAt,
 				everClaimed: false,
 			});
@@ -601,14 +635,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				},
 			});
 			const launched = yield* spawner
-				.launchAgent({
-					agent,
-					mode: policy.mode,
-					runId,
-					sessionId,
-					scopeId: task.scope_id,
-					cwd,
-				})
+				.launchRenderedAgent(rendered)
 				.pipe(
 					Effect.catchAll((error) =>
 						cleanupRun(runId, "launch_failed").pipe(
@@ -680,10 +707,10 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 					run_id: runId,
 					scope_id: task.scope_id,
 					logical_name: launched.logicalName,
-					harness_kind: launched.harnessKind ?? null,
-					harness_argv: launched.harnessArgv ?? [],
-					harness_env_keys: launched.harnessEnvKeys ?? [],
-					session_log_path: launched.sessionLogPath ?? null,
+					harness_kind: launched.harnessKind,
+					harness_argv: rendered.harness.argv,
+					harness_env_keys: Object.keys(rendered.harness.env),
+					session_log_path: launched.sessionLogPath,
 					pid: afk?.pid ?? null,
 					stdout_path: policy.mode === "afk" ? afkStdoutPath(config, runId) : null,
 					stderr_path: policy.mode === "afk" ? afkStderrPath(config, runId) : null,
@@ -772,12 +799,22 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 			const runId = yield* ids.nextRunId;
 			const sessionId = yield* ids.nextSessionId;
 			const launchedAt = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
+			const rendered = yield* spawner.renderAgent({
+				agent: "pandora",
+				mode: "hitl",
+				runId,
+				sessionId,
+				scopeId: "global",
+				cwd: config.dataDir,
+			});
 			yield* pithos.runUpsert({
 				agent: "pandora",
 				mode: "hitl",
 				scope: "global",
 				cwd: config.dataDir,
 				sessionId,
+				harnessKind: rendered.harness.kind,
+				sessionLogPath: rendered.sessionLogPath,
 				runId,
 			});
 			yield* log.write({
@@ -795,14 +832,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				},
 			});
 			const launched = yield* spawner
-				.launchAgent({
-					agent: "pandora",
-					mode: "hitl",
-					runId,
-					sessionId,
-					scopeId: "global",
-					cwd: config.dataDir,
-				})
+				.launchRenderedAgent(rendered)
 				.pipe(
 					Effect.catchAll((error) =>
 						cleanupRun(runId, "launch_failed").pipe(Effect.zipRight(Effect.fail(error))),
@@ -834,10 +864,10 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				data: {
 					run_id: runId,
 					logical_name: launched.logicalName,
-					harness_kind: launched.harnessKind ?? null,
-					harness_argv: launched.harnessArgv ?? [],
-					harness_env_keys: launched.harnessEnvKeys ?? [],
-					session_log_path: launched.sessionLogPath ?? null,
+					harness_kind: launched.harnessKind,
+					harness_argv: rendered.harness.argv,
+					harness_env_keys: Object.keys(rendered.harness.env),
+					session_log_path: launched.sessionLogPath,
 					tmux_target: tmuxTarget ?? null,
 				},
 			});
@@ -969,6 +999,8 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 			scope: "global",
 			cwd: config.dataDir,
 			sessionId: DAEMON_TARGET,
+			harnessKind: "system",
+			sessionLogPath: config.logPath,
 			runId: PDX_SYSTEM_RUN_ID,
 		});
 		const registry = yield* Registry;

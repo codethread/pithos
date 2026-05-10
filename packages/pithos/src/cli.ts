@@ -5,7 +5,7 @@ import { Effect, Option } from "effect";
 import type { Config } from "./config.js";
 import { makeEngine } from "./engine.js";
 import { exitCodeFor, PithosError } from "./errors.js";
-import type { Capability, Mode, ScopeKind } from "./db.js";
+import type { Capability, HarnessKind, Mode, ScopeKind } from "./db.js";
 import type { Services } from "./services.js";
 
 export interface CliContext {
@@ -26,6 +26,8 @@ type CommandInput =
 			readonly mode: Mode;
 			readonly scope: string;
 			readonly cwd: string;
+			readonly harnessKind: HarnessKind;
+			readonly sessionLogPath: string;
 			readonly sessionId: string;
 			readonly runId: string | undefined;
 	  }
@@ -207,6 +209,8 @@ export const makePithosCommand = (ctx: CliContext) => {
 			mode: Options.choice("mode", ["afk", "hitl"] as const),
 			scope: Options.text("scope"),
 			cwd: Options.text("cwd"),
+			harnessKind: Options.choice("harness-kind", ["claude", "pi", "system"] as const),
+			sessionLogPath: Options.text("session-log-path"),
 			sessionId: Options.text("session-id"),
 			runId: Options.text("run").pipe(Options.optional),
 		},
@@ -217,6 +221,8 @@ export const makePithosCommand = (ctx: CliContext) => {
 				mode: o.mode,
 				scope: o.scope,
 				cwd: o.cwd,
+				harnessKind: o.harnessKind,
+				sessionLogPath: o.sessionLogPath,
 				sessionId: o.sessionId,
 				runId: opt(o.runId),
 			}),

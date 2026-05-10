@@ -11,8 +11,12 @@ import {
 } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { launchAgent } from "../../spawner/src/index.ts";
-import { LiveSpawnerServices as liveSpawnerServices } from "../../spawner/src/services.ts";
+import {
+	launchRenderedAgent,
+	LiveSpawnerServices as liveSpawnerServices,
+	renderAgent,
+	renderSessionTranscript,
+} from "@pithos/spawner";
 import { liveServices, makeEngine, PithosError } from "@pithos/pithos";
 import type { Config as PithosConfig } from "@pithos/pithos";
 import { PdxError } from "./errors.js";
@@ -170,6 +174,8 @@ const pithosClient = (dbPath: string): PithosClientService => {
 						scope: input.scope,
 						cwd: input.cwd,
 						sessionId: input.sessionId,
+						harnessKind: input.harnessKind,
+						sessionLogPath: input.sessionLogPath,
 						runId: input.runId,
 					}),
 			),
@@ -216,29 +222,40 @@ const pithosClient = (dbPath: string): PithosClientService => {
 };
 
 export const makePithosClientLive = (dbPath: string) => PithosClient.of(pithosClient(dbPath));
+const spawnerError = (operation: string, error: unknown) =>
+	new PdxError({ code: "PROCESS_ERROR", message: `${operation} failed: ${String(error)}` });
+
 export const makeSpawnerLive = (config: {
 	readonly dataDir: string;
 	readonly pithosDbPath: string;
-}) =>
-	Spawner.of({
-		launchAgent: (input) =>
+}) => {
+	const renderServices = {
+		readText: liveSpawnerServices.readText,
+		env: (key: string) => {
+			if (key === "PDX_DATA_DIR") return config.dataDir;
+			if (key === "PITHOS_DB") return config.pithosDbPath;
+			return liveSpawnerServices.env(key);
+		},
+	};
+	return Spawner.of({
+		renderAgent: (input) =>
+			Effect.try({
+				try: () => renderAgent(input, renderServices),
+				catch: (error) => spawnerError("spawner render", error),
+			}),
+		launchRenderedAgent: (rendered) =>
 			Effect.tryPromise({
 				try: async () => {
-					const stdoutPath = `${config.dataDir}/runs/${input.runId}.stdout.log`;
-					const stderrPath = `${config.dataDir}/runs/${input.runId}.stderr.log`;
+					const stdoutPath = `${config.dataDir}/runs/${rendered.runId}.stdout.log`;
+					const stderrPath = `${config.dataDir}/runs/${rendered.runId}.stderr.log`;
 					await Promise.all([writeFile(stdoutPath, "", "utf8"), writeFile(stderrPath, "", "utf8")]);
 					const [stdout, stderr] = await Promise.all([
 						open(stdoutPath, "a"),
 						open(stderrPath, "a"),
 					]);
 					try {
-						return launchAgent(input, {
-							readText: liveSpawnerServices.readText,
-							env: (key) => {
-								if (key === "PDX_DATA_DIR") return config.dataDir;
-								if (key === "PITHOS_DB") return config.pithosDbPath;
-								return liveSpawnerServices.env(key);
-							},
+						return launchRenderedAgent(rendered, {
+							...renderServices,
 							spawnProcess: (file, args, options) => {
 								const child = spawn(file, args, {
 									cwd: options.cwd,
@@ -259,10 +276,25 @@ export const makeSpawnerLive = (config: {
 						await Promise.all([stdout.close(), stderr.close()]);
 					}
 				},
-				catch: (error) =>
-					new PdxError({
-						code: "PROCESS_ERROR",
-						message: `spawner launch failed: ${String(error)}`,
-					}),
+				catch: (error) => spawnerError("spawner launch", error),
+			}),
+		renderSessionTranscript: (input) =>
+			Effect.try({
+				try: () =>
+					input.limit === undefined
+						? renderSessionTranscript(
+								{ harnessKind: input.harnessKind, sessionLogPath: input.sessionLogPath },
+								renderServices,
+							)
+						: renderSessionTranscript(
+								{
+									harnessKind: input.harnessKind,
+									sessionLogPath: input.sessionLogPath,
+									limit: input.limit,
+								},
+								renderServices,
+							),
+				catch: (error) => spawnerError("spawner transcript", error),
 			}),
 	});
+};

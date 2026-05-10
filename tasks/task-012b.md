@@ -9,9 +9,9 @@ Snapshot:
 - `pithos --help`
 - `pithos` subcommand help for every public nested command
 - `pdx --help`
-- `pdx` subcommand help for `open`, `close`, `status`, `kill`, `logs show`
+- `pdx` subcommand help for `open`, `close`, `daemon status`, `daemon logs`, `run kill`, `run transcript`, `task kill`
 - `pandora-spawn preview --help`
-- `pdx status --json` minimum shape
+- `pdx daemon status` minimum JSON shape
 - `pithos run inspect` JSON shape
 - `pithos task inspect` JSON shape
 - `pithos graph inspect` JSON shape

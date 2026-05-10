@@ -9,6 +9,12 @@
 		"pandora-spawn": "./bin/pandora-spawn"
 	},
 	"type": "module",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"import": "./src/index.ts"
+		}
+	},
 	"scripts": {
 		"clean": "rimraf dist bin/pandora-spawn bin/pandora-spawn-dev *.tsbuildinfo",
 		"lint": "eslint .",

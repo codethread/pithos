@@ -1,5 +1,5 @@
 import { Context, Effect, SynchronizedRef } from "effect";
-import type { RunOutput } from "@pithos/pithos";
+import type { RunOutput as PithosRunOutput } from "@pithos/pithos";
 import type { PdxError } from "./errors.js";
 
 export interface ProcessResult {
@@ -54,8 +54,10 @@ export interface TmuxService {
 }
 export class Tmux extends Context.Tag("pdx/Tmux")<Tmux, TmuxService>() {}
 
+export type PdxRunOutput = PithosRunOutput;
+
 export interface PithosInterruptResult {
-	readonly run: RunOutput;
+	readonly run: PdxRunOutput;
 	readonly interruptedTask: { readonly id: string; readonly scope_id: string } | null;
 }
 
@@ -78,6 +80,8 @@ export interface PithosClientService {
 		readonly scope: string;
 		readonly cwd: string;
 		readonly sessionId: string;
+		readonly harnessKind: "claude" | "pi" | "system";
+		readonly sessionLogPath: string;
 		readonly runId?: string;
 	}) => Effect.Effect<void, PdxError>;
 	readonly runCleanup: (input: {
@@ -94,10 +98,10 @@ export interface PithosClientService {
 		readonly runId: string;
 		readonly reason: string;
 	}) => Effect.Effect<void, PdxError>;
-	readonly runInspect: (input: { readonly runId: string }) => Effect.Effect<RunOutput, PdxError>;
+	readonly runInspect: (input: { readonly runId: string }) => Effect.Effect<PdxRunOutput, PdxError>;
 	readonly activeRunForTask: (input: {
 		readonly taskId: string;
-	}) => Effect.Effect<RunOutput | null, PdxError>;
+	}) => Effect.Effect<PdxRunOutput | null, PdxError>;
 	readonly taskHeartbeat: (input: { readonly runId: string }) => Effect.Effect<void, PdxError>;
 	readonly taskEnqueue: (input: {
 		readonly scope: string;
@@ -123,6 +127,17 @@ export interface LaunchAgentInput {
 	readonly cwd: string;
 }
 
+export interface RenderedAgent extends LaunchAgentInput {
+	readonly logicalName: string;
+	readonly harness: {
+		readonly kind: "claude" | "pi";
+		readonly argv: readonly string[];
+		readonly env: Record<string, string>;
+	};
+	readonly sessionLogPath: string;
+	readonly prompt: string;
+}
+
 export interface LaunchAgentResult {
 	readonly agent: "pandora" | "toil" | "greed" | "war";
 	readonly mode: "afk" | "hitl";
@@ -130,16 +145,22 @@ export interface LaunchAgentResult {
 	readonly sessionId: string;
 	readonly scopeId: string;
 	readonly logicalName: string;
-	readonly harnessKind?: string;
-	readonly harnessArgv?: readonly string[];
-	readonly harnessEnvKeys?: readonly string[];
-	readonly sessionLogPath?: string;
+	readonly harnessKind: "claude" | "pi";
+	readonly sessionLogPath: string;
 	readonly hitl?: { readonly tmuxTarget: string; readonly panePid: number | null };
 	readonly afk?: { readonly pid: number; readonly processStartTime: string };
 }
 
 export interface SpawnerService {
-	readonly launchAgent: (input: LaunchAgentInput) => Effect.Effect<LaunchAgentResult, PdxError>;
+	readonly renderAgent: (input: LaunchAgentInput) => Effect.Effect<RenderedAgent, PdxError>;
+	readonly launchRenderedAgent: (
+		rendered: RenderedAgent,
+	) => Effect.Effect<LaunchAgentResult, PdxError>;
+	readonly renderSessionTranscript: (input: {
+		readonly harnessKind: "claude" | "pi";
+		readonly sessionLogPath: string;
+		readonly limit: number | undefined;
+	}) => Effect.Effect<string, PdxError>;
 }
 export class Spawner extends Context.Tag("pdx/Spawner")<Spawner, SpawnerService>() {}
 

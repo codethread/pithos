@@ -121,6 +121,8 @@ describe("pithos foundation", () => {
 			scope: repo.scope.id,
 			cwd: "/tmp/pithos-repo",
 			sessionId: "session_war",
+			harnessKind: "claude",
+			sessionLogPath: "/tmp/session_war.jsonl",
 			runId: "run_war",
 		});
 		expect(upserted.run).toMatchObject({
@@ -131,6 +133,8 @@ describe("pithos foundation", () => {
 			status: "live",
 			task_id: null,
 			session_id: "session_war",
+			harness_kind: "claude",
+			session_log_path: "/tmp/session_war.jsonl",
 		});
 		expect(upserted.run.created_at).toEqual(expect.any(String));
 		expect(upserted.run.updated_at).toEqual(expect.any(String));
@@ -148,7 +152,33 @@ describe("pithos foundation", () => {
 				scope: "global",
 				cwd: "/tmp",
 				sessionId: "",
+				harnessKind: "claude",
+				sessionLogPath: "/tmp/session_empty.jsonl",
 				runId: "run_empty_session",
+			}),
+		).toThrow(PithosError);
+		expect(() =>
+			engine.runUpsert({
+				agent: "war",
+				mode: "afk",
+				scope: "global",
+				cwd: "/tmp",
+				sessionId: "session",
+				harnessKind: "bogus" as never,
+				sessionLogPath: "/tmp/session.jsonl",
+				runId: "run_bad_harness",
+			}),
+		).toThrow(PithosError);
+		expect(() =>
+			engine.runUpsert({
+				agent: "war",
+				mode: "afk",
+				scope: "global",
+				cwd: "/tmp",
+				sessionId: "session",
+				harnessKind: "claude",
+				sessionLogPath: "",
+				runId: "run_empty_log",
 			}),
 		).toThrow(PithosError);
 		const db = new Database(dbPath);
@@ -174,6 +204,8 @@ describe("pithos foundation", () => {
 				scope: "repo:/missing",
 				cwd: "/tmp",
 				sessionId: "session",
+				harnessKind: "pi",
+				sessionLogPath: "/tmp/session.jsonl",
 				runId: "run_missing_scope",
 			}),
 		).toThrow(PithosError);
@@ -212,6 +244,8 @@ describe("pithos foundation", () => {
 			scope: "global",
 			cwd: "/tmp",
 			sessionId: "session",
+			harnessKind: "claude",
+			sessionLogPath: "/tmp/session_toil.jsonl",
 			runId: "run_toil",
 		});
 		expect(() =>

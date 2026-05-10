@@ -187,30 +187,63 @@ tasks:
   - id: task-012a
     title: "Slice 12a: MVP integration tests"
     file: ./task-012a.md
-    status: pending
+    status: complete
     blocked_by:
-      - task-011
+      - task-013
   - id: task-012b
     title: "Slice 12b: Stable surface snapshots"
     file: ./task-012b.md
     status: pending
     blocked_by:
-      - task-011
+      - task-013
   - id: task-012c
     title: "Slice 12c: Event payload schema coverage"
     file: ./task-012c.md
     status: pending
     blocked_by:
-      - task-011
+      - task-013
   - id: task-012d
     title: "Slice 12d: Race and lifecycle edge tests"
     file: ./task-012d.md
     status: pending
     blocked_by:
-      - task-011
+      - task-013
   - id: task-012e
     title: "Slice 12e: Error wording + graph performance smoke"
     file: ./task-012e.md
     status: pending
     blocked_by:
+      - task-013
+  - id: task-013
+    title: "Control-plane API cleanup epic"
+    file: ./task-013.md
+    status: split_required
+    blocked_by:
+      - task-013a
+      - task-013b
+      - task-013c
+  - id: task-013a
+    title: "Pithos run transcript metadata"
+    file: ./task-013a.md
+    status: complete
+    blocked_by:
       - task-011
+  - id: task-013b
+    title: "Spawner public API, manifest tuning, and transcript parser"
+    file: ./task-013b.md
+    status: complete
+    blocked_by:
+      - task-011
+  - id: task-013c
+    title: "Nested pdx CLI and run transcript command"
+    file: ./task-013c.md
+    status: complete
+    blocked_by:
+      - task-013a
+      - task-013b
+  - id: task-014
+    title: "Run versus agent nomenclature follow-up"
+    file: ./task-014.md
+    status: pending
+    blocked_by:
+      - task-013

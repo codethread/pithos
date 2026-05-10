@@ -21,11 +21,15 @@ import {
 	Spawner,
 	SupervisorLog,
 	Tmux,
+	type LaunchAgentInput,
+	type LaunchAgentResult,
 	type PithosClientService,
 	type RegistryService,
+	type SpawnerService,
 } from "../src/services.js";
-import { FileSystemLive } from "../src/live.js";
+import { FileSystemLive, makePithosClientLive } from "../src/live.js";
 import { makeTmux } from "../src/tmux.js";
+import { makeEngine, type Services as PithosServices } from "@pithos/pithos";
 import {
 	DAEMON_TARGET,
 	PANDORA_TARGET,
@@ -58,6 +62,32 @@ interface ReadyTaskInput {
 	readonly canonical_path?: string | null;
 }
 
+const runOutput = (
+	overrides: {
+		readonly id?: string;
+		readonly agent?: string;
+		readonly mode?: "afk" | "hitl";
+		readonly scope_id?: string;
+		readonly status?: string;
+		readonly task_id?: string | null;
+		readonly session_id?: string;
+		readonly harness_kind?: "claude" | "pi" | "system";
+		readonly session_log_path?: string;
+	} = {},
+) => ({
+	id: overrides.id ?? "run_test",
+	agent: overrides.agent ?? "pandora",
+	mode: overrides.mode ?? "hitl",
+	scope_id: overrides.scope_id ?? "global",
+	status: overrides.status ?? "running",
+	task_id: overrides.task_id ?? null,
+	session_id: overrides.session_id ?? "session_test",
+	harness_kind: overrides.harness_kind ?? "pi",
+	session_log_path: overrides.session_log_path ?? "/tmp/session_test.jsonl",
+	created_at: "2026-05-09T00:00:00.000Z",
+	updated_at: "2026-05-09T00:00:00.000Z",
+});
+
 const makePithos = (
 	calls: string[] = [],
 	ready: readonly ReadyTaskInput[] = [],
@@ -74,46 +104,29 @@ const makePithos = (
 			Effect.sync(() => {
 				calls.push(`runInterrupt:${input.runId ?? input.taskId}:${input.reason}`);
 				return {
-					run: {
+					run: runOutput({
 						id: input.runId ?? "run_for_task",
 						agent: "greed",
 						mode: "afk",
 						scope_id: "scope_repo",
 						status: "failed",
-						task_id: null,
-						session_id: "session_test",
-						created_at: "2026-05-09T00:00:00.000Z",
-						updated_at: "2026-05-09T00:00:00.000Z",
-					},
+					}),
 					interruptedTask: { id: input.taskId ?? "task_held", scope_id: "scope_repo" },
 				};
 			}),
 		runTimeout: (input) =>
 			Effect.sync(() => calls.push(`runTimeout:${input.runId}:${input.reason}`)),
-		runInspect: (input) =>
-			Effect.succeed({
-				id: input.runId,
-				agent: "pandora",
-				mode: "hitl",
-				scope_id: "global",
-				status: "running",
-				task_id: null,
-				session_id: "session_test",
-				created_at: "2026-05-09T00:00:00.000Z",
-				updated_at: "2026-05-09T00:00:00.000Z",
-			}),
+		runInspect: (input) => Effect.succeed(runOutput({ id: input.runId })),
 		activeRunForTask: () =>
-			Effect.succeed({
-				id: "run_for_task",
-				agent: "greed",
-				mode: "afk",
-				scope_id: "scope_repo",
-				status: "running",
-				task_id: "task_held",
-				session_id: "session_test",
-				created_at: "2026-05-09T00:00:00.000Z",
-				updated_at: "2026-05-09T00:00:00.000Z",
-			}),
+			Effect.succeed(
+				runOutput({
+					id: "run_for_task",
+					agent: "greed",
+					mode: "afk",
+					scope_id: "scope_repo",
+					task_id: "task_held",
+				}),
+			),
 		taskHeartbeat: (input) => Effect.sync(() => calls.push(`taskHeartbeat:${input.runId}`)),
 		taskEnqueue: (input) =>
 			Effect.sync(() => calls.push(`taskEnqueue:${input.capability}:${input.title}`)),
@@ -157,6 +170,52 @@ const noopFs = FileSystem.of({
 	removeFile: () => Effect.void,
 });
 
+const pithosTestServices = (): PithosServices => {
+	let counter = 0;
+	return {
+		fs: { readText: () => Effect.succeed("{}"), removeFile: () => Effect.void },
+		output: { write: () => Effect.void, writeError: () => Effect.void },
+		ids: {
+			make: (prefix) =>
+				Effect.sync(() => {
+					counter += 1;
+					return `${prefix}_${counter}`;
+				}),
+		},
+		clock: { nowIso: () => Effect.succeed("2026-05-09T00:00:00.000Z") },
+	};
+};
+
+const makeSpawner = (input: {
+	readonly launchAgent: (
+		launch: LaunchAgentInput,
+	) => Effect.Effect<
+		Partial<LaunchAgentResult> & LaunchAgentInput & { readonly logicalName: string },
+		PdxError
+	>;
+	readonly renderSessionTranscript?: SpawnerService["renderSessionTranscript"];
+}) =>
+	Spawner.of({
+		renderAgent: (launch) =>
+			Effect.succeed({
+				...launch,
+				logicalName: launch.agent === "pandora" ? PANDORA_TARGET : `pdx--${launch.agent}`,
+				harness: { kind: "pi", argv: ["pi", launch.runId], env: { PITHOS_RUN_ID: launch.runId } },
+				sessionLogPath: `/tmp/${launch.runId}.jsonl`,
+				prompt: "test prompt",
+			}),
+		launchRenderedAgent: (rendered) =>
+			input.launchAgent(rendered).pipe(
+				Effect.map((launched) => ({
+					...launched,
+					harnessKind: rendered.harness.kind,
+					sessionLogPath: rendered.sessionLogPath,
+				})),
+			),
+		renderSessionTranscript:
+			input.renderSessionTranscript ?? (() => Effect.succeed("test transcript\n")),
+	});
+
 const upsertPandora = (registry: RegistryService) =>
 	registry.upsert({
 		runId: "run_pandora",
@@ -190,7 +249,7 @@ const runSpawnTick = async (input: {
 			),
 			Effect.provideService(
 				Spawner,
-				Spawner.of({
+				makeSpawner({
 					launchAgent: (launch) =>
 						Effect.sync(() => {
 							input.launches.push(launch);
@@ -243,12 +302,11 @@ describe("pdx substrate", () => {
 			parsePdxArgs([
 				"--data-dir",
 				"/tmp/pdx-home",
+				"daemon",
 				"logs",
-				"show",
 				"--limit",
 				"10",
 				"--all",
-				"--json",
 				"--since",
 				"1h",
 			]),
@@ -256,7 +314,7 @@ describe("pdx substrate", () => {
 		expect(parsed).toMatchObject({
 			dataDir: "/tmp/pdx-home",
 			command: {
-				kind: "logs-show",
+				kind: "daemon-logs",
 				limit: 10,
 				all: true,
 				since: "1h",
@@ -272,21 +330,23 @@ describe("pdx substrate", () => {
 			command: { kind: "open" },
 		});
 		await expect(
-			run(parsePdxArgs(["daemon", "--interval-seconds", "5", "--max-afk", "6"])),
+			run(parsePdxArgs(["daemon", "run", "--interval-seconds", "5", "--max-afk", "6"])),
 		).resolves.toMatchObject({
-			command: { kind: "daemon" },
+			command: { kind: "daemon-run" },
 		});
 		await expect(run(parsePdxArgs(["close", "--interval-seconds", "99"]))).rejects.toThrow(
 			/does not take command options/,
 		);
-		await expect(run(parsePdxArgs(["daemon", "--json"]))).rejects.toThrow(/does not take --json/);
-		await expect(run(parsePdxArgs(["status", "--json"]))).resolves.toMatchObject({
-			command: { kind: "status" },
+		await expect(run(parsePdxArgs(["daemon", "--json"]))).rejects.toThrow(/Unknown option/);
+		await expect(run(parsePdxArgs(["daemon", "status"]))).resolves.toMatchObject({
+			command: { kind: "daemon-status" },
 		});
-		await expect(run(parsePdxArgs(["status", "--max-afk", "7"]))).rejects.toThrow(
+		await expect(run(parsePdxArgs(["status"]))).rejects.toThrow(/Command not implemented/);
+		await expect(run(parsePdxArgs(["kill", "--run", "run_1"]))).rejects.toThrow(/Unknown option/);
+		await expect(run(parsePdxArgs(["daemon", "status", "--max-afk", "7"]))).rejects.toThrow(
 			/afk timing options/,
 		);
-		await expect(run(parsePdxArgs(["logs", "show", "--max-afk", "9"]))).rejects.toThrow(
+		await expect(run(parsePdxArgs(["daemon", "logs", "--max-afk", "9"]))).rejects.toThrow(
 			/afk timing options/,
 		);
 	});
@@ -427,6 +487,7 @@ describe("pdx substrate", () => {
 			command: [
 				config.daemonEntrypoint,
 				"daemon",
+				"run",
 				"--data-dir",
 				config.dataDir,
 				"--max-afk",
@@ -459,7 +520,7 @@ describe("pdx substrate", () => {
 			nextRunId: Effect.sync(() => runIds.shift() ?? "run_unexpected"),
 			nextSessionId: Effect.sync(() => sessionIds.shift() ?? "session_unexpected"),
 		});
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: (input) =>
 				Effect.succeed(
 					input.agent === "pandora"
@@ -562,7 +623,7 @@ describe("pdx substrate", () => {
 				),
 				Effect.provideService(
 					Spawner,
-					Spawner.of({
+					makeSpawner({
 						launchAgent: (input) =>
 							Effect.succeed({
 								...input,
@@ -609,7 +670,7 @@ describe("pdx substrate", () => {
 			nextRunId: Effect.succeed("run_pandora_1"),
 			nextSessionId: Effect.succeed("session_pandora_1"),
 		});
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: (input) =>
 				Effect.succeed({
 					...input,
@@ -902,7 +963,7 @@ describe("pdx substrate", () => {
 			nextRunId: Effect.succeed("run_new"),
 			nextSessionId: Effect.succeed("session_new"),
 		});
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: (input) =>
 				Effect.succeed({
 					...input,
@@ -965,30 +1026,26 @@ describe("pdx substrate", () => {
 		const enqueues: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
 		const pithos = makePithos(calls, [], {
 			activeRunForTask: () =>
-				Effect.succeed({
-					id: "run_old_owner",
-					agent: "greed",
-					mode: "afk",
-					scope_id: "scope_repo",
-					status: "running",
-					task_id: "task_held",
-					session_id: "session_old",
-					created_at: "2026-05-09T00:00:00.000Z",
-					updated_at: "2026-05-09T00:00:00.000Z",
-				}),
+				Effect.succeed(
+					runOutput({
+						id: "run_old_owner",
+						agent: "greed",
+						mode: "afk",
+						scope_id: "scope_repo",
+						task_id: "task_held",
+						session_id: "session_old",
+					}),
+				),
 			runInterrupt: () =>
 				Effect.succeed({
-					run: {
+					run: runOutput({
 						id: "run_new_owner",
 						agent: "greed",
 						mode: "afk",
 						scope_id: "scope_repo",
 						status: "failed",
-						task_id: null,
 						session_id: "session_new",
-						created_at: "2026-05-09T00:00:00.000Z",
-						updated_at: "2026-05-09T00:00:00.000Z",
-					},
+					}),
 					interruptedTask: { id: "task_held", scope_id: "scope_repo" },
 				}),
 			taskEnqueue: (input) =>
@@ -1071,17 +1128,16 @@ describe("pdx substrate", () => {
 		const calls: string[] = [];
 		const pithos = makePithos(calls, [], {
 			runInspect: () =>
-				Effect.succeed({
-					id: "run_done",
-					agent: "greed",
-					mode: "afk",
-					scope_id: "scope_repo",
-					status: "ended",
-					task_id: null,
-					session_id: "session_done",
-					created_at: "2026-05-09T00:00:00.000Z",
-					updated_at: "2026-05-09T00:00:00.000Z",
-				}),
+				Effect.succeed(
+					runOutput({
+						id: "run_done",
+						agent: "greed",
+						mode: "afk",
+						scope_id: "scope_repo",
+						status: "ended",
+						session_id: "session_done",
+					}),
+				),
 		});
 		await expect(
 			run(
@@ -1145,7 +1201,7 @@ describe("pdx substrate", () => {
 			nextRunId: Effect.succeed("run_unused"),
 			nextSessionId: Effect.succeed("session_unused"),
 		});
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: () =>
 				Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected launch" })),
 		});
@@ -1222,7 +1278,7 @@ describe("pdx substrate", () => {
 			nextSessionId: Effect.succeed("session_toil"),
 		});
 		const launches: unknown[] = [];
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: (input) =>
 				Effect.sync(() => {
 					launches.push(input);
@@ -1439,7 +1495,7 @@ describe("pdx substrate", () => {
 			nextSessionId: Effect.succeed("session_greed"),
 		});
 		const launches: unknown[] = [];
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: (input) =>
 				Effect.sync(() => {
 					launches.push(input);
@@ -1506,7 +1562,7 @@ describe("pdx substrate", () => {
 			nextSessionId: Effect.succeed("session_war"),
 		});
 		const launches: unknown[] = [];
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: (input) =>
 				Effect.sync(() => {
 					launches.push(input);
@@ -1575,7 +1631,7 @@ describe("pdx substrate", () => {
 			nextRunId: Effect.succeed("run_war"),
 			nextSessionId: Effect.succeed("session_war"),
 		});
-		const spawner = Spawner.of({
+		const spawner = makeSpawner({
 			launchAgent: (input) =>
 				Effect.succeed({
 					...input,
@@ -1671,7 +1727,7 @@ describe("pdx substrate", () => {
 				),
 				Effect.provideService(
 					Spawner,
-					Spawner.of({
+					makeSpawner({
 						launchAgent: () =>
 							Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
 					}),
@@ -1769,7 +1825,7 @@ describe("pdx substrate", () => {
 					),
 					Effect.provideService(
 						Spawner,
-						Spawner.of({
+						makeSpawner({
 							launchAgent: () =>
 								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
 						}),
@@ -1816,7 +1872,7 @@ describe("pdx substrate", () => {
 				),
 				Effect.provideService(
 					Spawner,
-					Spawner.of({
+					makeSpawner({
 						launchAgent: (input) =>
 							Effect.succeed({
 								...input,
@@ -1877,7 +1933,7 @@ describe("pdx substrate", () => {
 					),
 					Effect.provideService(
 						Spawner,
-						Spawner.of({
+						makeSpawner({
 							launchAgent: () =>
 								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
 						}),
@@ -1950,7 +2006,7 @@ describe("pdx substrate", () => {
 					),
 					Effect.provideService(
 						Spawner,
-						Spawner.of({
+						makeSpawner({
 							launchAgent: (input) =>
 								Effect.succeed({
 									...input,
@@ -2020,7 +2076,7 @@ describe("pdx substrate", () => {
 					),
 					Effect.provideService(
 						Spawner,
-						Spawner.of({
+						makeSpawner({
 							launchAgent: () =>
 								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
 						}),
@@ -2059,6 +2115,200 @@ describe("pdx substrate", () => {
 		);
 		expect(template).toContain("# wakeup: claimable escalate");
 		expect(template).toContain("must not treat it as task content");
+	});
+
+	it("integrates real Pithos state with pdx reconcile spawning and agent claims", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-integration-"));
+		const config = await parseConfig(dataDir);
+		const engine = makeEngine({
+			config: { dbPath: config.pithosDbPath, runId: undefined },
+			services: pithosTestServices(),
+		});
+		engine.init({ fresh: true });
+		const repo = engine.scopeUpsert({ kind: "repo", path: dataDir }).scope.id;
+		engine.runUpsert({
+			agent: "pdx",
+			mode: "afk",
+			scope: "global",
+			cwd: dataDir,
+			sessionId: "pdx-system",
+			harnessKind: "system",
+			sessionLogPath: config.logPath,
+			runId: PDX_SYSTEM_RUN_ID,
+		});
+		engine.runUpsert({
+			agent: "pandora",
+			mode: "hitl",
+			scope: "global",
+			cwd: dataDir,
+			sessionId: "pandora-seed",
+			harnessKind: "pi",
+			sessionLogPath: join(dataDir, "pandora-seed.jsonl"),
+			runId: "run_pandora_seed",
+		});
+		engine.enqueue({
+			scope: repo,
+			capability: "triage",
+			title: "triage feature",
+			body: "break down the feature",
+			bodyFile: undefined,
+			runId: "run_pandora_seed",
+			dependsOn: [],
+		});
+		const registry = await run(makeRegistry);
+		const launches: LaunchAgentResult[] = [];
+		const spawner = makeSpawner({
+			launchAgent: (launch) =>
+				Effect.sync(() => {
+					const result =
+						launch.mode === "hitl"
+							? {
+									...launch,
+									logicalName: PANDORA_TARGET,
+									hitl: { tmuxTarget: PANDORA_TARGET, panePid: 100 },
+								}
+							: {
+									...launch,
+									logicalName: `pdx--${launch.agent}`,
+									afk: { pid: 200 + launches.length, processStartTime: "2026-05-09T00:00:00.000Z" },
+								};
+					launches.push({
+						...result,
+						harnessKind: "pi",
+						sessionLogPath: `/tmp/${launch.runId}.jsonl`,
+					});
+					return result;
+				}),
+		});
+		const ids = Ids.of({
+			nextRunId: Effect.sync(() => `run_spawn_${launches.length + 1}`),
+			nextSessionId: Effect.sync(() => `123e4567-e89b-42d3-a456-42661417400${launches.length}`),
+		});
+		await run(
+			reconcileTick(config).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, makePithosClientLive(config.pithosDbPath)),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+				Effect.provideService(Process, alwaysLiveProcess),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+			),
+		);
+		expect(launches.map((launch) => launch.agent)).toEqual(["pandora", "toil"]);
+		const entries = await run(registry.list);
+		expect(entries).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ agent: "pandora", state: "live" }),
+				expect.objectContaining({ agent: "toil", state: "live", scopeId: repo }),
+			]),
+		);
+		const toilRun = launches.find((launch) => launch.agent === "toil");
+		expect(toilRun).toBeDefined();
+		if (toilRun === undefined) throw new Error("toil launch missing");
+		const claimed = engine.claim({ runId: toilRun.runId, scope: repo, capability: "triage" });
+		expect(claimed.task.status).toBe("claimed");
+		expect(engine.runInspect({ runId: toilRun.runId }).run.task_id).toBe(claimed.task.id);
+	});
+
+	it("integrates pdx kill with real Pithos interrupt and escalation enqueue", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-kill-integration-"));
+		const config = await parseConfig(dataDir);
+		const engine = makeEngine({
+			config: { dbPath: config.pithosDbPath, runId: undefined },
+			services: pithosTestServices(),
+		});
+		engine.init({ fresh: true });
+		const repo = engine.scopeUpsert({ kind: "repo", path: dataDir }).scope.id;
+		engine.runUpsert({
+			agent: "pdx",
+			mode: "afk",
+			scope: "global",
+			cwd: dataDir,
+			sessionId: "pdx-system",
+			harnessKind: "system",
+			sessionLogPath: config.logPath,
+			runId: PDX_SYSTEM_RUN_ID,
+		});
+		engine.runUpsert({
+			agent: "toil",
+			mode: "afk",
+			scope: "global",
+			cwd: dataDir,
+			sessionId: "toil-session",
+			harnessKind: "pi",
+			sessionLogPath: join(dataDir, "toil.jsonl"),
+			runId: "run_toil",
+		});
+		engine.runUpsert({
+			agent: "war",
+			mode: "afk",
+			scope: repo,
+			cwd: dataDir,
+			sessionId: "war-session",
+			harnessKind: "pi",
+			sessionLogPath: join(dataDir, "war.jsonl"),
+			runId: "run_war",
+		});
+		engine.runUpsert({
+			agent: "pandora",
+			mode: "hitl",
+			scope: "global",
+			cwd: dataDir,
+			sessionId: "pandora-session",
+			harnessKind: "pi",
+			sessionLogPath: join(dataDir, "pandora.jsonl"),
+			runId: "run_pandora_for_kill",
+		});
+		const enqueued = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "execute",
+			body: "do work",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+		});
+		const claimed = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		expect(claimed.task.id).toBe(enqueued.task.id);
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_war",
+				agent: "war",
+				scopeId: repo,
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--war",
+				pid: 333,
+				everClaimed: true,
+			}),
+		);
+		const kills: string[] = [];
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(true),
+			kill: (pid, signal) => Effect.sync(() => kills.push(`${pid}:${signal}`)),
+		});
+		await run(
+			handleKillRequest({ run: "run_war", task: undefined, reason: "bad edit" }).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, makePithosClientLive(config.pithosDbPath)),
+				Effect.provideService(Process, process),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+			),
+		);
+		expect(kills).toEqual(["333:SIGTERM"]);
+		expect(engine.runInspect({ runId: "run_war" }).run.status).toBe("failed");
+		expect(engine.taskInspect({ taskId: enqueued.task.id }).task.status).toBe("failed");
+		const escalation = engine.claim({
+			runId: "run_pandora_for_kill",
+			scope: "global",
+			capability: "escalate",
+		});
+		expect(escalation.task.status).toBe("claimed");
 	});
 
 	it("starts registry empty and supports typed operations", async () => {

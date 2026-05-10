@@ -11,11 +11,11 @@ Error wording/code assertions:
   - `PITHOS_RUN_ID` conflict
   - capability scope mismatch
   - claim scope mismatch
-  - non-held `pdx kill --task` pointer to `pithos task cancel`
+  - non-held `pdx task kill <task-id>` pointer to `pithos task cancel`
   - heartbeat `--task`/`--token` atomicity
 - `NO_CLAIMABLE_WORK`
 - corrupt Supervisor log JSONL
-- invalid `pdx logs show --since`
+- invalid `pdx daemon logs --since`
 
 Performance smoke:
 

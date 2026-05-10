@@ -81,6 +81,10 @@ describe("pithos cli", () => {
 				"/tmp/pithos-cli",
 				"--session-id",
 				"session_cli",
+				"--harness-kind",
+				"pi",
+				"--session-log-path",
+				"/tmp/session_cli.jsonl",
 				"--run",
 				"run_cli",
 			],
@@ -88,13 +92,25 @@ describe("pithos cli", () => {
 		);
 		expect(JSON.parse(upsert.stdout[0] ?? "")).toMatchObject({
 			ok: true,
-			run: { id: "run_cli", agent: "war", mode: "afk", status: "live" },
+			run: {
+				id: "run_cli",
+				agent: "war",
+				mode: "afk",
+				status: "live",
+				harness_kind: "pi",
+				session_log_path: "/tmp/session_cli.jsonl",
+			},
 		});
 
 		const inspect = await runCli(["run", "inspect", "run_cli"], dbPath);
 		expect(JSON.parse(inspect.stdout[0] ?? "")).toMatchObject({
 			ok: true,
-			run: { id: "run_cli", session_id: "session_cli" },
+			run: {
+				id: "run_cli",
+				session_id: "session_cli",
+				harness_kind: "pi",
+				session_log_path: "/tmp/session_cli.jsonl",
+			},
 		});
 
 		const events = await runCli(["events", "tail", "--limit", "1"], dbPath);
@@ -118,6 +134,10 @@ describe("pithos cli", () => {
 				"/tmp",
 				"--session-id",
 				"session",
+				"--harness-kind",
+				"claude",
+				"--session-log-path",
+				"/tmp/session.jsonl",
 			],
 			dbPath,
 		);
@@ -148,6 +168,10 @@ describe("pithos cli", () => {
 				"/tmp",
 				"--session-id",
 				"session",
+				"--harness-kind",
+				"claude",
+				"--session-log-path",
+				"/tmp/session.jsonl",
 			],
 			dbPath,
 		);

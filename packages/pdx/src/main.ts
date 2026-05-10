@@ -1,9 +1,17 @@
-import { CliConfig, Command, Options } from "@effect/cli";
+import { Args, CliConfig, Command, Options } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, Option } from "effect";
 import process from "node:process";
 import { inspect } from "node:util";
-import { closePdx, killPdx, logsShowPdx, openPdx, runDaemon, statusPdx } from "./controller.js";
+import {
+	closePdx,
+	killPdx,
+	logsShowPdx,
+	openPdx,
+	runDaemon,
+	runTranscriptPdx,
+	statusPdx,
+} from "./controller.js";
 import { parsePdxConfig } from "./config.js";
 import { PdxError } from "./errors.js";
 import {
@@ -42,23 +50,34 @@ type CommandInput =
 			readonly intervalSeconds: number;
 	  }
 	| { readonly command: "close"; readonly dataDir: string | undefined }
-	| { readonly command: "status"; readonly dataDir: string | undefined }
+	| { readonly command: "daemon.status"; readonly dataDir: string | undefined }
 	| {
-			readonly command: "kill";
+			readonly command: "run.kill";
 			readonly dataDir: string | undefined;
-			readonly runId: string | undefined;
-			readonly taskId: string | undefined;
+			readonly runId: string;
 			readonly reason: string;
 	  }
 	| {
-			readonly command: "logs.show";
+			readonly command: "task.kill";
+			readonly dataDir: string | undefined;
+			readonly taskId: string;
+			readonly reason: string;
+	  }
+	| {
+			readonly command: "daemon.logs";
 			readonly dataDir: string | undefined;
 			readonly limit: number | undefined;
 			readonly all: boolean;
 			readonly since: string | undefined;
 	  }
 	| {
-			readonly command: "daemon";
+			readonly command: "run.transcript";
+			readonly dataDir: string | undefined;
+			readonly runId: string;
+			readonly limit: number | undefined;
+	  }
+	| {
+			readonly command: "daemon.run";
 			readonly dataDir: string | undefined;
 			readonly maxAfk: number;
 			readonly intervalSeconds: number;
@@ -115,18 +134,24 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 				return;
 			case "close":
 				return yield* closePdx(config).pipe(Effect.provide(provided));
-			case "status": {
+			case "daemon.status": {
 				const status = yield* statusPdx(config, defaultMaxAfk).pipe(Effect.provide(provided));
 				yield* Effect.sync(() => process.stdout.write(`${JSON.stringify(status)}\n`));
 				return;
 			}
-			case "kill":
+			case "run.kill":
 				return yield* killPdx(config, {
 					runId: input.runId,
+					taskId: undefined,
+					reason: input.reason,
+				}).pipe(Effect.provide(provided));
+			case "task.kill":
+				return yield* killPdx(config, {
+					runId: undefined,
 					taskId: input.taskId,
 					reason: input.reason,
 				}).pipe(Effect.provide(provided));
-			case "logs.show": {
+			case "daemon.logs": {
 				const outputText = yield* logsShowPdx(config, {
 					limit: input.limit,
 					all: input.all,
@@ -135,7 +160,15 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 				yield* Effect.sync(() => process.stdout.write(outputText));
 				return;
 			}
-			case "daemon": {
+			case "run.transcript": {
+				const transcript = yield* runTranscriptPdx({
+					runId: input.runId,
+					limit: input.limit,
+				}).pipe(Effect.provide(provided));
+				yield* Effect.sync(() => process.stdout.write(transcript));
+				return;
+			}
+			case "daemon.run": {
 				const handle = yield* runDaemon(config, input.maxAfk, input.intervalSeconds).pipe(
 					Effect.provide(provided),
 				);
@@ -155,6 +188,36 @@ const handleError = (error: unknown): Effect.Effect<void, unknown> => {
 	}
 	return Effect.fail(error);
 };
+
+const parseInternalDaemonRun = (
+	argv: readonly string[],
+): Effect.Effect<CommandInput | undefined, PdxError> =>
+	Effect.gen(function* () {
+		if (argv[2] !== "daemon" || argv[3] !== "run") return undefined;
+		let dataDir: string | undefined;
+		let maxAfk = defaultMaxAfk;
+		let intervalSeconds = defaultIntervalSeconds;
+		for (let index = 4; index < argv.length; index++) {
+			const arg = argv[index]!;
+			const value = argv[index + 1];
+			if (value === undefined || value.startsWith("--")) {
+				yield* Effect.fail(
+					new PdxError({ code: "VALIDATION_ERROR", message: `${arg} requires a value` }),
+				);
+			}
+			if (arg === "--data-dir") dataDir = value;
+			else if (arg === "--max-afk") maxAfk = yield* parsePositiveInt(Number(value), "--max-afk");
+			else if (arg === "--interval-seconds") {
+				intervalSeconds = yield* parsePositiveInt(Number(value), "--interval-seconds");
+			} else {
+				yield* Effect.fail(
+					new PdxError({ code: "VALIDATION_ERROR", message: `Unknown option: ${arg}` }),
+				);
+			}
+			index += 1;
+		}
+		return { command: "daemon.run", dataDir, maxAfk, intervalSeconds } as const;
+	});
 
 const makeCommand = (runtime: RuntimeInput) => {
 	const open = Command.make(
@@ -187,35 +250,14 @@ const makeCommand = (runtime: RuntimeInput) => {
 		({ dataDir }) => runCommand(runtime, { command: "close", dataDir: opt(dataDir) }),
 	);
 
-	const status = Command.make(
+	const daemonStatus = Command.make(
 		"status",
-		{
-			dataDir: Options.text("data-dir").pipe(Options.optional),
-			json: Options.boolean("json"),
-		},
-		({ dataDir }) => runCommand(runtime, { command: "status", dataDir: opt(dataDir) }),
-	);
+		{ dataDir: Options.text("data-dir").pipe(Options.optional) },
+		({ dataDir }) => runCommand(runtime, { command: "daemon.status", dataDir: opt(dataDir) }),
+	).pipe(Command.withDescription("Show daemon state, supervised agents, and queue counts."));
 
-	const kill = Command.make(
-		"kill",
-		{
-			dataDir: Options.text("data-dir").pipe(Options.optional),
-			runId: Options.text("run").pipe(Options.optional),
-			taskId: Options.text("task").pipe(Options.optional),
-			reason: Options.text("reason"),
-		},
-		({ dataDir, runId, taskId, reason }) =>
-			runCommand(runtime, {
-				command: "kill",
-				dataDir: opt(dataDir),
-				runId: opt(runId),
-				taskId: opt(taskId),
-				reason,
-			}),
-	);
-
-	const logsShow = Command.make(
-		"show",
+	const daemonLogs = Command.make(
+		"logs",
 		{
 			dataDir: Options.text("data-dir").pipe(Options.optional),
 			limit: Options.integer("limit").pipe(Options.optional),
@@ -229,53 +271,87 @@ const makeCommand = (runtime: RuntimeInput) => {
 					yield* parsePositiveInt(parsedLimit, "--limit");
 				}
 				yield* runCommand(runtime, {
-					command: "logs.show",
+					command: "daemon.logs",
 					dataDir: opt(dataDir),
 					limit: parsedLimit,
 					all,
 					since: opt(since),
 				});
 			}),
+	).pipe(Command.withDescription("Show pdx daemon supervisor JSONL logs (not agent transcripts)."));
+
+	const daemon = Command.make("daemon").pipe(
+		Command.withDescription("Daemon supervisor commands."),
+		Command.withSubcommands([daemonStatus, daemonLogs]),
 	);
 
-	const logs = Command.make("logs").pipe(Command.withSubcommands([logsShow]));
-
-	const daemon = Command.make(
-		"daemon",
+	const runKill = Command.make(
+		"kill",
 		{
+			runId: Args.text({ name: "run-id" }),
 			dataDir: Options.text("data-dir").pipe(Options.optional),
-			maxAfk: Options.integer("max-afk").pipe(Options.withDefault(defaultMaxAfk)),
-			intervalSeconds: Options.integer("interval-seconds").pipe(
-				Options.withDefault(defaultIntervalSeconds),
-			),
+			reason: Options.text("reason"),
 		},
-		({ dataDir, maxAfk, intervalSeconds }) =>
+		({ dataDir, runId, reason }) =>
+			runCommand(runtime, { command: "run.kill", dataDir: opt(dataDir), runId, reason }),
+	);
+
+	const runTranscript = Command.make(
+		"transcript",
+		{
+			runId: Args.text({ name: "run-id" }),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
+			limit: Options.integer("limit").pipe(Options.optional),
+		},
+		({ dataDir, runId, limit }) =>
 			Effect.gen(function* () {
-				yield* parsePositiveInt(maxAfk, "--max-afk");
-				yield* parsePositiveInt(intervalSeconds, "--interval-seconds");
+				const parsedLimit = opt(limit);
+				if (parsedLimit !== undefined) {
+					yield* parsePositiveInt(parsedLimit, "--limit");
+				}
 				yield* runCommand(runtime, {
-					command: "daemon",
+					command: "run.transcript",
 					dataDir: opt(dataDir),
-					maxAfk,
-					intervalSeconds,
+					runId,
+					limit: parsedLimit,
 				});
 			}),
+	).pipe(Command.withDescription("Render an agent harness transcript for a run."));
+
+	const run = Command.make("run").pipe(Command.withSubcommands([runKill, runTranscript]));
+
+	const taskKill = Command.make(
+		"kill",
+		{
+			taskId: Args.text({ name: "task-id" }),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
+			reason: Options.text("reason"),
+		},
+		({ dataDir, taskId, reason }) =>
+			runCommand(runtime, { command: "task.kill", dataDir: opt(dataDir), taskId, reason }),
 	);
 
-	return Command.make("pdx").pipe(
-		Command.withSubcommands([open, close, status, kill, logs, daemon]),
-	);
+	const task = Command.make("task").pipe(Command.withSubcommands([taskKill]));
+
+	return Command.make("pdx").pipe(Command.withSubcommands([open, close, daemon, run, task]));
 };
 
 const program = captureRuntimeInput.pipe(
-	Effect.flatMap((runtime) => {
-		const cli = Command.run(makeCommand(runtime), {
-			name: "Pdx",
-			version: "0.1.0",
-			executable: "pdx",
-		});
-		return cli(process.argv).pipe(Effect.catchAll((error) => handleError(error)));
-	}),
+	Effect.flatMap((runtime) =>
+		Effect.gen(function* () {
+			const internal = yield* parseInternalDaemonRun(process.argv);
+			if (internal !== undefined) {
+				yield* runCommand(runtime, internal);
+				return;
+			}
+			const cli = Command.run(makeCommand(runtime), {
+				name: "Pdx",
+				version: "0.1.0",
+				executable: "pdx",
+			});
+			yield* cli(process.argv).pipe(Effect.catchAll((error) => handleError(error)));
+		}),
+	),
 	Effect.catchAll((error) =>
 		Effect.sync(() => {
 			const message = error instanceof Error ? error.message : inspect(error);

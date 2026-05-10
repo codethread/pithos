@@ -9,7 +9,7 @@ Cover:
 - concurrent claim attempts for the same claimable task: one wins, loser receives `NO_CLAIMABLE_WORK` or a loud tagged race/validation error; DB remains consistent
 - fenced update race: `STALE_TOKEN_RACE` rolls back and does not partially mutate task/run/event state
 - `task supersede` with mixed dependent states (`queued` + `cancelled` + `done`) fails loudly per spec
-- `pdx kill` racing with natural death: if run is already terminal or resource already gone, behavior is loud and consistent with Pithos being source of truth
+- `pdx run kill` racing with natural death: if run is already terminal or resource already gone, behavior is loud and consistent with Pithos being source of truth
 - orphan discovery when both tmux orphans and AFK pidfile orphans coexist
 - no-claim timeout near boundary: just before 30s does not fire; at/after 30s fires once
 

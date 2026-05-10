@@ -12,6 +12,7 @@ import { decodeRow } from "./rows.js";
 export type Db = Database.Database;
 export type ScopeKind = "global" | "repo" | "worktree";
 export type Mode = "afk" | "hitl";
+export type HarnessKind = "claude" | "pi" | "system";
 export type { AgentKind, Capability };
 
 export type TaskStatus =
@@ -74,6 +75,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	scope_id TEXT NOT NULL REFERENCES scopes(id),
 	cwd TEXT NOT NULL CHECK (length(cwd) > 0),
 	session_id TEXT NOT NULL CHECK (length(session_id) > 0),
+	harness_kind TEXT NOT NULL CHECK (harness_kind IN ('claude', 'pi', 'system')),
+	session_log_path TEXT NOT NULL CHECK (length(session_log_path) > 0),
 	status TEXT NOT NULL CHECK (status IN ('live', 'ended', 'failed', 'cancelled', 'timed_out')) DEFAULT 'live',
 	task_id TEXT,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

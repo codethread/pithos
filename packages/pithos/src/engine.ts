@@ -7,6 +7,7 @@ import {
 	openDb,
 	sql,
 	type Capability,
+	type HarnessKind,
 	type Mode,
 	type ScopeKind,
 	type TaskStatus,
@@ -45,6 +46,8 @@ export interface Engine {
 		readonly mode: Mode;
 		readonly scope: string;
 		readonly cwd: string;
+		readonly harnessKind: HarnessKind;
+		readonly sessionLogPath: string;
 		readonly sessionId: string;
 		readonly runId: string | undefined;
 	}) => { readonly ok: true; readonly run: RunOutput };
@@ -266,6 +269,8 @@ export interface RunOutput {
 	readonly status: string;
 	readonly task_id: string | null;
 	readonly session_id: string;
+	readonly harness_kind: HarnessKind;
+	readonly session_log_path: string;
 	readonly created_at: string;
 	readonly updated_at: string;
 }
@@ -288,6 +293,8 @@ const toRunOutput = (row: RunRow): RunOutput => ({
 	status: row.status,
 	task_id: row.task_id,
 	session_id: row.session_id,
+	harness_kind: row.harness_kind,
+	session_log_path: row.session_log_path,
 	created_at: row.created_at,
 	updated_at: row.updated_at,
 });
@@ -335,6 +342,18 @@ WHERE id = ?
   AND status = 'queued'
 RETURNING id, fencing_token
 `;
+
+const HarnessKindSchema = Schema.Literal("claude", "pi", "system");
+
+const parseHarnessKind = (value: unknown): HarnessKind =>
+	Either.match(Schema.decodeUnknownEither(HarnessKindSchema)(value), {
+		onLeft: () =>
+			fail(
+				"VALIDATION_ERROR",
+				`invalid --harness-kind: ${String(value)}. Valid values: claude, pi, system`,
+			),
+		onRight: (kind) => kind,
+	});
 
 const requireNonEmpty = (value: string, name: string): string => {
 	if (value.length === 0) fail("VALIDATION_ERROR", `${name} must be non-empty`);
@@ -386,8 +405,10 @@ INSERT INTO runs(
 	mode,
 	scope_id,
 	cwd,
-	session_id
-) VALUES (?, ?, ?, ?, ?, ?)
+	session_id,
+	harness_kind,
+	session_log_path
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id)
 DO UPDATE SET
 	agent_kind = excluded.agent_kind,
@@ -395,7 +416,26 @@ DO UPDATE SET
 	scope_id = excluded.scope_id,
 	cwd = excluded.cwd,
 	session_id = excluded.session_id,
+	harness_kind = excluded.harness_kind,
+	session_log_path = excluded.session_log_path,
 	updated_at = CURRENT_TIMESTAMP
+`;
+
+const runSelect = sql`
+SELECT
+	id,
+	agent_kind,
+	mode,
+	scope_id,
+	cwd,
+	harness_kind,
+	session_log_path,
+	status,
+	task_id,
+	session_id,
+	created_at,
+	updated_at
+FROM runs
 `;
 
 const event = (
@@ -441,11 +481,7 @@ const decodeEventPayload = (payloadJson: string, eventId: string): Json => {
 const liveRun = (db: Db, runId: string): RunRow => {
 	const r = decodeRow(
 		RunRowSchema,
-		db
-			.prepare(
-				sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
-			)
-			.get(runId),
+		db.prepare(`${runSelect} WHERE id=?`).get(runId),
 		`run not found: ${runId}`,
 	);
 	if (r.status !== "live") fail("VALIDATION_ERROR", `run is not live: ${runId}`);
@@ -556,11 +592,7 @@ const isClaimable = (db: Db, task: { readonly id: string; readonly status: strin
 const runById = (db: Db, runId: string): RunRow =>
 	decodeRow(
 		RunRowSchema,
-		db
-			.prepare(
-				sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
-			)
-			.get(runId),
+		db.prepare(`${runSelect} WHERE id=?`).get(runId),
 		`run not found: ${runId}`,
 	);
 
@@ -773,7 +805,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			db.prepare(upsertScope).run(sid, kind, canonical);
 			return { ok: true, scope: { id: sid, kind, canonical_path: canonical } };
 		}),
-	runUpsert: ({ agent, mode, scope, cwd, sessionId, runId }) =>
+	runUpsert: ({ agent, mode, scope, cwd, harnessKind, sessionLogPath, sessionId, runId }) =>
 		withDb(ctx, (db) => {
 			const agentExists = db
 				.prepare(sql`SELECT 1 FROM agent_kinds WHERE agent_kind = ?`)
@@ -791,14 +823,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				scope,
 				requireNonEmpty(cwd, "--cwd"),
 				requireNonEmpty(sessionId, "--session-id"),
+				parseHarnessKind(harnessKind),
+				requireNonEmpty(sessionLogPath, "--session-log-path"),
 			);
 			const row = decodeRow(
 				RunRowSchema,
-				db
-					.prepare(
-						sql`SELECT id,agent_kind,mode,scope_id,status,task_id,session_id,created_at,updated_at FROM runs WHERE id=?`,
-					)
-					.get(rid),
+				db.prepare(`${runSelect} WHERE id=?`).get(rid),
 				`run not found after upsert: ${rid}`,
 			);
 			return { ok: true, run: toRunOutput(row) };

@@ -122,7 +122,7 @@ pdx close
   -> pithos run cleanup the `pdx` system run last with reason `pdx_close`
   -> close pdx tmux session
 
-pdx kill --run|--task --reason
+pdx run kill <run-id> --reason / pdx task kill <task-id> --reason
   -> pithos run interrupt first
   -> if a held task was interrupted, use the `pdx` system run to enqueue a global `escalate` task for Pandora
   -> mark registry entry terminating
@@ -254,7 +254,14 @@ mode TEXT NOT NULL CHECK (mode IN ('afk','hitl'))
 
 Mode is supplied by `pdx` at run upsert. Pithos stores it for audit and cleanup visibility; supervision policy remains in pdx.
 
-Existing metadata columns such as `harness`, `session_id`, and `tmux_target` may remain as audit/debug hints. Runtime ownership is pdx Registry + OS/tmux probes, not those columns.
+Runs also store non-null launch transcript metadata:
+
+```sql
+harness_kind TEXT NOT NULL CHECK (harness_kind IN ('claude','pi','system')),
+session_log_path TEXT NOT NULL CHECK (length(session_log_path) > 0)
+```
+
+`session_id`, `harness_kind`, and `session_log_path` are the durable index from a Pithos run to its transcript/log source. Spawned agent runs use `claude` or `pi`; the `pdx` system actor uses `system` and points at the supervisor log. `pdx run transcript <run-id>` only parses harness-backed `claude`/`pi` runs. For `system` runs it fails loudly and points operators to `pdx daemon logs`. Runtime ownership remains pdx Registry + OS/tmux probes; ephemeral values such as pid and current tmux target are not durable run truth.
 
 Leases are removed from the MVP data model. There is no `lease_until`, `lease_owner_run_id`, or `--lease-minutes`. `runs.task_id` is the held-task owner pointer; Fencing tokens invalidate stale task writes. Heartbeat records run liveness/observability only and may advance a held task from `claimed` to `running`; it does not extend a lease. Pacing is owned by the caller (`pdx` or an agent recipe), not by a Pithos `--throttle` flag.
 
@@ -332,7 +339,7 @@ task1 done -> task2 failed
 Rules:
 
 - `queued`, `failed`, `dead_letter`, and `cancelled` tasks may be superseded.
-- `claimed` and `running` tasks may not be superseded; use `pdx kill` / `pithos run interrupt` first.
+- `claimed` and `running` tasks may not be superseded; use `pdx run kill <run-id>` / `pdx task kill <task-id>` or `pithos run interrupt` first.
 - Direct queued dependents are rewired to the replacement.
 - Direct cancelled dependents are ignored; they are already terminal and need no retarget.
 - Direct dependents in any other state (`claimed`, `running`, `done`, `failed`, `dead_letter`) cause supersede to fail loudly and require explicit replan.
@@ -356,6 +363,8 @@ pithos run upsert \
   --scope <scope-id> \
   --cwd <path> \
   --session-id <session-id> \
+  --harness-kind <claude|pi|system> \
+  --session-log-path <path> \
   [--run <run-id>]
 
 pithos run cleanup --run <run-id> --reason <text>
@@ -366,7 +375,7 @@ pithos run timeout --run <run-id> --reason <text>
 
 pithos run inspect <run-id>
 
-# Output minimum: { ok, run: { id, agent, mode, scope_id, status, task_id, session_id, created_at, updated_at } }
+# Output minimum: { ok, run: { id, agent, mode, scope_id, status, task_id, session_id, harness_kind, session_log_path, created_at, updated_at } }
 
 pithos task enqueue \
   --scope <scope-id> \
@@ -456,7 +465,7 @@ The active-task update is fenced against the captured `runs.task_id`, task statu
 
 ### `pithos run interrupt`
 
-Used for deliberate operator interruption via `pdx kill`.
+Used for deliberate operator interruption via `pdx run kill` or `pdx task kill`.
 
 - terminal run: no-op
 - no task: run -> `cancelled`; no task mutation; no escalation from Pithos
@@ -490,7 +499,7 @@ Output minimum:
 Intentional abandon.
 
 - Allowed for `queued`, `failed`, and `dead_letter` tasks.
-- Not allowed for `claimed` or `running`; use `pdx kill` / `pithos run interrupt`.
+- Not allowed for `claimed` or `running`; use `pdx run kill <run-id>` / `pdx task kill <task-id>` or `pithos run interrupt`.
 - Not allowed for `done`.
 - Emits `task.cancelled`.
 
@@ -501,12 +510,19 @@ Minimal operator/Pandora-facing API:
 ```text
 pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>]
 pdx close [--data-dir <path>]
-pdx status [--data-dir <path>] [--json]
-pdx kill (--run <run-id> | --task <task-id>) --reason <text> [--data-dir <path>]
-pdx logs show [--data-dir <path>] [--limit <n> | --all] [--since <when>]
+
+pdx daemon status [--data-dir <path>]
+pdx daemon logs [--data-dir <path>] [--limit <n> | --all] [--since <when>]
+
+pdx run kill <run-id> --reason <text> [--data-dir <path>]
+pdx run transcript <run-id> [--data-dir <path>] [--limit <n>]
+
+pdx task kill <task-id> --reason <text> [--data-dir <path>]
 ```
 
-`pdx status` must have JSON output. The exact shape is intentionally loose for MVP; Pandora can consume and adapt to the available fields. It must include top-level keys `daemon`, `registry`, `queue`, and `caps`. It should include at least:
+The internal daemon process entrypoint is `pdx daemon run`; it is used by `pdx open` inside tmux and is intentionally omitted from public help/API docs. `pdx daemon` is the public daemon namespace only.
+
+`pdx daemon status` must have JSON output. The exact shape is intentionally loose for MVP; Pandora can consume and adapt to the available fields. It must include top-level keys `daemon`, `registry`, `queue`, and `caps`. It should include at least:
 
 - daemon liveness
 - in-memory registry entries with raw IDs and friendly names (`run_id`, `task_id`, `session_id`, `agent`, `scope_id`, `mode`, `logical_name`, `tmux_target` for HITL, `pid` for AFK, `state`)
@@ -514,9 +530,9 @@ pdx logs show [--data-dir <path>] [--limit <n> | --all] [--since <when>]
 - cap usage, including global `max_afk`
 - recent in-memory supervisor events/errors
 
-If no daemon is running, `pdx status` returns successful JSON with `daemon.running = false`. If state cannot be determined due to tmux/process errors, it fails loudly.
+If no daemon is running, `pdx daemon status` returns successful JSON with `daemon.running = false`. If state cannot be determined due to tmux/process errors, it fails loudly.
 
-`pdx logs show` reads the structured supervisor JSONL log even when the daemon is stopped. It prints raw original JSONL lines so Pandora can pipe to `jq`.
+`pdx daemon logs` reads the structured supervisor JSONL log even when the daemon is stopped. It prints raw original JSONL lines so Pandora can pipe to `jq`. These are pdx supervisor logs, not agent harness transcripts.
 
 - default: last 100 lines
 - `--limit <n>`: last N matching lines
@@ -526,16 +542,25 @@ If no daemon is running, `pdx status` returns successful JSON with `daemon.runni
 - `today`/`yesterday` use local time boundaries
 - missing/unreadable log file, invalid `--since`, or corrupt JSONL fails loudly
 
-`pdx kill` must be immediate and scheduler-visible:
+`pdx run kill` and `pdx task kill` must be immediate and scheduler-visible:
 
 1. Mutate Pithos first with `pithos run interrupt`.
-2. If `--task <id>` is supplied and no run currently holds that task, fail loudly; `Kill` acts on a live run. The error should point to `pithos task cancel` for non-held task abandonment.
-3. `pithos run interrupt --task` resolves the owning run from Pithos DB state, not from pdx Registry. If zero active owning runs exist, fail loudly.
+2. `pdx task kill <task-id>` means “interrupt the live run currently holding this task.” If no run currently holds that task, fail loudly and point to `pithos task cancel` for non-held task abandonment.
+3. `pithos run interrupt` resolves the owning run from Pithos DB state for task-keyed interruption, not from pdx Registry. If zero active owning runs exist, fail loudly.
 4. If the interrupt returned a held task, use the global `pdx` system run to enqueue a global `escalate` task for Pandora referencing the interrupted task/run/scope.
 5. Mark the registry entry `terminating` so caps still count it and reconcile does not respawn while kill is in progress.
 6. Kill the OS process or tmux session immediately.
 7. Retry kill once per reconcile tick and emit a structured supervisor log entry for each failed attempt. No max retry or escalation path in MVP.
 8. Remove the registry entry only after kill succeeds.
+
+`pdx run transcript <run-id>` is the pdx-owned replacement for the old spawner status command. It inspects the Pithos run, parses its non-null `harness_kind` and `session_log_path`, and delegates harness-log parsing to the Spawner library. Default `--limit` is 20. Output is plain text, one transcript event per line:
+
+```text
+[2026-05-10 14:30:01] ASSISTANT: concise one-line message or tool summary
+[2026-05-10 14:30:05] USER: concise one-line message
+```
+
+System runs, missing session log files, unreadable files, unsupported `harness_kind`, corrupt JSONL, or malformed run metadata fail loudly. DB run state remains `pithos run inspect <run-id>`; task state remains `pithos task inspect <task-id>`.
 
 No `pdx restart` in MVP. Recovery is explicit through Pandora/Adam and graph repair.
 
@@ -565,18 +590,24 @@ Supervisor logs are structured JSONL at an internal pdx-controlled path such as 
 
 Spawner is primarily a library/module used by `pdx`.
 
-Layered library API:
+Layered library API exported from `@pithos/spawner` package root:
 
 ```ts
 renderAgent(input): RenderedAgent
+launchRenderedAgent(rendered): LaunchResult
 launchAgent(input): LaunchResult
+renderSessionTranscript(input): string
 ```
+
+The package root also exports the public service interfaces and intended live implementation used by consumers. Consumers must import `@pithos/spawner`, not sibling package `src/*` internals.
 
 `renderAgent` is pure render/preview: no Pithos mutation, no process launch, no tmux creation. It loads and validates manifest/templates, validates supplied mode against manifest mode, renders the prompt, builds harness argv/env, and generates `claim_command`.
 
-`launchAgent` calls `renderAgent`, then launches AFK/HITL and returns launch metadata. It does not decide lifecycle outcome.
+`launchRenderedAgent` launches an already rendered plan and returns runtime launch metadata. `launchAgent` is a convenience wrapper that calls `renderAgent` then `launchRenderedAgent`; `pdx` uses `renderAgent` before run upsert, persists non-null transcript metadata, then calls `launchRenderedAgent` so the launched process exactly matches the persisted render plan.
 
-Input shape for both:
+`renderSessionTranscript` owns harness-specific Claude/Pi session-log parsing. `pdx run transcript` uses this library API after resolving run transcript metadata through Pithos.
+
+Input shape for `renderAgent` / `launchAgent`:
 
 ```ts
 {
@@ -600,8 +631,19 @@ Input shape for both:
   scopeId: string
   cwd: string
   logicalName: string
-  harness: { kind: string; argv: readonly string[]; env: Record<string, string> }
+  harness: { kind: "claude" | "pi"; argv: readonly string[]; env: Record<string, string> }
+  sessionLogPath: string
   prompt: string
+}
+```
+
+`RenderSessionTranscriptInput` shape:
+
+```ts
+{
+  harnessKind: "claude" | "pi"
+  sessionLogPath: string
+  limit?: number // default 20
 }
 ```
 
@@ -615,16 +657,18 @@ Input shape for both:
   sessionId: string
   scopeId: string
   logicalName: string
-  harnessKind: string
+  harnessKind: "claude" | "pi"
   sessionLogPath: string
   afk?: { pid: number; processStartTime: string }
   hitl?: { tmuxTarget: string; panePid: number | null }
 }
 ```
 
-Agent mode is manifest-declared. `pdx` reads the manifest, upserts the run with that mode, and passes the same mode to Spawner. Spawner validates the supplied mode against the manifest so mismatches fail loudly.
+`LaunchResult` intentionally omits rendered argv/env. Those belong to the `RenderedAgent` launch plan. `pdx` logs the plan separately as supervisor observability before launch; the launch result reports runtime process/tmux metadata.
 
-`pdx` owns ID generation and run upsert. Spawner requires caller-supplied `runId` and `sessionId`; it does not generate them and does not create run rows.
+Agent mode is manifest-declared. `pdx` renders through Spawner first, upserts the run with the rendered mode, `harness.kind`, and `sessionLogPath`, then launches the rendered plan. Spawner validates the supplied mode against the manifest so mismatches fail loudly.
+
+`pdx` owns ID generation and run upsert. Spawner requires caller-supplied `runId` and UUID `sessionId`; it does not generate them and does not create run rows.
 
 Spawner/template context contains self-claim context, not task content:
 
@@ -646,7 +690,7 @@ pithos task claim --run <run-id> --scope <scope-id> --capability <claim>
 
 Pithos still enforces claim authorization and one-active-task-per-run.
 
-Manifest entries repeat claim/enqueue metadata for rendering and consistency checks, even though Pithos seeds enforcement data:
+Manifest entries repeat claim/enqueue metadata for rendering and consistency checks, even though Pithos seeds enforcement data. They also declare harness runtime tuning; these fields are MVP contract, not compatibility baggage:
 
 ```json
 {
@@ -654,10 +698,23 @@ Manifest entries repeat claim/enqueue metadata for rendering and consistency che
 	"mode": "afk",
 	"claims": ["execute"],
 	"enqueues": ["escalate"],
-	"harness": { "kind": "claude" },
+	"harness": {
+		"kind": "claude",
+		"model": "sonnet",
+		"system_prompt_mode": "replace",
+		"tools": ["Bash", "Read", "Edit", "Write"]
+	},
+	"includes": ["_common.md"],
 	"template": "war.md.tmpl"
 }
 ```
+
+Harness config rules:
+
+- `model` is required and rendered as `--model <model>` for both Claude and Pi.
+- `system_prompt_mode` is required. `replace` renders `--system-prompt <prompt>`; `append` renders `--append-system-prompt <prompt>`.
+- `tools` is optional. If omitted, no `--tools` flag is rendered and the harness default applies. If present, it must be non-empty and renders as one comma-separated `--tools <a,b,c>` argument. Tool names are not validated by Spawner; they are harness-owned strings and may change without code changes.
+- `includes` is optional. Include names must be unique template basenames. Each listed include is loaded as raw text from the templates directory and becomes a template variable keyed by filename, for example `{{_common.md}}`. Includes are not recursively rendered. Unknown template variables fail loudly.
 
 Responsibilities:
 
@@ -668,9 +725,9 @@ Responsibilities:
 - launch HITL tmux session and return tmux metadata to pdx
 - return the expected harness-native session log path using the same discovery convention as the prior Pandora `status` script
 
-AFK harness argv must run the harness in non-interactive print mode so a stdio-detached process actually performs one task and exits. For Pi and Claude, AFK argv includes `--print "Claim and process one task, then exit."`; HITL argv omits `--print` and runs interactively in tmux. Claude session IDs must be valid UUIDs.
+AFK harness argv must run the harness in non-interactive print mode so a stdio-detached process actually performs one task and exits. For Pi and Claude, AFK argv includes `--print "Claim and process one task, then exit."`; HITL argv omits `--print` and runs interactively in tmux. All Spawner session IDs must be valid UUIDs.
 
-Session logs follow the harness-native discovery convention from the prior Pandora `status` script: Claude logs live under `~/.claude/projects/**/<uuid>.jsonl`; Pi logs live under `~/.pi/agent/sessions/**/<uuid>.jsonl` or `~/.pi/agent/sessions/**/*_<uuid>.jsonl`. `pdx` records the expected path in launch metadata, but the Pithos DB and supervisor logs remain under `--data-dir`.
+Session logs follow the harness-native discovery convention from the prior Pandora `status` script: Claude logs live under `~/.claude/projects/**/<uuid>.jsonl`; Pi logs live under `~/.pi/agent/sessions/**/<uuid>.jsonl` or `~/.pi/agent/sessions/**/*_<uuid>.jsonl`. The rendered plan includes the expected `sessionLogPath`, and Pithos stores that path on the run. `renderSessionTranscript` reads the stored path; it does not rediscover path ownership from the current manifest.
 
 Dev/internal CLI may expose:
 
@@ -678,7 +735,7 @@ Dev/internal CLI may expose:
 pandora-spawn preview --agent <name> --mode <afk|hitl> --scope <scope-id> --run <run-id> --session-id <session-id> --cwd <path>
 ```
 
-Preview output is JSON `RenderedAgent`, including prompt and harness argv/env. Preview performs manifest/template validation only; it does not validate Pithos run/scope state.
+Preview output is JSON `RenderedAgent`, including prompt and harness argv/env. Preview performs manifest/template validation only; it does not validate Pithos run/scope state. Because preview renders the exact harness environment, it requires DB context: either `PITHOS_DB` or `PDX_DATA_DIR` from which Spawner derives `<data-dir>/pithos.sqlite`. `PITHOS_BIN` is optional and defaults to `pithos`.
 
 Spawner error codes:
 
@@ -718,7 +775,7 @@ Pithos invariant: a run may hold at most one active task at a time. After comple
 
 Per-agent roles and enqueue authority:
 
-- **Pandora** claims `escalate`, discusses with Adam, investigates with Pithos/pdx status/logs, and decides whether to supersede/cancel/replan/enqueue follow-up. She may enqueue `triage`, `design`, and `escalate`, but not `execute`; execution goes through Toil.
+- **Pandora** claims `escalate`, discusses with Adam, investigates with Pithos state plus `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`, and decides whether to supersede/cancel/replan/enqueue follow-up. She may enqueue `triage`, `design`, and `escalate`, but not `execute`; execution goes through Toil.
 - **Toil** claims `triage`, decomposes and routes work, and may enqueue `triage`, `design`, `execute`, and checkpoint `escalate` tasks. Toil may supersede/cancel non-held tasks when repairing a broken chain.
 - **Greed** claims `design`, produces `design-brief` artifacts, and may enqueue `design`, `triage`, and `escalate` when the HITL design session branches or is ready for follow-up. Greed does not enqueue `execute` in MVP.
 - **War** claims `execute`, performs repo/worktree execution, produces `war-completion` artifacts, and may enqueue `escalate` when attention is needed. War does not enqueue further `execute` tasks in MVP.
@@ -757,4 +814,4 @@ Pithos events are durable audit records. Payloads may grow, but these event name
 
 ## 13. Open Questions
 
-- None currently. The remaining implementation details should be resolved during implementation and review.
+- **No-claim post-timeout policy:** After a non-Pandora run times out or dies before its first claim, should pdx immediately allow a fresh run for the same `(agent, scope)`, apply a bounded retry/backoff policy, or create an escalation before retrying? Current MVP behavior should remain minimal and explicit; do not add silent suppression without a specified policy.

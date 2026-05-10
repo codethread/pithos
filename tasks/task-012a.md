@@ -1,5 +1,9 @@
 # Slice 12a — MVP integration tests
 
+## Status
+
+Complete in current working tree.
+
 ## What to build
 
 Add end-to-end MVP integration coverage across Pithos, spawner, and pdx using test harness seams so CI does not require real Anthropic credentials or real model binaries.
@@ -20,7 +24,7 @@ Cover the happy path:
 Cover the kill path:
 
 1. Spawn a Greed or War run and let it hold a task.
-2. `pdx kill --run <id> --reason <text>`.
+2. `pdx run kill <id> --reason <text>`.
 3. Observe Pithos `Interrupt`: held task becomes `failed`, Fencing token increments.
 4. Observe pdx-authored global Interruption escalation.
 5. Observe Pandora can claim/complete the escalation.
@@ -36,6 +40,10 @@ Cover the kill path:
 
 ## Acceptance criteria
 
-- [ ] MVP happy path integration test passes
-- [ ] Kill/interruption/escalation path integration test passes
-- [ ] Tests use injected/mocked harness seams, not real model credentials
+- [x] MVP happy path integration test passes
+- [x] Kill/interruption/escalation path integration test passes
+- [x] Tests use injected/mocked harness seams, not real model credentials
+
+## Implementation notes
+
+Coverage lives in `packages/pdx/test/substrate.test.ts` and uses real Pithos engine/DB state with fake pdx Spawner/Process/Tmux seams. The tests intentionally avoid asserting unresolved no-claim post-timeout retry/escalation policy beyond the current minimal timeout behavior.

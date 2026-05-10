@@ -32,6 +32,8 @@ const setup = (runIdEnv?: string) => {
 		scope: "global",
 		cwd: "/tmp",
 		sessionId: "s_toil",
+		harnessKind: "claude",
+		sessionLogPath: "/tmp/s_toil.jsonl",
 		runId: "run_toil",
 	});
 	engine.runUpsert({
@@ -40,6 +42,8 @@ const setup = (runIdEnv?: string) => {
 		scope: repo,
 		cwd: "/tmp/pithos-repo",
 		sessionId: "s_war",
+		harnessKind: "pi",
+		sessionLogPath: "/tmp/s_war.jsonl",
 		runId: "run_war",
 	});
 	engine.runUpsert({
@@ -48,6 +52,8 @@ const setup = (runIdEnv?: string) => {
 		scope: "global",
 		cwd: "/tmp",
 		sessionId: "s_pdx",
+		harnessKind: "pi",
+		sessionLogPath: "/tmp/s_pdx.jsonl",
 		runId: "run_pdx",
 	});
 	return { dbPath, engine, repo };
@@ -237,7 +243,13 @@ describe("task lifecycle", () => {
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		expect(engine.runCleanup({ runId: "run_war", reason: "process exited" })).toMatchObject({
 			ok: true,
-			run: { id: "run_war", status: "failed", task_id: null },
+			run: {
+				id: "run_war",
+				status: "failed",
+				task_id: null,
+				harness_kind: "pi",
+				session_log_path: "/tmp/s_war.jsonl",
+			},
 		});
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(task)).toBe("queued");
@@ -268,12 +280,20 @@ describe("task lifecycle", () => {
 			scope: repo,
 			cwd: "/tmp/pithos-repo",
 			sessionId: "s_war2",
+			harnessKind: "pi",
+			sessionLogPath: "/tmp/s_war2.jsonl",
 			runId: "run_war2",
 		});
 		engine.claim({ runId: "run_war2", scope: repo, capability: "execute" });
 		db.prepare("UPDATE tasks SET attempts=max_attempts WHERE id=?").run(task);
 		expect(engine.runCleanup({ runId: "run_war2", reason: "process exited" })).toMatchObject({
-			run: { id: "run_war2", status: "failed", task_id: null },
+			run: {
+				id: "run_war2",
+				status: "failed",
+				task_id: null,
+				harness_kind: "pi",
+				session_log_path: "/tmp/s_war2.jsonl",
+			},
 		});
 		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(task)).toBe("dead_letter");
 		expect(db.prepare("SELECT fencing_token FROM tasks WHERE id=?").pluck().get(task)).toBe(4);
@@ -298,7 +318,13 @@ describe("task lifecycle", () => {
 		);
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		expect(engine.runInterrupt({ runId: undefined, taskId: task, reason: "stop" })).toMatchObject({
-			run: { id: "run_war", status: "failed", task_id: null },
+			run: {
+				id: "run_war",
+				status: "failed",
+				task_id: null,
+				harness_kind: "pi",
+				session_log_path: "/tmp/s_war.jsonl",
+			},
 		});
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(task)).toBe("failed");
@@ -327,7 +353,13 @@ describe("task lifecycle", () => {
 		expect(() => engine.runTimeout({ runId: "run_pdx", reason: "no claim" })).toThrow(PithosError);
 		expect(engine.runTimeout({ runId: "run_war", reason: "no claim" })).toMatchObject({
 			ok: true,
-			run: { id: "run_war", status: "timed_out", task_id: null },
+			run: {
+				id: "run_war",
+				status: "timed_out",
+				task_id: null,
+				harness_kind: "pi",
+				session_log_path: "/tmp/s_war.jsonl",
+			},
 		});
 		expect(engine.runTimeout({ runId: "run_war", reason: "retry" })).toMatchObject({
 			run: { id: "run_war", status: "timed_out", task_id: null },
@@ -338,6 +370,8 @@ describe("task lifecycle", () => {
 			scope: repo,
 			cwd: "/tmp/pithos-repo",
 			sessionId: "s_war2",
+			harnessKind: "pi",
+			sessionLogPath: "/tmp/s_war2.jsonl",
 			runId: "run_war2",
 		});
 		const held = engine.enqueue({

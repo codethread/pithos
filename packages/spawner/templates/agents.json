@@ -5,7 +5,13 @@
 			"mode": "hitl",
 			"claims": ["escalate"],
 			"enqueues": ["triage", "design", "escalate"],
-			"harness": { "kind": "pi" },
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"system_prompt_mode": "replace",
+				"tools": ["bash", "read", "edit", "write", "grep", "find", "ls"]
+			},
+			"includes": ["_common.md"],
 			"template": "pandora.md.tmpl"
 		},
 		{
@@ -13,7 +19,13 @@
 			"mode": "afk",
 			"claims": ["triage"],
 			"enqueues": ["triage", "design", "execute", "escalate"],
-			"harness": { "kind": "pi" },
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"system_prompt_mode": "append",
+				"tools": ["bash", "read", "edit", "write", "grep", "find", "ls"]
+			},
+			"includes": ["_common.md"],
 			"template": "toil.md.tmpl"
 		},
 		{
@@ -21,7 +33,13 @@
 			"mode": "hitl",
 			"claims": ["design"],
 			"enqueues": ["triage", "design", "escalate"],
-			"harness": { "kind": "pi" },
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"system_prompt_mode": "replace",
+				"tools": ["bash", "read", "edit", "write", "grep", "find", "ls"]
+			},
+			"includes": ["_common.md"],
 			"template": "greed.md.tmpl"
 		},
 		{
@@ -29,7 +47,12 @@
 			"mode": "afk",
 			"claims": ["execute"],
 			"enqueues": ["escalate"],
-			"harness": { "kind": "claude" },
+			"harness": {
+				"kind": "pi",
+				"model": "deepseek-v4-pro",
+				"system_prompt_mode": "append"
+			},
+			"includes": ["_common.md"],
 			"template": "war.md.tmpl"
 		}
 	]

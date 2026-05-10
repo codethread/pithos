@@ -5,20 +5,17 @@ export type ParsedCommand =
 	| { readonly kind: "help" }
 	| { readonly kind: "open" }
 	| { readonly kind: "close" }
-	| { readonly kind: "status" }
+	| { readonly kind: "daemon-status" }
 	| {
-			readonly kind: "kill";
-			runId: string | undefined;
-			taskId: string | undefined;
-			reason: string;
-	  }
-	| {
-			readonly kind: "logs-show";
+			readonly kind: "daemon-logs";
 			readonly limit: number | undefined;
 			readonly all: boolean;
 			readonly since: string | undefined;
 	  }
-	| { readonly kind: "daemon" };
+	| { readonly kind: "daemon-run" }
+	| { readonly kind: "run-kill"; readonly runId: string; readonly reason: string }
+	| { readonly kind: "run-transcript"; readonly runId: string; readonly limit: number | undefined }
+	| { readonly kind: "task-kill"; readonly taskId: string; readonly reason: string };
 
 export interface ParsedPdxArgs {
 	readonly command: ParsedCommand;
@@ -26,58 +23,6 @@ export interface ParsedPdxArgs {
 	readonly intervalSecondsRaw: string | undefined;
 	readonly maxAfkRaw: string | undefined;
 }
-
-interface LogsOptions {
-	readonly limitRaw: string | undefined;
-	readonly all: boolean;
-	readonly since: string | undefined;
-	readonly json: boolean;
-}
-
-const hasLogsFilterOption = (logsOptions: LogsOptions): boolean =>
-	logsOptions.limitRaw !== undefined || logsOptions.all || logsOptions.since !== undefined;
-
-const hasAfkTimingOption = (
-	intervalSecondsRaw: string | undefined,
-	maxAfkRaw: string | undefined,
-): boolean => intervalSecondsRaw !== undefined || maxAfkRaw !== undefined;
-
-const rejectCommandOptions = (command: string): Effect.Effect<void, PdxError> =>
-	Effect.fail(
-		new PdxError({
-			code: "VALIDATION_ERROR",
-			message: `${command} does not take command options`,
-		}),
-	);
-
-const rejectLogsFilterOptions = (
-	command: string,
-	logsOptions: LogsOptions,
-): Effect.Effect<void, PdxError> =>
-	hasLogsFilterOption(logsOptions)
-		? Effect.fail(
-				new PdxError({
-					code: "VALIDATION_ERROR",
-					message: `${command} does not take logs options`,
-				}),
-			)
-		: Effect.void;
-
-const rejectAfkTimingOptions = (command: string): Effect.Effect<void, PdxError> =>
-	Effect.fail(
-		new PdxError({
-			code: "VALIDATION_ERROR",
-			message: `${command} does not take afk timing options`,
-		}),
-	);
-
-const rejectJsonOption = (command: string): Effect.Effect<void, PdxError> =>
-	Effect.fail(
-		new PdxError({
-			code: "VALIDATION_ERROR",
-			message: `${command} does not take --json`,
-		}),
-	);
 
 const parsePositiveInt = (
 	raw: string | undefined,
@@ -107,145 +52,11 @@ const parseOptionValue = (
 	return Effect.succeed(value);
 };
 
-const parseCommand = (
-	commandArgs: readonly string[],
-	logsShowInput: LogsOptions,
-	showHelp: boolean,
-	intervalSecondsRaw: string | undefined,
-	maxAfkRaw: string | undefined,
-	killInput: {
-		readonly runId: string | undefined;
-		readonly taskId: string | undefined;
-		readonly reason: string | undefined;
-	},
-): Effect.Effect<ParsedCommand, PdxError> =>
-	Effect.gen(function* () {
-		const command = commandArgs[0];
-		if (showHelp || command === undefined || commandArgs.length === 0) {
-			return { kind: "help" } as const;
-		}
-		if (command === "open") {
-			if (hasLogsFilterOption(logsShowInput)) {
-				yield* rejectLogsFilterOptions("open", logsShowInput);
-			}
-			if (logsShowInput.json) {
-				yield* rejectJsonOption("open");
-			}
-			if (commandArgs.length !== 1) {
-				return yield* Effect.fail(
-					new PdxError({
-						code: "VALIDATION_ERROR",
-						message: "open does not take positional arguments",
-					}),
-				);
-			}
-			return { kind: "open" } as const;
-		}
-		if (command === "close") {
-			if (
-				hasAfkTimingOption(intervalSecondsRaw, maxAfkRaw) ||
-				hasLogsFilterOption(logsShowInput) ||
-				logsShowInput.json
-			) {
-				yield* rejectCommandOptions("close");
-			}
-			if (commandArgs.length !== 1) {
-				return yield* Effect.fail(
-					new PdxError({
-						code: "VALIDATION_ERROR",
-						message: "close does not take positional arguments",
-					}),
-				);
-			}
-			return { kind: "close" } as const;
-		}
-		if (command === "status") {
-			if (hasAfkTimingOption(intervalSecondsRaw, maxAfkRaw)) {
-				yield* rejectAfkTimingOptions("status");
-			}
-			yield* rejectLogsFilterOptions("status", logsShowInput);
-			if (commandArgs.length !== 1) {
-				return yield* Effect.fail(
-					new PdxError({
-						code: "VALIDATION_ERROR",
-						message: "status does not take positional arguments",
-					}),
-				);
-			}
-			return { kind: "status" } as const;
-		}
-		if (command === "kill") {
-			if (
-				hasAfkTimingOption(intervalSecondsRaw, maxAfkRaw) ||
-				hasLogsFilterOption(logsShowInput) ||
-				logsShowInput.json
-			) {
-				yield* rejectCommandOptions("kill");
-			}
-			if (commandArgs.length !== 1) {
-				return yield* Effect.fail(
-					new PdxError({
-						code: "VALIDATION_ERROR",
-						message: "kill does not take positional arguments",
-					}),
-				);
-			}
-			if ((killInput.runId === undefined) === (killInput.taskId === undefined)) {
-				return yield* Effect.fail(
-					new PdxError({
-						code: "VALIDATION_ERROR",
-						message: "kill requires exactly one of --run or --task",
-					}),
-				);
-			}
-			if (killInput.reason === undefined || killInput.reason.trim() === "") {
-				return yield* Effect.fail(
-					new PdxError({ code: "VALIDATION_ERROR", message: "kill requires --reason" }),
-				);
-			}
-			return {
-				kind: "kill",
-				runId: killInput.runId,
-				taskId: killInput.taskId,
-				reason: killInput.reason,
-			} as const;
-		}
-		if (command === "logs") {
-			if (commandArgs[1] !== "show" || commandArgs.length !== 2) {
-				return yield* Effect.fail(
-					new PdxError({ code: "VALIDATION_ERROR", message: "Command not implemented: logs" }),
-				);
-			}
-			if (hasAfkTimingOption(intervalSecondsRaw, maxAfkRaw)) {
-				yield* rejectAfkTimingOptions("logs show");
-			}
-			const limit = yield* parsePositiveInt(logsShowInput.limitRaw, "--limit");
-			return {
-				kind: "logs-show",
-				limit,
-				all: logsShowInput.all,
-				since: logsShowInput.since,
-			} as const;
-		}
-		if (command === "daemon") {
-			yield* rejectLogsFilterOptions("daemon", logsShowInput);
-			if (logsShowInput.json) {
-				yield* rejectJsonOption("daemon");
-			}
-			if (commandArgs.length !== 1) {
-				return yield* Effect.fail(
-					new PdxError({
-						code: "VALIDATION_ERROR",
-						message: "daemon does not take positional arguments",
-					}),
-				);
-			}
-			return { kind: "daemon" } as const;
-		}
-		return yield* Effect.fail(
-			new PdxError({ code: "VALIDATION_ERROR", message: `Command not implemented: ${command}` }),
-		);
-	});
+const fail = (message: string): Effect.Effect<never, PdxError> =>
+	Effect.fail(new PdxError({ code: "VALIDATION_ERROR", message }));
+
+const requireNoExtra = (command: string, args: readonly string[], count: number) =>
+	args.length === count ? Effect.void : fail(`${command} does not take positional arguments`);
 
 export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxArgs, PdxError> =>
 	Effect.gen(function* () {
@@ -256,10 +67,7 @@ export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxAr
 		let limitRaw: string | undefined;
 		let since: string | undefined;
 		let all = false;
-		let json = false;
 		let showHelp = false;
-		let runId: string | undefined;
-		let taskId: string | undefined;
 		let reason: string | undefined;
 
 		for (let index = 0; index < args.length; index++) {
@@ -268,80 +76,118 @@ export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxAr
 				commandArgs.push(arg);
 				continue;
 			}
-
 			switch (arg) {
-				case "--data-dir": {
+				case "--data-dir":
 					dataDir = yield* parseOptionValue(args, index, "--data-dir");
 					index += 1;
 					continue;
-				}
-				case "--interval-seconds": {
+				case "--interval-seconds":
 					intervalSecondsRaw = yield* parseOptionValue(args, index, "--interval-seconds");
 					index += 1;
 					continue;
-				}
-				case "--max-afk": {
+				case "--max-afk":
 					maxAfkRaw = yield* parseOptionValue(args, index, "--max-afk");
 					index += 1;
 					continue;
-				}
-				case "--limit": {
+				case "--limit":
 					limitRaw = yield* parseOptionValue(args, index, "--limit");
 					index += 1;
 					continue;
-				}
-				case "--since": {
+				case "--since":
 					since = yield* parseOptionValue(args, index, "--since");
 					index += 1;
 					continue;
-				}
-				case "--all": {
+				case "--all":
 					all = true;
 					continue;
-				}
-				case "--run": {
-					runId = yield* parseOptionValue(args, index, "--run");
-					index += 1;
-					continue;
-				}
-				case "--task": {
-					taskId = yield* parseOptionValue(args, index, "--task");
-					index += 1;
-					continue;
-				}
-				case "--reason": {
+				case "--reason":
 					reason = yield* parseOptionValue(args, index, "--reason");
 					index += 1;
 					continue;
-				}
-				case "--json": {
-					json = true;
-					continue;
-				}
-				case "--help": {
+				case "--help":
 					showHelp = true;
 					continue;
-				}
-				default: {
-					return yield* Effect.fail(
-						new PdxError({ code: "VALIDATION_ERROR", message: `Unknown option: ${arg}` }),
-					);
-				}
+				case "--run":
+				case "--task":
+				case "--json":
+					return yield* fail(`Unknown option: ${arg}`);
+				default:
+					return yield* fail(`Unknown option: ${arg}`);
 			}
 		}
 
-		const command = yield* parseCommand(
-			commandArgs,
-			{ limitRaw, all, since, json },
-			showHelp,
-			intervalSecondsRaw,
-			maxAfkRaw,
-			{ runId, taskId, reason },
-		);
-		return {
-			command,
-			dataDir,
-			intervalSecondsRaw,
-			maxAfkRaw,
-		};
+		if (showHelp || commandArgs.length === 0) {
+			return { command: { kind: "help" }, dataDir, intervalSecondsRaw, maxAfkRaw };
+		}
+
+		const [head, sub, id] = commandArgs;
+		let command: ParsedCommand;
+		if (head === "open") {
+			yield* requireNoExtra("open", commandArgs, 1);
+			if (limitRaw !== undefined || since !== undefined || all)
+				yield* fail("open does not take logs options");
+			command = { kind: "open" };
+		} else if (head === "close") {
+			yield* requireNoExtra("close", commandArgs, 1);
+			if (intervalSecondsRaw !== undefined || maxAfkRaw !== undefined) {
+				yield* fail("close does not take command options");
+			}
+			command = { kind: "close" };
+		} else if (head === "daemon" && sub === "status") {
+			yield* requireNoExtra("daemon status", commandArgs, 2);
+			if (intervalSecondsRaw !== undefined || maxAfkRaw !== undefined) {
+				yield* fail("daemon status does not take afk timing options");
+			}
+			if (limitRaw !== undefined || since !== undefined || all) {
+				yield* fail("daemon status does not take logs options");
+			}
+			command = { kind: "daemon-status" };
+		} else if (head === "daemon" && sub === "logs") {
+			yield* requireNoExtra("daemon logs", commandArgs, 2);
+			if (intervalSecondsRaw !== undefined || maxAfkRaw !== undefined) {
+				yield* fail("daemon logs does not take afk timing options");
+			}
+			command = {
+				kind: "daemon-logs",
+				limit: yield* parsePositiveInt(limitRaw, "--limit"),
+				all,
+				since,
+			};
+		} else if (head === "daemon" && sub === "run") {
+			yield* requireNoExtra("daemon run", commandArgs, 2);
+			if (limitRaw !== undefined || since !== undefined || all) {
+				yield* fail("daemon run does not take logs options");
+			}
+			command = { kind: "daemon-run" };
+		} else if (head === "run" && sub === "kill") {
+			yield* requireNoExtra("run kill", commandArgs, 3);
+			const runId = id ?? (yield* fail("run kill requires <run-id>"));
+			const killReason =
+				reason === undefined || reason.trim() === ""
+					? yield* fail("run kill requires --reason")
+					: reason;
+			command = { kind: "run-kill", runId, reason: killReason };
+		} else if (head === "run" && sub === "transcript") {
+			yield* requireNoExtra("run transcript", commandArgs, 3);
+			const runId = id ?? (yield* fail("run transcript requires <run-id>"));
+			command = {
+				kind: "run-transcript",
+				runId,
+				limit: yield* parsePositiveInt(limitRaw, "--limit"),
+			};
+		} else if (head === "task" && sub === "kill") {
+			yield* requireNoExtra("task kill", commandArgs, 3);
+			const taskId = id ?? (yield* fail("task kill requires <task-id>"));
+			const killReason =
+				reason === undefined || reason.trim() === ""
+					? yield* fail("task kill requires --reason")
+					: reason;
+			command = { kind: "task-kill", taskId, reason: killReason };
+		} else if (head === "status" || head === "logs" || head === "kill") {
+			return yield* fail(`Command not implemented: ${head}`);
+		} else {
+			return yield* fail(`Command not implemented: ${head}`);
+		}
+
+		return { command, dataDir, intervalSecondsRaw, maxAfkRaw };
 	});

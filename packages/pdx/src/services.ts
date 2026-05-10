@@ -130,6 +130,10 @@ export interface LaunchAgentResult {
 	readonly sessionId: string;
 	readonly scopeId: string;
 	readonly logicalName: string;
+	readonly harnessKind?: string;
+	readonly harnessArgv?: readonly string[];
+	readonly harnessEnvKeys?: readonly string[];
+	readonly sessionLogPath?: string;
 	readonly hitl?: { readonly tmuxTarget: string; readonly panePid: number | null };
 	readonly afk?: { readonly pid: number; readonly processStartTime: string };
 }

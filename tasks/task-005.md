@@ -19,10 +19,10 @@ Downstream tasks that need a usable pdx operator surface should depend on `task-
 The split still delivers the original slice-5 outcome:
 
 - New greenfield workspace package `packages/pdx/` with bin `pdx`.
-- `pdx open [--home <path>] [--interval-seconds <n>] [--max-afk <n>]` starts the local supervisor daemon in tmux target `pdx--daemon` after non-destructive `pithos init`.
-- `pdx close [--home <path>]` stops the daemon and cleans the `pdx` system run last.
-- `pdx status [--home <path>] [--json]` returns JSON with top-level `daemon`, `registry`, `queue`, and `caps`.
-- `pdx logs show [--home <path>] [--limit <n> | --all] [--since <when>]` reads the structured Supervisor log as raw JSONL.
+- `pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>]` starts the local supervisor daemon in tmux target `pdx--daemon` after non-destructive `pithos init`.
+- `pdx close [--data-dir <path>]` stops the daemon and cleans the `pdx` system run last.
+- `pdx status [--data-dir <path>] [--json]` returns JSON with top-level `daemon`, `registry`, `queue`, and `caps`.
+- `pdx logs show [--data-dir <path>] [--limit <n> | --all] [--since <when>]` reads the structured Supervisor log as raw JSONL.
 - Tmux/process/filesystem/clock/IDs/Pithos access sit behind Effect services/layers.
 - Supervisor logs are structured JSONL; no unstructured daemon logs.
 - Registry exists as an in-memory concept but remains empty until task 006 populates Pandora.

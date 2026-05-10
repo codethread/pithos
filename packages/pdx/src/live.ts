@@ -1,8 +1,18 @@
 import { Effect } from "effect";
-import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import {
+	appendFile,
+	mkdir,
+	open,
+	readdir,
+	readFile,
+	rename,
+	rm,
+	writeFile,
+} from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { launchAgent } from "../../spawner/src/index.ts";
+import { LiveSpawnerServices as liveSpawnerServices } from "../../spawner/src/services.ts";
 import { liveServices, makeEngine, PithosError } from "@pithos/pithos";
 import type { Config as PithosConfig } from "@pithos/pithos";
 import { PdxError } from "./errors.js";
@@ -126,7 +136,7 @@ export const FileSystemLive = FileSystem.of({
 export const ClockLive = Clock.of({ nowIso: Effect.sync(() => new Date().toISOString()) });
 export const IdsLive = Ids.of({
 	nextRunId: Effect.sync(() => `run_${randomUUID().replaceAll("-", "")}`),
-	nextSessionId: Effect.sync(() => `session_${randomUUID().replaceAll("-", "")}`),
+	nextSessionId: Effect.sync(() => randomUUID()),
 });
 const pithosError = (operation: string, error: unknown) => {
 	if (error instanceof PdxError) return error;
@@ -206,11 +216,53 @@ const pithosClient = (dbPath: string): PithosClientService => {
 };
 
 export const makePithosClientLive = (dbPath: string) => PithosClient.of(pithosClient(dbPath));
-export const SpawnerLive = Spawner.of({
-	launchAgent: (input) =>
-		Effect.try({
-			try: () => launchAgent(input),
-			catch: (error) =>
-				new PdxError({ code: "PROCESS_ERROR", message: `spawner launch failed: ${String(error)}` }),
-		}),
-});
+export const makeSpawnerLive = (config: {
+	readonly dataDir: string;
+	readonly pithosDbPath: string;
+}) =>
+	Spawner.of({
+		launchAgent: (input) =>
+			Effect.tryPromise({
+				try: async () => {
+					const stdoutPath = `${config.dataDir}/runs/${input.runId}.stdout.log`;
+					const stderrPath = `${config.dataDir}/runs/${input.runId}.stderr.log`;
+					await Promise.all([writeFile(stdoutPath, "", "utf8"), writeFile(stderrPath, "", "utf8")]);
+					const [stdout, stderr] = await Promise.all([
+						open(stdoutPath, "a"),
+						open(stderrPath, "a"),
+					]);
+					try {
+						return launchAgent(input, {
+							readText: liveSpawnerServices.readText,
+							env: (key) => {
+								if (key === "PDX_DATA_DIR") return config.dataDir;
+								if (key === "PITHOS_DB") return config.pithosDbPath;
+								return liveSpawnerServices.env(key);
+							},
+							spawnProcess: (file, args, options) => {
+								const child = spawn(file, args, {
+									cwd: options.cwd,
+									env: {
+										...process.env,
+										PDX_DATA_DIR: config.dataDir,
+										PITHOS_DB: config.pithosDbPath,
+										...options.env,
+									},
+									stdio: ["ignore", stdout.fd, stderr.fd],
+									detached: false,
+								});
+								return child.pid === undefined ? {} : { pid: child.pid };
+							},
+							execFile: liveSpawnerServices.execFile,
+						});
+					} finally {
+						await Promise.all([stdout.close(), stderr.close()]);
+					}
+				},
+				catch: (error) =>
+					new PdxError({
+						code: "PROCESS_ERROR",
+						message: `spawner launch failed: ${String(error)}`,
+					}),
+			}),
+	});

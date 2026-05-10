@@ -3,13 +3,13 @@ import { resolve } from "node:path";
 import { PdxError } from "./errors.js";
 
 export const RawPdxConfigSchema = Schema.Struct({
-	home: Schema.optional(Schema.NonEmptyString),
+	dataDir: Schema.optional(Schema.NonEmptyString),
 	envHome: Schema.optional(Schema.NonEmptyString),
 	daemonEntrypoint: Schema.NonEmptyString,
 });
 
 export interface PdxConfig {
-	readonly home: string;
+	readonly dataDir: string;
 	readonly socketPath: string;
 	readonly logPath: string;
 	readonly runsDir: string;
@@ -27,22 +27,22 @@ export const parsePdxConfig = (input: unknown): Effect.Effect<PdxConfig, PdxErro
 				}),
 		),
 		Effect.flatMap((decoded) => {
-			if (decoded.home === undefined && decoded.envHome === undefined) {
+			if (decoded.dataDir === undefined && decoded.envHome === undefined) {
 				return Effect.fail(
 					new PdxError({
 						code: "CONFIG_ERROR",
-						message: "missing required home (provide --home or HOME env)",
+						message: "missing required data dir (provide --data-dir or HOME env)",
 					}),
 				);
 			}
-			const home = resolve(decoded.home ?? `${decoded.envHome}/.pdx`);
+			const dataDir = resolve(decoded.dataDir ?? `${decoded.envHome}/.pdx`);
 			return Effect.succeed({
-				home,
-				socketPath: `${home}/pdx.sock`,
-				logPath: `${home}/pdx.jsonl`,
-				runsDir: `${home}/runs`,
+				dataDir,
+				socketPath: `${dataDir}/pdx.sock`,
+				logPath: `${dataDir}/pdx.jsonl`,
+				runsDir: `${dataDir}/runs`,
 				daemonEntrypoint: decoded.daemonEntrypoint,
-				pithosDbPath: `${home}/pithos.sqlite`,
+				pithosDbPath: `${dataDir}/pithos.sqlite`,
 			});
 		}),
 	);

@@ -4,7 +4,7 @@
 
 Implement Pandora/operator introspection commands over the pdx substrate from tasks 005a/005b.
 
-`pdx status [--home <path>] [--json]`:
+`pdx status [--data-dir <path>] [--json]`:
 
 - JSON output is mandatory; `--json` may be accepted as the only mode.
 - Required top-level keys: `daemon`, `registry`, `queue`, `caps`.
@@ -14,7 +14,7 @@ Implement Pandora/operator introspection commands over the pdx substrate from ta
 - Queue counts come from Pithos claimable-task inspection, grouped at least by scope/capability when available.
 - Caps shape includes configured `max_afk`, with zero usage while registry is empty.
 
-`pdx logs show [--home <path>] [--limit <n> | --all] [--since <when>]`:
+`pdx logs show [--data-dir <path>] [--limit <n> | --all] [--since <when>]`:
 
 - Reads the structured Supervisor log even when daemon is stopped.
 - Prints raw original JSONL lines, preserving pipe-friendliness for `jq`.

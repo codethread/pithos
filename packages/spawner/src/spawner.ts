@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
 	BUILTIN_AGENT_CLAIMS,
@@ -41,6 +42,8 @@ export interface LaunchResult {
 	readonly scopeId: string;
 	readonly logicalName: string;
 	readonly harnessKind: string;
+	readonly harnessArgv: readonly string[];
+	readonly harnessEnvKeys: readonly string[];
 	readonly sessionLogPath: string;
 	readonly afk?: { readonly pid: number; readonly processStartTime: string };
 	readonly hitl?: { readonly tmuxTarget: string; readonly panePid: number | null };
@@ -136,18 +139,27 @@ const renderTemplate = (template: string, ctx: Record<string, string>): string =
 	});
 
 const SpawnerConfigSchema = Schema.Struct({
+	dataDir: Schema.NonEmptyString,
 	pithosBin: Schema.NonEmptyString,
-	home: Schema.NonEmptyString,
+	pithosDb: Schema.NonEmptyString,
 });
 
 type SpawnerConfig = Schema.Schema.Type<typeof SpawnerConfigSchema>;
 
-const loadConfig = (services: RenderServices): SpawnerConfig =>
-	decode(
+const loadConfig = (services: RenderServices): SpawnerConfig => {
+	const dataDir = services.env("PDX_DATA_DIR");
+	return decode(
 		SpawnerConfigSchema,
-		{ pithosBin: services.env("PITHOS_BIN") ?? "pithos", home: services.home() },
+		{
+			dataDir,
+			pithosBin: services.env("PITHOS_BIN") ?? "pithos",
+			pithosDb:
+				services.env("PITHOS_DB") ??
+				(dataDir === undefined ? undefined : `${dataDir}/pithos.sqlite`),
+		},
 		"SpawnerConfig",
 	);
+};
 
 const logicalName = (input: RenderAgentInput): string =>
 	input.agent === "pandora"
@@ -159,14 +171,10 @@ const claudeProjectSlug = (cwd: string): string => cwd.replace(/^\/+/, "").repla
 const piSessionBucket = (cwd: string): string =>
 	`--${cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-")}--`;
 
-const sessionLogPath = (
-	input: RenderAgentInput,
-	harnessKind: "claude" | "pi",
-	config: SpawnerConfig,
-): string =>
+const sessionLogPath = (input: RenderAgentInput, harnessKind: "claude" | "pi"): string =>
 	harnessKind === "claude"
-		? `${config.home}/.claude/projects/${claudeProjectSlug(input.cwd)}/${input.sessionId}.jsonl`
-		: `${config.home}/.pi/agent/sessions/${piSessionBucket(input.cwd)}/${input.sessionId}.jsonl`;
+		? `${homedir()}/.claude/projects/${claudeProjectSlug(input.cwd)}/${input.sessionId}.jsonl`
+		: `${homedir()}/.pi/agent/sessions/${piSessionBucket(input.cwd)}/${input.sessionId}.jsonl`;
 
 export const renderAgent = (
 	input: RenderAgentInput,
@@ -199,15 +207,37 @@ export const renderAgent = (
 		enqueues: manifest.enqueues.join(", "),
 	});
 	const env = {
+		PITHOS_DB: config.pithosDb,
 		PITHOS_RUN_ID: input.runId,
 		PITHOS_SESSION_ID: input.sessionId,
 		PITHOS_SCOPE_ID: input.scopeId,
 		PITHOS_BIN: config.pithosBin,
 	};
+	const initialMessage = "Claim and process one task, then exit.";
 	const argv =
 		manifest.harness.kind === "claude"
-			? ["claude", "--session-id", input.sessionId, "--system-prompt", prompt]
-			: ["pi", "--session", sessionLogPath(input, "pi", config), "--system-prompt", prompt];
+			? input.mode === "afk"
+				? [
+						"claude",
+						"--session-id",
+						input.sessionId,
+						"--system-prompt",
+						prompt,
+						"--print",
+						initialMessage,
+					]
+				: ["claude", "--session-id", input.sessionId, "--system-prompt", prompt]
+			: input.mode === "afk"
+				? [
+						"pi",
+						"--session",
+						sessionLogPath(input, "pi"),
+						"--system-prompt",
+						prompt,
+						"--print",
+						initialMessage,
+					]
+				: ["pi", "--session", sessionLogPath(input, "pi"), "--system-prompt", prompt];
 	return {
 		...input,
 		logicalName: logicalName(input),
@@ -220,7 +250,6 @@ export const launchAgent = (
 	input: RenderAgentInput,
 	services: LaunchServices = LiveSpawnerServices,
 ): LaunchResult => {
-	const config = loadConfig(services);
 	const rendered = renderAgent(input, services);
 	if (rendered.mode === "afk") {
 		const child = services.spawnProcess(
@@ -244,7 +273,9 @@ export const launchAgent = (
 			scopeId: rendered.scopeId,
 			logicalName: rendered.logicalName,
 			harnessKind: rendered.harness.kind,
-			sessionLogPath: sessionLogPath(rendered, rendered.harness.kind as "claude" | "pi", config),
+			harnessArgv: rendered.harness.argv,
+			harnessEnvKeys: Object.keys(rendered.harness.env).sort(),
+			sessionLogPath: sessionLogPath(rendered, rendered.harness.kind as "claude" | "pi"),
 			afk: { pid: child.pid, processStartTime: new Date().toISOString() },
 		};
 	}
@@ -283,7 +314,9 @@ export const launchAgent = (
 		scopeId: rendered.scopeId,
 		logicalName: rendered.logicalName,
 		harnessKind: rendered.harness.kind,
-		sessionLogPath: sessionLogPath(rendered, rendered.harness.kind as "claude" | "pi", config),
+		harnessArgv: rendered.harness.argv,
+		harnessEnvKeys: Object.keys(rendered.harness.env).sort(),
+		sessionLogPath: sessionLogPath(rendered, rendered.harness.kind as "claude" | "pi"),
 		hitl: { tmuxTarget: rendered.logicalName, panePid: pid },
 	};
 };

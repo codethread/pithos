@@ -40,6 +40,10 @@ Output is `RenderedAgent` JSON with `agent`, `mode`, `runId`, `sessionId`, `scop
 
 `PITHOS_BIN` controls the rendered claim command; default is `pithos`.
 
+AFK Pi and Claude agents render with `--print "Claim and process one task, then exit."` so detached launches do real non-interactive work. HITL agents omit `--print` and run interactively. Claude session IDs must be valid UUIDs.
+
+Session logs use harness-native locations so prior Pandora-style status tooling can find them by session id: Claude under `~/.claude/projects/**/<uuid>.jsonl`, Pi under `~/.pi/agent/sessions/**/<uuid>.jsonl`.
+
 ## Templates
 
 `templates/agents.json` is locked to:

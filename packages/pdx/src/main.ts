@@ -11,8 +11,8 @@ import {
 	FileSystemLive,
 	IdsLive,
 	makePithosClientLive,
+	makeSpawnerLive,
 	ProcessLive,
-	SpawnerLive,
 } from "./live.js";
 import { makeSupervisorLog } from "./log.js";
 import {
@@ -37,29 +37,29 @@ interface RuntimeInput {
 type CommandInput =
 	| {
 			readonly command: "open";
-			readonly home: string | undefined;
+			readonly dataDir: string | undefined;
 			readonly maxAfk: number;
 			readonly intervalSeconds: number;
 	  }
-	| { readonly command: "close"; readonly home: string | undefined }
-	| { readonly command: "status"; readonly home: string | undefined }
+	| { readonly command: "close"; readonly dataDir: string | undefined }
+	| { readonly command: "status"; readonly dataDir: string | undefined }
 	| {
 			readonly command: "kill";
-			readonly home: string | undefined;
+			readonly dataDir: string | undefined;
 			readonly runId: string | undefined;
 			readonly taskId: string | undefined;
 			readonly reason: string;
 	  }
 	| {
 			readonly command: "logs.show";
-			readonly home: string | undefined;
+			readonly dataDir: string | undefined;
 			readonly limit: number | undefined;
 			readonly all: boolean;
 			readonly since: string | undefined;
 	  }
 	| {
 			readonly command: "daemon";
-			readonly home: string | undefined;
+			readonly dataDir: string | undefined;
 			readonly maxAfk: number;
 			readonly intervalSeconds: number;
 	  };
@@ -88,13 +88,12 @@ const baseLayer = Layer.mergeAll(
 	Layer.succeed(FileSystem, FileSystemLive),
 	Layer.succeed(Clock, ClockLive),
 	Layer.succeed(Ids, IdsLive),
-	Layer.succeed(Spawner, SpawnerLive),
 );
 
 const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 	Effect.gen(function* () {
 		const config = yield* parsePdxConfig({
-			home: input.home,
+			dataDir: input.dataDir,
 			envHome: runtime.envHome,
 			daemonEntrypoint: runtime.daemonEntrypoint,
 		});
@@ -106,6 +105,7 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 			Layer.succeed(SupervisorLog, supervisorLog),
 			Layer.succeed(Registry, registry),
 			Layer.succeed(PithosClient, makePithosClientLive(config.pithosDbPath)),
+			Layer.succeed(Spawner, makeSpawnerLive(config)),
 		);
 
 		switch (input.command) {
@@ -160,19 +160,19 @@ const makeCommand = (runtime: RuntimeInput) => {
 	const open = Command.make(
 		"open",
 		{
-			home: Options.text("home").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
 			maxAfk: Options.integer("max-afk").pipe(Options.withDefault(defaultMaxAfk)),
 			intervalSeconds: Options.integer("interval-seconds").pipe(
 				Options.withDefault(defaultIntervalSeconds),
 			),
 		},
-		({ home, maxAfk, intervalSeconds }) =>
+		({ dataDir, maxAfk, intervalSeconds }) =>
 			Effect.gen(function* () {
 				yield* parsePositiveInt(maxAfk, "--max-afk");
 				yield* parsePositiveInt(intervalSeconds, "--interval-seconds");
 				yield* runCommand(runtime, {
 					command: "open",
-					home: opt(home),
+					dataDir: opt(dataDir),
 					maxAfk,
 					intervalSeconds,
 				});
@@ -182,32 +182,32 @@ const makeCommand = (runtime: RuntimeInput) => {
 	const close = Command.make(
 		"close",
 		{
-			home: Options.text("home").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
 		},
-		({ home }) => runCommand(runtime, { command: "close", home: opt(home) }),
+		({ dataDir }) => runCommand(runtime, { command: "close", dataDir: opt(dataDir) }),
 	);
 
 	const status = Command.make(
 		"status",
 		{
-			home: Options.text("home").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
 			json: Options.boolean("json"),
 		},
-		({ home }) => runCommand(runtime, { command: "status", home: opt(home) }),
+		({ dataDir }) => runCommand(runtime, { command: "status", dataDir: opt(dataDir) }),
 	);
 
 	const kill = Command.make(
 		"kill",
 		{
-			home: Options.text("home").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
 			runId: Options.text("run").pipe(Options.optional),
 			taskId: Options.text("task").pipe(Options.optional),
 			reason: Options.text("reason"),
 		},
-		({ home, runId, taskId, reason }) =>
+		({ dataDir, runId, taskId, reason }) =>
 			runCommand(runtime, {
 				command: "kill",
-				home: opt(home),
+				dataDir: opt(dataDir),
 				runId: opt(runId),
 				taskId: opt(taskId),
 				reason,
@@ -217,12 +217,12 @@ const makeCommand = (runtime: RuntimeInput) => {
 	const logsShow = Command.make(
 		"show",
 		{
-			home: Options.text("home").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
 			limit: Options.integer("limit").pipe(Options.optional),
 			since: Options.text("since").pipe(Options.optional),
 			all: Options.boolean("all"),
 		},
-		({ home, limit, since, all }) =>
+		({ dataDir, limit, since, all }) =>
 			Effect.gen(function* () {
 				const parsedLimit = opt(limit);
 				if (parsedLimit !== undefined) {
@@ -230,7 +230,7 @@ const makeCommand = (runtime: RuntimeInput) => {
 				}
 				yield* runCommand(runtime, {
 					command: "logs.show",
-					home: opt(home),
+					dataDir: opt(dataDir),
 					limit: parsedLimit,
 					all,
 					since: opt(since),
@@ -243,19 +243,19 @@ const makeCommand = (runtime: RuntimeInput) => {
 	const daemon = Command.make(
 		"daemon",
 		{
-			home: Options.text("home").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(Options.optional),
 			maxAfk: Options.integer("max-afk").pipe(Options.withDefault(defaultMaxAfk)),
 			intervalSeconds: Options.integer("interval-seconds").pipe(
 				Options.withDefault(defaultIntervalSeconds),
 			),
 		},
-		({ home, maxAfk, intervalSeconds }) =>
+		({ dataDir, maxAfk, intervalSeconds }) =>
 			Effect.gen(function* () {
 				yield* parsePositiveInt(maxAfk, "--max-afk");
 				yield* parsePositiveInt(intervalSeconds, "--interval-seconds");
 				yield* runCommand(runtime, {
 					command: "daemon",
-					home: opt(home),
+					dataDir: opt(dataDir),
 					maxAfk,
 					intervalSeconds,
 				});

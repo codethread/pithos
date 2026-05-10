@@ -23,6 +23,10 @@ export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
 const NO_CLAIM_TIMEOUT_MILLIS = 30_000;
 
 const pidfilePath = (config: PdxConfig, runId: string): string => `${config.runsDir}/${runId}.pid`;
+const afkStdoutPath = (config: PdxConfig, runId: string): string =>
+	`${config.runsDir}/${runId}.stdout.log`;
+const afkStderrPath = (config: PdxConfig, runId: string): string =>
+	`${config.runsDir}/${runId}.stderr.log`;
 
 const writeAfkPidfile = (config: PdxConfig, runId: string, pid: number) =>
 	FileSystem.pipe(
@@ -112,6 +116,8 @@ const awaitDaemonReady = (
 const isMissingTmuxSessionError = (error: PdxError): boolean =>
 	error.message.includes("can't find session") || error.message.includes("no server running");
 
+const isMissingProcessError = (error: PdxError): boolean => error.message.includes("ESRCH");
+
 export const openPdx = (config: PdxConfig, maxAfk: number, intervalSeconds: number) =>
 	Effect.gen(function* () {
 		const tmux = yield* Tmux;
@@ -123,17 +129,17 @@ export const openPdx = (config: PdxConfig, maxAfk: number, intervalSeconds: numb
 				new PdxError({ code: "VALIDATION_ERROR", message: `${DAEMON_TARGET} already exists` }),
 			);
 		}
-		yield* fs.mkdir(config.home);
+		yield* fs.mkdir(config.dataDir);
 		yield* pithos.init();
 		yield* fs.mkdir(config.runsDir);
 		yield* tmux.newSession({
 			target: DAEMON_TARGET,
-			cwd: config.home,
+			cwd: config.dataDir,
 			command: [
 				config.daemonEntrypoint,
 				"daemon",
-				"--home",
-				config.home,
+				"--data-dir",
+				config.dataDir,
 				"--max-afk",
 				String(maxAfk),
 				"--interval-seconds",
@@ -243,7 +249,7 @@ export const statusPdx = (config: PdxConfig, maxAfk: number) =>
 		const pithos = yield* PithosClient;
 		const running = yield* tmux.hasSession(DAEMON_TARGET);
 		const daemonStatus = yield* readDaemonStatus(config, running, maxAfk);
-		yield* fs.mkdir(config.home);
+		yield* fs.mkdir(config.dataDir);
 		yield* pithos.init();
 		const ready = yield* pithos.briefing();
 		const queue = queueCounts(ready);
@@ -550,7 +556,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 					(policy.mode !== "afk" || hasAfkCapacity(entries, maxAfk)),
 			);
 			if (task === undefined) continue;
-			const cwd = task.scope_kind === "global" ? config.home : task.canonical_path;
+			const cwd = task.scope_kind === "global" ? config.dataDir : task.canonical_path;
 			if (cwd === null) {
 				return yield* Effect.fail(
 					new PdxError({
@@ -579,6 +585,20 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				logicalName: `pdx--${agent}`,
 				launchedAt,
 				everClaimed: false,
+			});
+			yield* log.write({
+				level: "info",
+				span: "pdx.launch",
+				msg: "launching agent",
+				data: {
+					agent,
+					mode: policy.mode,
+					run_id: runId,
+					session_id: sessionId,
+					scope_id: task.scope_id,
+					cwd,
+					pithos_db: config.pithosDbPath,
+				},
 			});
 			const launched = yield* spawner
 				.launchAgent({
@@ -656,7 +676,18 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				level: "info",
 				span: "pdx.reconcile",
 				msg: `spawned ${agent}`,
-				data: { run_id: runId, scope_id: task.scope_id },
+				data: {
+					run_id: runId,
+					scope_id: task.scope_id,
+					logical_name: launched.logicalName,
+					harness_kind: launched.harnessKind ?? null,
+					harness_argv: launched.harnessArgv ?? [],
+					harness_env_keys: launched.harnessEnvKeys ?? [],
+					session_log_path: launched.sessionLogPath ?? null,
+					pid: afk?.pid ?? null,
+					stdout_path: policy.mode === "afk" ? afkStdoutPath(config, runId) : null,
+					stderr_path: policy.mode === "afk" ? afkStderrPath(config, runId) : null,
+				},
 			});
 			return;
 		}
@@ -697,7 +728,12 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					yield* registry.upsert({ ...entry, killAttempts: attempts });
 				}
 			} else if (!alive) {
+				let stdout: string | null = null;
+				let stderr: string | null = null;
 				if (entry.mode === "afk") {
+					const fs = yield* FileSystem;
+					stdout = yield* fs.readFile(afkStdoutPath(config, entry.runId));
+					stderr = yield* fs.readFile(afkStderrPath(config, entry.runId));
 					yield* cleanupAfkRun(config, entry.runId, "natural_death");
 				} else {
 					yield* cleanupRun(entry.runId, "natural_death");
@@ -707,7 +743,16 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					level: "info",
 					span: "pdx.reconcile",
 					msg: "removed dead entry",
-					data: { run_id: entry.runId },
+					data: {
+						run_id: entry.runId,
+						agent: entry.agent,
+						mode: entry.mode,
+						pid: entry.pid ?? null,
+						stdout_path: entry.mode === "afk" ? afkStdoutPath(config, entry.runId) : null,
+						stderr_path: entry.mode === "afk" ? afkStderrPath(config, entry.runId) : null,
+						stdout_tail: stdout === null ? null : stdout.slice(-4000),
+						stderr_tail: stderr === null ? null : stderr.slice(-4000),
+					},
 				});
 			} else if (entry.state === "live") {
 				const run = yield* pithos.runInspect({ runId: entry.runId });
@@ -731,9 +776,23 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				agent: "pandora",
 				mode: "hitl",
 				scope: "global",
-				cwd: config.home,
+				cwd: config.dataDir,
 				sessionId,
 				runId,
+			});
+			yield* log.write({
+				level: "info",
+				span: "pdx.launch",
+				msg: "launching agent",
+				data: {
+					agent: "pandora",
+					mode: "hitl",
+					run_id: runId,
+					session_id: sessionId,
+					scope_id: "global",
+					cwd: config.dataDir,
+					pithos_db: config.pithosDbPath,
+				},
 			});
 			const launched = yield* spawner
 				.launchAgent({
@@ -742,7 +801,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					runId,
 					sessionId,
 					scopeId: "global",
-					cwd: config.home,
+					cwd: config.dataDir,
 				})
 				.pipe(
 					Effect.catchAll((error) =>
@@ -772,7 +831,15 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				level: "info",
 				span: "pdx.reconcile",
 				msg: "spawned pandora",
-				data: { run_id: runId },
+				data: {
+					run_id: runId,
+					logical_name: launched.logicalName,
+					harness_kind: launched.harnessKind ?? null,
+					harness_argv: launched.harnessArgv ?? [],
+					harness_env_keys: launched.harnessEnvKeys ?? [],
+					session_log_path: launched.sessionLogPath ?? null,
+					tmux_target: tmuxTarget ?? null,
+				},
 			});
 		}
 		yield* sendEscalateWakeupIfNeeded();
@@ -900,7 +967,7 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 			agent: "pdx",
 			mode: "afk",
 			scope: "global",
-			cwd: config.home,
+			cwd: config.dataDir,
 			sessionId: DAEMON_TARGET,
 			runId: PDX_SYSTEM_RUN_ID,
 		});
@@ -927,7 +994,13 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 						);
 					yield* confirmTmuxGone(tmux, entry.tmuxTarget);
 				} else if (entry.pid !== undefined) {
-					yield* processService.kill(entry.pid, "SIGTERM");
+					yield* processService
+						.kill(entry.pid, "SIGTERM")
+						.pipe(
+							Effect.catchAll((error) =>
+								isMissingProcessError(error) ? Effect.void : Effect.fail(error),
+							),
+						);
 					const alive = yield* processService.isAlive(entry.pid);
 					if (alive) {
 						yield* Effect.fail(

@@ -1,6 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 
 export interface SpawnedProcess {
 	readonly pid?: number;
@@ -15,7 +14,6 @@ export interface CommandResult {
 export interface RenderServices {
 	readonly readText: (path: string) => string;
 	readonly env: (key: string) => string | undefined;
-	readonly home: () => string;
 }
 
 export interface LaunchServices extends RenderServices {
@@ -30,7 +28,6 @@ export interface LaunchServices extends RenderServices {
 export const LiveSpawnerServices: LaunchServices = {
 	readText: (path) => readFileSync(path, "utf8"),
 	env: (key) => process.env[key],
-	home: () => process.env.HOME ?? homedir(),
 	spawnProcess: (file, args, options) => {
 		const child = spawn(file, args, {
 			cwd: options.cwd,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { BUILTIN_AGENT_ENQUEUES } from "@pithos/pithos/builtins";
 import { SpawnerError } from "./errors.js";
 import { renderAgent } from "./spawner.js";
 
@@ -30,8 +31,7 @@ const agentsFile = (
 
 const fakeRenderServices = (agentsJson: string) => ({
 	readText: (path: string) => (path.endsWith("agents.json") ? agentsJson : "{{claim_command}}"),
-	env: () => undefined,
-	home: () => "/home/test",
+	env: (key: string) => (key === "PDX_DATA_DIR" ? "/tmp/pdx-data" : undefined),
 });
 
 describe("renderAgent", () => {
@@ -41,7 +41,10 @@ describe("renderAgent", () => {
 		["greed", "hitl", "design"],
 		["war", "afk", "execute"],
 	] as const)("renders required shape and claim command for %s", (agent, mode, capability) => {
-		const rendered = renderAgent({ ...base, agent, mode });
+		const rendered = renderAgent(
+			{ ...base, agent, mode },
+			fakeRenderServices(agentsFile(agent, mode, [capability], BUILTIN_AGENT_ENQUEUES[agent])),
+		);
 
 		expect(rendered).toMatchObject({
 			agent,

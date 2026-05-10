@@ -22,7 +22,7 @@ export type ParsedCommand =
 
 export interface ParsedPdxArgs {
 	readonly command: ParsedCommand;
-	readonly home: string | undefined;
+	readonly dataDir: string | undefined;
 	readonly intervalSecondsRaw: string | undefined;
 	readonly maxAfkRaw: string | undefined;
 }
@@ -250,7 +250,7 @@ const parseCommand = (
 export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxArgs, PdxError> =>
 	Effect.gen(function* () {
 		const commandArgs: string[] = [];
-		let home: string | undefined;
+		let dataDir: string | undefined;
 		let intervalSecondsRaw: string | undefined;
 		let maxAfkRaw: string | undefined;
 		let limitRaw: string | undefined;
@@ -270,8 +270,8 @@ export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxAr
 			}
 
 			switch (arg) {
-				case "--home": {
-					home = yield* parseOptionValue(args, index, "--home");
+				case "--data-dir": {
+					dataDir = yield* parseOptionValue(args, index, "--data-dir");
 					index += 1;
 					continue;
 				}
@@ -340,7 +340,7 @@ export const parsePdxArgs = (args: readonly string[]): Effect.Effect<ParsedPdxAr
 		);
 		return {
 			command,
-			home,
+			dataDir,
 			intervalSecondsRaw,
 			maxAfkRaw,
 		};

@@ -77,7 +77,7 @@ This is a destructive pre-v1 rewrite.
   - **Rationale:** Claim authorization is a durable invariant, not a template convention. Pre-v1 roster changes can be clean-break schema/seed updates.
 
 - **Decision:** AFK and HITL session logs use the same harness session-log mechanism as today.
-  - **Rationale:** `claude`, `claude --print`, `pi`, and `pi --print` write the normal harness session logs. The mode changes supervision, not log discovery.
+  - **Rationale:** The prior Pandora `status` script discovers Claude logs in `~/.claude/projects/**/<uuid>.jsonl` and Pi logs in `~/.pi/agent/sessions/**`. `claude`, `claude --print`, `pi`, and `pi --print` should remain inspectable by the same convention. The mode changes supervision, not log discovery.
 
 ## 4. Architecture
 
@@ -88,10 +88,10 @@ pdx open
   -> start pdx daemon in tmux target `pdx--daemon`
   -> daemon startup settlement:
        kill deterministic old HITL tmux sessions matching `^pdx--`
-       kill AFK orphans from pidfiles under `<home>/runs/<run-id>.pid`
+       kill AFK orphans from pidfiles under `<data-dir>/runs/<run-id>.pid`
        confirm old execution resources are gone
        pithos run cleanup all active built-in-agent runs with reason `daemon_start`
-  -> daemon upserts one long-lived `pdx` system run in global scope (`mode=afk`, `cwd=<pdx home>`)
+  -> daemon upserts one long-lived `pdx` system run in global scope (`mode=afk`, `cwd=<pdx data-dir>`)
   -> daemon starts one long-lived Pandora HITL run in global scope regardless of queue state
   -> Adam may chat directly with Pandora; Pandora records durable work by enqueueing tasks/artifacts
   -> Pandora claims `escalate` tasks when woken or when she checks the queue
@@ -141,7 +141,7 @@ Layer responsibilities:
 
 `@pithos/pithos` is the supervisor-facing integration boundary. `pdx` calls typed library operations directly for queue inspection and run/task mutations. The `pithos` CLI is the agent/operator boundary only; when this spec says `pithos run cleanup`, `pithos briefing`, or similar in pdx flows, it names the corresponding Pithos operation and semantics, not a required subprocess invocation.
 
-`pdx` has no persisted registry in MVP. On startup it does not adopt old sessions. It kills and confirms deterministic old tmux/process leftovers, cleans active built-in Pithos runs, and begins with a fresh in-memory registry. HITL leftovers are discovered with `tmux ls -F '#S'` filtered by `^pdx--`. AFK leftovers are discovered from pdx-owned pidfiles under `<home>/runs/<run-id>.pid`; pdx writes pidfiles at AFK launch and removes them during cleanup.
+`pdx` has no persisted registry in MVP. On startup it does not adopt old sessions. It kills and confirms deterministic old tmux/process leftovers, cleans active built-in Pithos runs, and begins with a fresh in-memory registry. HITL leftovers are discovered with `tmux ls -F '#S'` filtered by `^pdx--`. AFK leftovers are discovered from pdx-owned pidfiles under `<data-dir>/runs/<run-id>.pid`; pdx writes pidfiles at AFK launch and removes them during cleanup.
 
 No same-run resurrection exists. When an agent dies, pdx cleans up the old run and removes the registry entry; a later reconcile pass may spawn a fresh run that picks up durable state from Pithos and the filesystem/worktree.
 
@@ -158,7 +158,7 @@ Caps are counted from the in-memory registry, including `launching`, `live`, and
 
 Default reconcile interval is 5 seconds. `pdx open --interval-seconds <n>` remains available for tuning. There is no backoff in MVP.
 
-Spawn policy is intentionally simple in MVP: one spawn per reconcile tick, after lifecycle settlement, in seeded agent order (`pandora`, `toil`, `greed`, `war`). `repo` and `worktree` scopes use `scope.canonical_path` as cwd. `global` scope uses `<pdx home>` as cwd.
+Spawn policy is intentionally simple in MVP: one spawn per reconcile tick, after lifecycle settlement, in seeded agent order (`pandora`, `toil`, `greed`, `war`). `repo` and `worktree` scopes use `scope.canonical_path` as cwd. `global` scope uses `<pdx data-dir>` as cwd.
 
 The 30 second No-claim session timeout is a registry bootstrap rule, not a generic `runs.task_id IS NULL` rule. It applies only to non-Pandora registry entries that have never observed an initial claim. Once a run has ever held a task, later idle/null `runs.task_id` periods are not No-claim sessions.
 
@@ -499,11 +499,11 @@ Intentional abandon.
 Minimal operator/Pandora-facing API:
 
 ```text
-pdx open [--home <path>] [--interval-seconds <n>] [--max-afk <n>]
-pdx close [--home <path>]
-pdx status [--home <path>] [--json]
-pdx kill (--run <run-id> | --task <task-id>) --reason <text> [--home <path>]
-pdx logs show [--home <path>] [--limit <n> | --all] [--since <when>]
+pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>]
+pdx close [--data-dir <path>]
+pdx status [--data-dir <path>] [--json]
+pdx kill (--run <run-id> | --task <task-id>) --reason <text> [--data-dir <path>]
+pdx logs show [--data-dir <path>] [--limit <n> | --all] [--since <when>]
 ```
 
 `pdx status` must have JSON output. The exact shape is intentionally loose for MVP; Pandora can consume and adapt to the available fields. It must include top-level keys `daemon`, `registry`, `queue`, and `caps`. It should include at least:
@@ -559,7 +559,7 @@ pdx--<agent>__<scope-slug>--<session-short>
 
 AFK agents use the same `logical_name` convention in logs/status even though they do not have tmux sessions.
 
-Supervisor logs are structured JSONL at an internal pdx-controlled path such as `<home>/pdx.jsonl`. Use structured `Effect.log*` output and spans per project rules; do not write unstructured daemon logs. Every supervisor log line includes at least `ts`, `level`, `span`, and `msg`.
+Supervisor logs are structured JSONL at an internal pdx-controlled path such as `<data-dir>/pdx.jsonl`. Use structured `Effect.log*` output and spans per project rules; do not write unstructured daemon logs. Every supervisor log line includes at least `ts`, `level`, `span`, and `msg`.
 
 ## 9. Spawner Interface
 
@@ -666,7 +666,11 @@ Responsibilities:
 - build harness argv/env
 - launch AFK foreground process and return process metadata to pdx
 - launch HITL tmux session and return tmux metadata to pdx
-- return session log path using the harness' normal session-log convention
+- return the expected harness-native session log path using the same discovery convention as the prior Pandora `status` script
+
+AFK harness argv must run the harness in non-interactive print mode so a stdio-detached process actually performs one task and exits. For Pi and Claude, AFK argv includes `--print "Claim and process one task, then exit."`; HITL argv omits `--print` and runs interactively in tmux. Claude session IDs must be valid UUIDs.
+
+Session logs follow the harness-native discovery convention from the prior Pandora `status` script: Claude logs live under `~/.claude/projects/**/<uuid>.jsonl`; Pi logs live under `~/.pi/agent/sessions/**/<uuid>.jsonl` or `~/.pi/agent/sessions/**/*_<uuid>.jsonl`. `pdx` records the expected path in launch metadata, but the Pithos DB and supervisor logs remain under `--data-dir`.
 
 Dev/internal CLI may expose:
 
@@ -694,7 +698,7 @@ message injection
 lifecycle cleanup/reclaim
 ```
 
-AFK and HITL session-log discovery follows the same harness session-log convention as the current interactive harnesses.
+AFK and HITL session-log discovery follows the harness-native convention used by the prior Pandora `status` script.
 
 ## 10. Agent Contract
 

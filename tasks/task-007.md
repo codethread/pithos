@@ -2,7 +2,7 @@
 
 ## What to build
 
-Implement `pdx kill (--run <run-id> | --task <task-id>) --reason <text> [--home <path>]` in `packages/pdx/` per spec §8.
+Implement `pdx kill (--run <run-id> | --task <task-id>) --reason <text> [--data-dir <path>]` in `packages/pdx/` per spec §8.
 
 Sequence:
 

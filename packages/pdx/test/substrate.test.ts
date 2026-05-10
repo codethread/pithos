@@ -42,14 +42,14 @@ import {
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
 
-const configInput = (home: string | undefined, envHome: string | undefined) => ({
-	home,
+const configInput = (dataDir: string | undefined, envHome: string | undefined) => ({
+	dataDir,
 	envHome,
 	daemonEntrypoint: "/tmp/pdx-dev",
 });
 
-const parseConfig = (home: string, envHome = "/tmp/user-home") =>
-	run(parsePdxConfig(configInput(home, envHome)));
+const parseConfig = (dataDir: string, envHome = "/tmp/user-home") =>
+	run(parsePdxConfig(configInput(dataDir, envHome)));
 
 interface ReadyTaskInput {
 	readonly scope_id: string;
@@ -169,7 +169,7 @@ const upsertPandora = (registry: RegistryService) =>
 	});
 
 const runSpawnTick = async (input: {
-	readonly home: string;
+	readonly dataDir: string;
 	readonly registry: RegistryService;
 	readonly pithos: PithosClientService;
 	readonly launches: unknown[];
@@ -178,7 +178,7 @@ const runSpawnTick = async (input: {
 	readonly sessionId?: string;
 }) =>
 	run(
-		reconcileTick(await parseConfig(input.home), input.maxAfk).pipe(
+		reconcileTick(await parseConfig(input.dataDir), input.maxAfk).pipe(
 			Effect.provideService(Registry, input.registry),
 			Effect.provideService(PithosClient, PithosClient.of(input.pithos)),
 			Effect.provideService(
@@ -217,31 +217,31 @@ const runSpawnTick = async (input: {
 	);
 
 describe("pdx substrate", () => {
-	it("derives config paths from home", async () => {
+	it("derives config paths from data dir", async () => {
 		const config = await parseConfig("/tmp/pdx-home");
 		expect(config).toMatchObject({
-			home: "/tmp/pdx-home",
+			dataDir: "/tmp/pdx-home",
 			socketPath: "/tmp/pdx-home/pdx.sock",
 			logPath: "/tmp/pdx-home/pdx.jsonl",
 			runsDir: "/tmp/pdx-home/runs",
 		});
 	});
 
-	it("uses explicit --home without HOME env", async () => {
+	it("uses explicit --data-dir without HOME env", async () => {
 		const config = await run(parsePdxConfig(configInput("/tmp/pdx-home", undefined)));
-		expect(config.home).toBe("/tmp/pdx-home");
+		expect(config.dataDir).toBe("/tmp/pdx-home");
 	});
 
-	it("fails config parse when --home and HOME env are both missing", async () => {
+	it("fails config parse when --data-dir and HOME env are both missing", async () => {
 		await expect(run(parsePdxConfig({ daemonEntrypoint: "/tmp/pdx-dev" }))).rejects.toThrow(
-			/missing required home/,
+			/missing required data dir/,
 		);
 	});
 
 	it("parses pure CLI args and rejects unknown/extra values", async () => {
 		const parsed = await run(
 			parsePdxArgs([
-				"--home",
+				"--data-dir",
 				"/tmp/pdx-home",
 				"logs",
 				"show",
@@ -254,7 +254,7 @@ describe("pdx substrate", () => {
 			]),
 		);
 		expect(parsed).toMatchObject({
-			home: "/tmp/pdx-home",
+			dataDir: "/tmp/pdx-home",
 			command: {
 				kind: "logs-show",
 				limit: 10,
@@ -381,8 +381,8 @@ describe("pdx substrate", () => {
 	});
 
 	it("open starts daemon tmux session with configured entrypoint", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
-		const config = await parseConfig(home);
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const config = await parseConfig(dataDir);
 		let commandInput:
 			| { readonly target: string; readonly cwd: string; readonly command: readonly string[] }
 			| undefined;
@@ -423,12 +423,12 @@ describe("pdx substrate", () => {
 		}
 		expect(commandInput).toEqual({
 			target: DAEMON_TARGET,
-			cwd: config.home,
+			cwd: config.dataDir,
 			command: [
 				config.daemonEntrypoint,
 				"daemon",
-				"--home",
-				config.home,
+				"--data-dir",
+				config.dataDir,
 				"--max-afk",
 				"4",
 				"--interval-seconds",
@@ -437,7 +437,7 @@ describe("pdx substrate", () => {
 		});
 	});
 	it("daemon startup creates runs dir, system run, Pandora singleton, and excludes pdx from caps", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const mkdirs: string[] = [];
 		const pithosCalls: string[] = [];
 		const fs = FileSystem.of({
@@ -488,7 +488,7 @@ describe("pdx substrate", () => {
 			isAlive: () => Effect.succeed(true),
 			kill: () => Effect.void,
 		});
-		const config = await parseConfig(home);
+		const config = await parseConfig(dataDir);
 		const handle = await run(
 			runDaemon(config, 1, 5).pipe(
 				Effect.provideService(FileSystem, fs),
@@ -503,7 +503,7 @@ describe("pdx substrate", () => {
 			),
 		);
 		await run(handle.close);
-		expect(mkdirs).toEqual([`${home}/runs`]);
+		expect(mkdirs).toEqual([`${dataDir}/runs`]);
 		expect(pithosCalls).toContain("scopeUpsert:global");
 		expect(pithosCalls).toContain(`runUpsert:pdx:${PDX_SYSTEM_RUN_ID}`);
 		expect(pithosCalls).toContain("runUpsert:pandora:run_pandora_1");
@@ -512,8 +512,8 @@ describe("pdx substrate", () => {
 	});
 
 	it("daemon startup settles HITL and AFK orphans before creating system run", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
-		const config = await parseConfig(home);
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const config = await parseConfig(dataDir);
 		const events: string[] = [];
 		const removes: string[] = [];
 		const fs = FileSystem.of({
@@ -591,7 +591,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("daemon stop replies after cleanup and closes the IPC socket explicitly", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const pithosCalls: string[] = [];
 		const removes: string[] = [];
 		const fs = FileSystem.of({
@@ -632,7 +632,7 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
-		const config = await parseConfig(home);
+		const config = await parseConfig(dataDir);
 		const handle = await run(
 			runDaemon(config, 4, 5).pipe(
 				Effect.provideService(FileSystem, fs),
@@ -883,7 +883,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("reconcile cleans dead Pandora and respawns with a fresh run id", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(
 			registry.upsert({
@@ -921,7 +921,7 @@ describe("pdx substrate", () => {
 		});
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		await run(
-			reconcileTick(await parseConfig(home)).pipe(
+			reconcileTick(await parseConfig(dataDir)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(Ids, ids),
@@ -1095,7 +1095,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("kill retry keeps terminating entry until resource is gone", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(
 			registry.upsert({
@@ -1158,7 +1158,7 @@ describe("pdx substrate", () => {
 			pasteBuffer: () => Effect.void,
 		});
 		await run(
-			reconcileTick(await parseConfig(home)).pipe(
+			reconcileTick(await parseConfig(dataDir)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(Ids, ids),
@@ -1175,7 +1175,7 @@ describe("pdx substrate", () => {
 			expect.objectContaining({ runId: "run_kill", state: "terminating" }),
 		);
 		await run(
-			reconcileTick(await parseConfig(home)).pipe(
+			reconcileTick(await parseConfig(dataDir)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(Ids, ids),
@@ -1193,7 +1193,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("reconcile spawns one non-Pandora agent in seeded order without pre-claiming", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(
 			registry.upsert({
@@ -1239,7 +1239,7 @@ describe("pdx substrate", () => {
 			pasteBuffer: () => Effect.void,
 		});
 		await run(
-			reconcileTick(await parseConfig(home)).pipe(
+			reconcileTick(await parseConfig(dataDir)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(Ids, ids),
@@ -1263,7 +1263,7 @@ describe("pdx substrate", () => {
 				runId: "run_toil",
 				sessionId: "session_toil",
 				scopeId: "global",
-				cwd: home,
+				cwd: dataDir,
 			}),
 		]);
 		expect(await run(registry.list)).toContainEqual(
@@ -1274,7 +1274,7 @@ describe("pdx substrate", () => {
 	it.each(["launching", "live", "terminating"] as const)(
 		"per-agent/scope cap blocks spawn while existing entry is %s",
 		async (state) => {
-			const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+			const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 			const registry = await run(makeRegistry);
 			await run(upsertPandora(registry));
 			await run(
@@ -1294,7 +1294,7 @@ describe("pdx substrate", () => {
 			const calls: string[] = [];
 			const launches: unknown[] = [];
 			await runSpawnTick({
-				home,
+				dataDir,
 				registry,
 				pithos: makePithos(calls, [
 					{
@@ -1314,7 +1314,7 @@ describe("pdx substrate", () => {
 	it.each(["launching", "live", "terminating"] as const)(
 		"global AFK cap blocks non-Pandora spawns while existing entry is %s",
 		async (state) => {
-			const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+			const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 			const registry = await run(makeRegistry);
 			await run(upsertPandora(registry));
 			await run(
@@ -1334,7 +1334,7 @@ describe("pdx substrate", () => {
 			const calls: string[] = [];
 			const launches: unknown[] = [];
 			await runSpawnTick({
-				home,
+				dataDir,
 				registry,
 				maxAfk: 1,
 				pithos: makePithos(calls, [
@@ -1353,7 +1353,7 @@ describe("pdx substrate", () => {
 	);
 
 	it("global AFK cap releases after entry removal", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		await run(
@@ -1370,7 +1370,7 @@ describe("pdx substrate", () => {
 		await run(registry.remove("run_toil_existing"));
 		const launches: unknown[] = [];
 		await runSpawnTick({
-			home,
+			dataDir,
 			registry,
 			maxAfk: 1,
 			pithos: makePithos(
@@ -1390,12 +1390,12 @@ describe("pdx substrate", () => {
 	});
 
 	it("Pandora does not consume global AFK capacity", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		const launches: unknown[] = [];
 		await runSpawnTick({
-			home,
+			dataDir,
 			registry,
 			maxAfk: 1,
 			runId: "run_toil",
@@ -1410,7 +1410,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("derives non-Pandora cwd from repo and worktree scopes", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(
 			registry.upsert({
@@ -1460,7 +1460,7 @@ describe("pdx substrate", () => {
 			pasteBuffer: () => Effect.void,
 		});
 		await run(
-			reconcileTick(await parseConfig(home)).pipe(
+			reconcileTick(await parseConfig(dataDir)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(Ids, ids),
@@ -1477,7 +1477,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("spawns War for repo execute work with repo cwd", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(
 			registry.upsert({
@@ -1523,7 +1523,7 @@ describe("pdx substrate", () => {
 			pasteBuffer: () => Effect.void,
 		});
 		await run(
-			reconcileTick(await parseConfig(home)).pipe(
+			reconcileTick(await parseConfig(dataDir)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(Ids, ids),
@@ -1547,7 +1547,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("AFK launch writes pidfile and cleanup removes it after Pithos cleanup", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		const writes: string[] = [];
@@ -1596,7 +1596,7 @@ describe("pdx substrate", () => {
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
-		const config = await parseConfig(home);
+		const config = await parseConfig(dataDir);
 		await run(
 			reconcileTick(config).pipe(
 				Effect.provideService(Registry, registry),
@@ -1631,8 +1631,8 @@ describe("pdx substrate", () => {
 	});
 
 	it("no-claim timeout kills, confirms gone, times out, then removes entry and pidfile", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
-		const config = await parseConfig(home);
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const config = await parseConfig(dataDir);
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		await run(
@@ -1702,7 +1702,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("no-claim timeout excludes Pandora and previously claimed idle runs", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		await run(
@@ -1720,7 +1720,7 @@ describe("pdx substrate", () => {
 		);
 		const calls: string[] = [];
 		await runSpawnTick({
-			home,
+			dataDir,
 			registry,
 			pithos: makePithos(calls),
 			launches: [],
@@ -1730,7 +1730,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("no-claim timeout preserves entry when Pithos rejects a held task", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		await run(
@@ -1754,7 +1754,7 @@ describe("pdx substrate", () => {
 		});
 		await expect(
 			run(
-				reconcileTick(await parseConfig(home)).pipe(
+				reconcileTick(await parseConfig(dataDir)).pipe(
 					Effect.provideService(Registry, registry),
 					Effect.provideService(
 						PithosClient,
@@ -1791,7 +1791,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("HITL launch writes no pidfile", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		const writes: string[] = [];
@@ -1807,7 +1807,7 @@ describe("pdx substrate", () => {
 			],
 		);
 		await run(
-			reconcileTick(await parseConfig(home)).pipe(
+			reconcileTick(await parseConfig(dataDir)).pipe(
 				Effect.provideService(Registry, registry),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(
@@ -1845,7 +1845,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("does not remove AFK pidfile when cleanup fails after process exit", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		await run(
@@ -1862,7 +1862,7 @@ describe("pdx substrate", () => {
 		const removes: string[] = [];
 		await expect(
 			run(
-				reconcileTick(await parseConfig(home)).pipe(
+				reconcileTick(await parseConfig(dataDir)).pipe(
 					Effect.provideService(Registry, registry),
 					Effect.provideService(
 						PithosClient,
@@ -1907,7 +1907,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("AFK pidfile write failure rolls back launch before surfacing the error", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		const pithosCalls: string[] = [];
@@ -1928,7 +1928,7 @@ describe("pdx substrate", () => {
 		});
 		await expect(
 			run(
-				reconcileTick(await parseConfig(home)).pipe(
+				reconcileTick(await parseConfig(dataDir)).pipe(
 					Effect.provideService(Registry, registry),
 					Effect.provideService(
 						PithosClient,
@@ -1986,7 +1986,7 @@ describe("pdx substrate", () => {
 	});
 
 	it("wakes Pandora exactly when global escalate work transitions to claimable", async () => {
-		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
 		let ready: readonly ReadyTaskInput[] = [];
@@ -2011,7 +2011,7 @@ describe("pdx substrate", () => {
 		});
 		const tick = async () =>
 			run(
-				reconcileTick(await parseConfig(home)).pipe(
+				reconcileTick(await parseConfig(dataDir)).pipe(
 					Effect.provideService(Registry, registry),
 					Effect.provideService(PithosClient, pithos),
 					Effect.provideService(

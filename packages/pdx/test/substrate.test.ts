@@ -146,6 +146,8 @@ const alwaysLiveProcess = Process.of({
 
 const testLog = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 
+const testClock = Clock.of({ nowIso: Effect.succeed("2026-05-09T00:00:31.000Z") });
+
 const noopFs = FileSystem.of({
 	appendFile: () => Effect.void,
 	readFile: () => Effect.succeed(""),
@@ -209,6 +211,7 @@ const runSpawnTick = async (input: {
 			Effect.provideService(Process, alwaysLiveProcess),
 			Effect.provideService(SupervisorLog, testLog),
 			Effect.provideService(FileSystem, noopFs),
+			Effect.provideService(Clock, testClock),
 		),
 	);
 
@@ -367,6 +370,7 @@ describe("pdx substrate", () => {
 				openPdx(await parseConfig("/tmp/pdx-home"), 4, 5).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
+					Effect.provideService(Clock, testClock),
 					Effect.provideService(PithosClient, pithos),
 				),
 			),
@@ -406,6 +410,7 @@ describe("pdx substrate", () => {
 				openPdx(config, 4, 5).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
+					Effect.provideService(Clock, testClock),
 					Effect.provideService(PithosClient, pithos),
 				),
 			);
@@ -482,6 +487,7 @@ describe("pdx substrate", () => {
 		const handle = await run(
 			runDaemon(config, 1, 5).pipe(
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(Registry, registry),
@@ -545,6 +551,7 @@ describe("pdx substrate", () => {
 		const handle = await run(
 			runDaemon(config, 4, 5).pipe(
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(Registry, registry),
@@ -565,6 +572,7 @@ describe("pdx substrate", () => {
 				pid: 456,
 			}),
 		);
+
 		const response = await run(requestIpc(config.socketPath, { kind: "stop" }));
 		await run(handle.shutdown);
 		await run(handle.close);
@@ -599,6 +607,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(pithosCalls).toEqual(["init"]);
@@ -634,6 +643,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(PithosClient, pithos),
 					Effect.provideService(FileSystem, fs),
+					Effect.provideService(Clock, testClock),
 				),
 			),
 		).rejects.toThrow("tmux exploded");
@@ -659,6 +669,7 @@ describe("pdx substrate", () => {
 		const defaultOutput = await run(
 			logsShowPdx(config, { limit: undefined, all: false, since: undefined }).pipe(
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(defaultOutput).toBe(`${lines.slice(1).join("\n")}\n`);
@@ -666,12 +677,14 @@ describe("pdx substrate", () => {
 		const limitOutput = await run(
 			logsShowPdx(config, { limit: 2, all: false, since: undefined }).pipe(
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(limitOutput).toBe(`${lines.slice(-2).join("\n")}\n`);
 		const allOutput = await run(
 			logsShowPdx(config, { limit: undefined, all: true, since: undefined }).pipe(
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(allOutput).toBe(`${lines.join("\n")}\n`);
@@ -738,6 +751,7 @@ describe("pdx substrate", () => {
 			run(
 				logsShowPdx(config, { limit: undefined, all: true, since: undefined }).pipe(
 					Effect.provideService(FileSystem, corruptFs),
+					Effect.provideService(Clock, testClock),
 				),
 			),
 		).rejects.toThrow("corrupt supervisor log JSONL");
@@ -752,6 +766,7 @@ describe("pdx substrate", () => {
 			run(
 				logsShowPdx(config, { limit: undefined, all: true, since: undefined }).pipe(
 					Effect.provideService(FileSystem, blankLineFs),
+					Effect.provideService(Clock, testClock),
 				),
 			),
 		).rejects.toThrow("corrupt supervisor log JSONL");
@@ -823,6 +838,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		const entries = await run(registry.list);
@@ -1060,6 +1076,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Process, process),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(kills).toEqual(["SIGKILL"]);
@@ -1076,6 +1093,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Process, process),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
@@ -1138,6 +1156,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(pithosCalls).toContain("runUpsert:toil:run_toil");
@@ -1175,6 +1194,9 @@ describe("pdx substrate", () => {
 					mode: "afk",
 					state,
 					logicalName: "pdx--war-existing",
+					...(state === "live"
+						? { launchedAt: "2026-05-09T00:00:31.000Z", everClaimed: false }
+						: {}),
 					pid: 123,
 				}),
 			);
@@ -1212,6 +1234,9 @@ describe("pdx substrate", () => {
 					mode: "afk",
 					state,
 					logicalName: "pdx--toil-existing",
+					...(state === "live"
+						? { launchedAt: "2026-05-09T00:00:31.000Z", everClaimed: false }
+						: {}),
 					pid: 123,
 				}),
 			);
@@ -1352,6 +1377,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(launches).toEqual([
@@ -1414,6 +1440,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
 				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(launches).toEqual([
@@ -1488,6 +1515,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Process, process),
 				Effect.provideService(SupervisorLog, testLog),
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(writes).toEqual([`${config.runsDir}/run_war.pid:456\n`]);
@@ -1504,9 +1532,169 @@ describe("pdx substrate", () => {
 				),
 				Effect.provideService(SupervisorLog, testLog),
 				Effect.provideService(FileSystem, fs),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(removes).toContain(`${config.runsDir}/run_war.pid`);
+	});
+
+	it("no-claim timeout kills, confirms gone, times out, then removes entry and pidfile", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const config = await parseConfig(home);
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_timeout",
+				agent: "war",
+				scopeId: "scope_repo",
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--war",
+				launchedAt: "2026-05-09T00:00:00.000Z",
+				everClaimed: false,
+				pid: 456,
+			}),
+		);
+		const calls: string[] = [];
+		const removes: string[] = [];
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.sync(() => !calls.includes("kill:456:SIGTERM")),
+			kill: (pid, signal) => Effect.sync(() => calls.push(`kill:${pid}:${signal}`)),
+		});
+		await run(
+			reconcileTick(config).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(
+					PithosClient,
+					makePithos(calls, [], {
+						runTimeout: (input) =>
+							Effect.sync(() => calls.push(`runTimeout:${input.runId}:${input.reason}`)),
+					}),
+				),
+				Effect.provideService(
+					Ids,
+					Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+				),
+				Effect.provideService(
+					Spawner,
+					Spawner.of({
+						launchAgent: () =>
+							Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+					}),
+				),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+				Effect.provideService(Process, process),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(
+					FileSystem,
+					FileSystem.of({
+						appendFile: () => Effect.void,
+						readFile: () => Effect.succeed(""),
+						mkdir: () => Effect.void,
+						writeFileAtomic: () => Effect.void,
+						removeFile: (path) => Effect.sync(() => removes.push(path)),
+					}),
+				),
+				Effect.provideService(Clock, testClock),
+			),
+		);
+		expect(calls.filter((call) => !call.startsWith("taskHeartbeat:"))).toEqual([
+			"kill:456:SIGTERM",
+			"runTimeout:run_timeout:no_claim_timeout",
+		]);
+		expect(removes).toContain(`${config.runsDir}/run_timeout.pid`);
+		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
+	});
+
+	it("no-claim timeout excludes Pandora and previously claimed idle runs", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_idle",
+				agent: "war",
+				scopeId: "scope_repo",
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--war",
+				launchedAt: "2026-05-09T00:00:00.000Z",
+				everClaimed: true,
+				pid: 456,
+			}),
+		);
+		const calls: string[] = [];
+		await runSpawnTick({
+			home,
+			registry,
+			pithos: makePithos(calls),
+			launches: [],
+		});
+		expect(calls).not.toContain("runTimeout:run_idle:no_claim_timeout");
+		expect(await run(registry.list)).toHaveLength(2);
+	});
+
+	it("no-claim timeout preserves entry when Pithos rejects a held task", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_held",
+				agent: "war",
+				scopeId: "scope_repo",
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--war",
+				launchedAt: "2026-05-09T00:00:00.000Z",
+				everClaimed: false,
+				pid: 456,
+			}),
+		);
+		const calls: string[] = [];
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.sync(() => !calls.includes("kill:456:SIGTERM")),
+			kill: (pid, signal) => Effect.sync(() => calls.push(`kill:${pid}:${signal}`)),
+		});
+		await expect(
+			run(
+				reconcileTick(await parseConfig(home)).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(
+						PithosClient,
+						makePithos(calls, [], {
+							runTimeout: () =>
+								Effect.fail(new PdxError({ code: "VALIDATION_ERROR", message: "held task" })),
+						}),
+					),
+					Effect.provideService(
+						Ids,
+						Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+					),
+					Effect.provideService(
+						Spawner,
+						Spawner.of({
+							launchAgent: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+						}),
+					),
+					Effect.provideService(Tmux, alwaysLiveTmux),
+					Effect.provideService(Process, process),
+					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, testClock),
+				),
+			),
+		).rejects.toThrow("held task");
+		expect(calls.filter((call) => !call.startsWith("taskHeartbeat:"))).toEqual([
+			"kill:456:SIGTERM",
+		]);
+		expect(await run(registry.list)).toEqual(
+			expect.arrayContaining([expect.objectContaining({ runId: "run_held", state: "live" })]),
+		);
 	});
 
 	it("HITL launch writes no pidfile", async () => {
@@ -1556,6 +1744,7 @@ describe("pdx substrate", () => {
 						removeFile: () => Effect.void,
 					}),
 				),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		expect(writes).toEqual([]);
@@ -1615,6 +1804,7 @@ describe("pdx substrate", () => {
 							removeFile: (path) => Effect.sync(() => removes.push(path)),
 						}),
 					),
+					Effect.provideService(Clock, testClock),
 				),
 			),
 		).rejects.toThrow("cleanup failed");
@@ -1677,6 +1867,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(Process, process),
 					Effect.provideService(SupervisorLog, testLog),
 					Effect.provideService(FileSystem, fs),
+					Effect.provideService(Clock, testClock),
 				),
 			),
 		).rejects.toThrow("pidfile write failed");
@@ -1691,6 +1882,7 @@ describe("pdx substrate", () => {
 		await run(
 			FileSystemLive.writeFileAtomic(path, "456\n").pipe(
 				Effect.provideService(FileSystem, FileSystemLive),
+				Effect.provideService(Clock, testClock),
 			),
 		);
 		await expect(readFile(path, "utf8")).resolves.toBe("456\n");

@@ -627,7 +627,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					msg: "removed dead entry",
 					data: { run_id: entry.runId },
 				});
-			} else {
+			} else if (entry.state === "live") {
 				const run = yield* pithos.runInspect({ runId: entry.runId });
 				const observedEntry = run.task_id === null ? entry : { ...entry, everClaimed: true };
 				if (observedEntry !== entry) {

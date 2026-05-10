@@ -200,12 +200,10 @@ Representative shapes:
 
 ```json
 {
-  "ok": true,
-  "summary": "implemented fix and verified substrate test",
-  "artifacts": ["artifact_123"],
-  "checks": [
-    { "name": "substrate.test.ts", "ok": true }
-  ]
+	"ok": true,
+	"summary": "implemented fix and verified substrate test",
+	"artifacts": ["artifact_123"],
+	"checks": [{ "name": "substrate.test.ts", "ok": true }]
 }
 ```
 

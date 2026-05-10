@@ -1,6 +1,6 @@
 # pdx Pandora singleton demo
 
-Replay after `pnpm run build` so `pdx`, `pithos-next`, and `pandora-spawn` are linked from this checkout.
+Replay after `pnpm run build` so `pdx`, `pithos`, and `pandora-spawn` are linked from this checkout.
 
 ```sh
 HOME_DIR=$(mktemp -d)

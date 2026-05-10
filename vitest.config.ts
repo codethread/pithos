@@ -10,15 +10,10 @@ export default defineConfig({
 			// code; this hook just keeps the reporter clean at runtime.
 			return false;
 		},
-		// CLI subprocess tests use spawnSync, which blocks the worker event loop
-		// past vitest's RPC ping window and surfaces as "Timeout calling
-		// onTaskUpdate" unhandled errors. They are framework noise, not test
-		// failures — ignore so the suite exits 0.
-		dangerouslyIgnoreUnhandledErrors: true,
 		projects: [
-			"packages/cli/vitest.unit.config.ts",
-			"packages/cli/vitest.integration.config.ts",
+			"packages/pithos/vitest.config.ts",
 			"packages/spawner/vitest.config.ts",
+			"packages/pdx/vitest.config.ts",
 		],
 	},
 });

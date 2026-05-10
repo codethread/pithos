@@ -2054,7 +2054,7 @@ describe("pdx substrate", () => {
 
 	it("Pandora template documents wakeup marker recognition", async () => {
 		const template = await readFile(
-			join(process.cwd(), "../spawner/templates/pandora.md.tmpl"),
+			new URL("../../spawner/templates/pandora.md.tmpl", import.meta.url),
 			"utf8",
 		);
 		expect(template).toContain("# wakeup: claimable escalate");

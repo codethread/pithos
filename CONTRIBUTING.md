@@ -14,7 +14,7 @@ pnpm install
 pnpm run build
 ```
 
-`pnpm run build` builds every workspace package and links the `pithos` and `pandora-spawn` bins onto global PATH via `package.json#bin`.
+`pnpm run build` builds every workspace package and links the `pithos`, `pdx`, and `pandora-spawn` bins onto global PATH via `package.json#bin`.
 
 ## Verify before every commit
 
@@ -56,7 +56,7 @@ All four must be green before every commit. No "leftover issues", no "next commi
 | --------------------------------------------------------- | ---------------------------------------------------------------- |
 | Understand the product, agent model, and architecture     | `README.md`                                                      |
 | Understand engineering rules (fail loudly, etc.)          | `AGENTS.md`                                                      |
-| Touch DB schema, CLI shape, or migrations                 | `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md`         |
+| Touch DB schema, CLI shape, or migrations                 | `packages/pithos/README.md`                                      |
 | Touch templates, hooks, harness wiring, or session status | `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md` |
 | Touch the Claude Code plugin manifest or hooks            | `packages/spawner/claude-plugin/README.md`                       |
 | Touch the Pi extension                                    | `packages/spawner/pi-extension/README.md`                        |
@@ -64,5 +64,4 @@ All four must be green before every commit. No "leftover issues", no "next commi
 
 Each package's `CONTRIBUTING.md` carries that package's quality bar and add-a-feature checklist:
 
-- `packages/cli/CONTRIBUTING.md` — full Effect quality bar (tagged errors, schemas at IO, structured logs).
 - `packages/spawner/CONTRIBUTING.md` — spawner package constraints, change checklist, and harness/template guidance.

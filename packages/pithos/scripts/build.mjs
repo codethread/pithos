@@ -9,7 +9,7 @@ const pkgRoot = resolve(__dirname, "..");
 const args = new Set(process.argv.slice(2));
 const dev = args.has("--dev");
 const run = args.has("--run");
-const outfile = resolve(pkgRoot, dev ? "bin/pithos-next-dev" : "bin/pithos-next");
+const outfile = resolve(pkgRoot, dev ? "bin/pithos-dev" : "bin/pithos");
 
 await esbuild.build({
 	entryPoints: [resolve(pkgRoot, "src/main.ts")],

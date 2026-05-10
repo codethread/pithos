@@ -14,7 +14,7 @@ import {
 	type Services,
 } from "../src/index.js";
 
-const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-next-")), "pithos.db");
+const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-")), "pithos.db");
 
 const services = (): Services & { stdout: string[]; stderr: string[] } => {
 	const stdout: string[] = [];

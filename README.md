@@ -12,7 +12,6 @@ Pandora's Box is a pre-v1 multi-agent orchestration system with three layers:
 pnpm install
 pnpm run build
 pithos --help
-pithos-next --help
 pdx --help
 pandora-spawn --help
 ```
@@ -44,12 +43,11 @@ pandora-spawn preview \
 
 ## Docs map
 
-| Path                                 | Purpose                                            |
-| ------------------------------------ | -------------------------------------------------- |
-| `UBIQUITOUS_LANGUAGE.md`             | Shared domain terms                                |
-| `specs/control-plane-supervision.md` | Pithos / Spawner / pdx control-plane contract      |
-| `specs/task-graph.md`                | Dependency and supersession graph semantics        |
-| `packages/spawner/README.md`         | Spawner library and preview CLI                    |
-| `packages/pdx/`                      | Local supervisor package                           |
-| `packages/pithos/`                   | New Pithos package under active cutover            |
-| `packages/cli/`                      | Existing Pithos CLI implementation pending cutover |
+| Path                                 | Purpose                                       |
+| ------------------------------------ | --------------------------------------------- |
+| `UBIQUITOUS_LANGUAGE.md`             | Shared domain terms                           |
+| `specs/control-plane-supervision.md` | Pithos / Spawner / pdx control-plane contract |
+| `specs/task-graph.md`                | Dependency and supersession graph semantics   |
+| `packages/spawner/README.md`         | Spawner library and preview CLI               |
+| `packages/pdx/`                      | Local supervisor package                      |
+| `packages/pithos/`                   | Pithos durable state library and CLI          |

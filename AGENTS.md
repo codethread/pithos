@@ -13,10 +13,10 @@ pithos --help
 Fast dev run without the full build/link pipeline:
 
 ```sh
-pnpm --filter @pithos/cli start --help
+pnpm --filter @pithos/pithos start --help
 ```
 
-`pnpm run build` builds all workspace packages and links the `pithos` and `pandora-spawn` bins onto the global PATH via `package.json#bin`. The package scripts use esbuild directly; no `tsx`.
+`pnpm run build` builds all workspace packages and links the `pithos`, `pdx`, and `pandora-spawn` bins onto the global PATH via `package.json#bin`. The package scripts use esbuild directly; no `tsx`.
 
 ## 1. Checks pass between commits
 
@@ -108,7 +108,7 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 ## Effect.ts
 
 - This codebase uses effect.ts heavily, the source for Effect is at `~/dev/vendor/effect`
-- Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness — see `packages/cli/src` for the pattern.
+- Use dependency injection for DB, clock, IDs, filesystem, process execution, and Claude harness — see `packages/pithos/src` for the pattern.
 - Runtime application code must not pluck process environment variables or filesystem state directly at arbitrary call sites. Parse expected environment into a typed Config service at the boundary, using Schema, then pass/use that service throughout.
 - Runtime filesystem/process IO must sit behind Effect services or project service interfaces with live and test implementations. Prefer `@effect/platform`/`@effect/platform-node` where it fits; add a small project service when it does not.
 - Raw Node modules such as `node:fs`, `node:process`, and `node:child_process` are acceptable in build scripts and live service implementations only, not in domain logic or command handlers.
@@ -118,7 +118,6 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 - `README.md`: project intro, agent model, delegation chain, and current architecture
 - `CONTRIBUTING.md`: build, verify, commit baseline, and doc map
 - `AGENTS.md`: non-negotiable rules beyond what can be enforced statically, injected transparently into agents
-- `packages/cli/README.md`, `packages/cli/CONTRIBUTING.md`: CLI surface, package quality bar, add-a-command checklist
 - `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md`: spawner surface, hook contract, session-log introspection, package constraints
 - Each `packages/<package>/` repeats this pattern, providing more granular details as scope narrows
 

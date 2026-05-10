@@ -11,7 +11,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"format": "oxfmt",
-		"build": "pnpm -r --if-present build && cd packages/cli && npm link && cd ../spawner && npm link && cd ../pithos && npm link && cd ../pdx && npm link",
+		"build": "pnpm -r --if-present build && cd packages/spawner && npm link && cd ../pithos && npm link && cd ../pdx && npm link",
 		"verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm run build",
 		"prepare": "husky"
 	},

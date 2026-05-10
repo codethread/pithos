@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"bin": {
-		"pithos-next": "./bin/pithos-next"
+		"pithos": "./bin/pithos"
 	},
 	"type": "module",
 	"exports": {
@@ -11,7 +11,7 @@
 		"./builtins": "./src/builtins.ts"
 	},
 	"scripts": {
-		"clean": "rimraf dist bin/pithos-next bin/pithos-next-dev *.tsbuildinfo",
+		"clean": "rimraf dist bin/pithos bin/pithos-dev *.tsbuildinfo",
 		"lint": "eslint .",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"test": "vitest run --config vitest.config.ts",

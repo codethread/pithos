@@ -6,10 +6,10 @@ Run from repo root after build/link:
 
 ```sh
 pnpm run build
-PITHOS_BIN=pithos-next docs/demos/pithos-backbone.sh
+PITHOS_BIN=pithos docs/demos/pithos-backbone.sh
 ```
 
-The script creates an isolated temporary `PITHOS_DB` and uses only public `pithos-next` CLI commands. It covers:
+The script creates an isolated temporary `PITHOS_DB` and uses only public `pithos` CLI commands. It covers:
 
 - `init --fresh`
 - global, repo, and worktree scope upserts

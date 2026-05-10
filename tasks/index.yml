@@ -162,7 +162,7 @@ tasks:
   - id: task-011
     title: "Slice 11: Cutover: retire `packages/cli/`, point `pithos` bin at new package"
     file: ./task-011.md
-    status: pending
+    status: complete
     blocked_by:
       - task-001e
       - task-002

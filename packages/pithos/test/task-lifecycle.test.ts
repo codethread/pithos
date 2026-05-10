@@ -7,7 +7,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { PithosError, makeEngine, type Services } from "../src/index.js";
 
-const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-next-task-")), "pithos.db");
+const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-task-")), "pithos.db");
 
 const services = (): Services => ({
 	fs: {

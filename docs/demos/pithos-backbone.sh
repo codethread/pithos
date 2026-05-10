@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PITHOS_BIN=${PITHOS_BIN:-pithos-next}
+PITHOS_BIN=${PITHOS_BIN:-pithos}
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/pithos-backbone.XXXXXX")
 export PITHOS_DB="$WORKDIR/pithos.db"
 

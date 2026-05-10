@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { makePithosCommand, type Services } from "../src/index.js";
 
-const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-next-cli-")), "pithos.db");
+const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-cli-")), "pithos.db");
 
 const services = (): Services & { stdout: string[]; stderr: string[] } => {
 	const stdout: string[] = [];
@@ -42,10 +42,10 @@ const runCli = async (args: readonly string[], dbPath: string) => {
 	const cli = Command.run(command, {
 		name: "Pithos",
 		version: "0.1.0",
-		executable: "pithos-next",
+		executable: "pithos",
 	});
 	await Effect.runPromise(
-		cli(["node", "pithos-next", ...args]).pipe(
+		cli(["node", "pithos", ...args]).pipe(
 			Effect.provide(Layer.mergeAll(NodeContext.layer, CliConfig.layer({ showBuiltIns: false }))),
 		),
 	);
@@ -56,7 +56,7 @@ afterEach(() => {
 	process.exitCode = undefined;
 });
 
-describe("pithos-next cli", () => {
+describe("pithos cli", () => {
 	it("dispatches nested scope/run/events commands with JSON output", async () => {
 		const dbPath = tempDb();
 		await runCli(["init", "--fresh"], dbPath);

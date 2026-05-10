@@ -59,7 +59,7 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 ### Component structure
 
 ```text
-packages/cli/src/
+packages/pithos/src/
   cli/commands.ts           # wire new flags and subcommands
   commands/
     enqueue.ts              # repeated --depends-on support
@@ -74,7 +74,7 @@ packages/cli/src/
     task-graph.ts           # shared graph queries, cycle checks, claimability helpers
 ```
 
-Tests live beside commands and in `packages/cli/test/` for end-to-end SQLite coverage.
+Tests live beside commands and in `packages/pithos/test/` for end-to-end SQLite coverage.
 
 ### Data flow
 
@@ -451,25 +451,25 @@ New/changed event contracts:
 
 - [x] Add unit tests for cycle detection, supersede preconditions, and graph rendering
 - [x] Add integration tests for cross-scope dependencies, claimability, and supersession rewrites
-- [x] Update `packages/cli/README.md` help surface and exit-code references
+- [x] Update `packages/pithos/README.md` help surface and exit-code references
 - [x] Run `pnpm verify`
 
 ## 7. Code Locations
 
-| File                                      | Change                                                                       |
-| ----------------------------------------- | ---------------------------------------------------------------------------- |
-| `packages/cli/src/db/migrate.ts`          | Modify: add `task_dependencies` and `task_supersessions` to initial schema   |
-| `packages/cli/src/db/rows.ts`             | Modify: add relationship row decoders                                        |
-| `packages/cli/src/domain/task-graph.ts`   | New: graph queries, summaries, cycle detection, claimability helpers         |
-| `packages/cli/src/commands/enqueue.ts`    | Modify: repeated `--depends-on`, dependency validation, event payload update |
-| `packages/cli/src/commands/claim.ts`      | Modify: dependency-aware claim query                                         |
-| `packages/cli/src/commands/inspect.ts`    | Modify: relationship-aware task inspect; add graph inspect                   |
-| `packages/cli/src/commands/briefing.ts`   | Modify: blocked vs ready sections and blocker rendering                      |
-| `packages/cli/src/commands/supersede.ts`  | New: replacement flow                                                        |
-| `packages/cli/src/cli/commands.ts`        | Modify: wire new flags and subcommands into `--help`                         |
-| `packages/cli/src/commands/*.test.ts`     | Modify/add: unit coverage for new command contracts                          |
-| `packages/cli/test/*.integration.test.ts` | Modify/add: end-to-end SQLite coverage for DAG + supersession flows          |
-| `packages/cli/README.md`                  | Modify: document new command surface and semantics                           |
+| File                                         | Change                                                                       |
+| -------------------------------------------- | ---------------------------------------------------------------------------- |
+| `packages/pithos/src/db/migrate.ts`          | Modify: add `task_dependencies` and `task_supersessions` to initial schema   |
+| `packages/pithos/src/db/rows.ts`             | Modify: add relationship row decoders                                        |
+| `packages/pithos/src/domain/task-graph.ts`   | New: graph queries, summaries, cycle detection, claimability helpers         |
+| `packages/pithos/src/commands/enqueue.ts`    | Modify: repeated `--depends-on`, dependency validation, event payload update |
+| `packages/pithos/src/commands/claim.ts`      | Modify: dependency-aware claim query                                         |
+| `packages/pithos/src/commands/inspect.ts`    | Modify: relationship-aware task inspect; add graph inspect                   |
+| `packages/pithos/src/commands/briefing.ts`   | Modify: blocked vs ready sections and blocker rendering                      |
+| `packages/pithos/src/commands/supersede.ts`  | New: replacement flow                                                        |
+| `packages/pithos/src/cli/commands.ts`        | Modify: wire new flags and subcommands into `--help`                         |
+| `packages/pithos/src/commands/*.test.ts`     | Modify/add: unit coverage for new command contracts                          |
+| `packages/pithos/test/*.integration.test.ts` | Modify/add: end-to-end SQLite coverage for DAG + supersession flows          |
+| `packages/pithos/README.md`                  | Modify: document new command surface and semantics                           |
 
 ## 8. Open Questions
 

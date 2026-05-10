@@ -448,7 +448,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 		{ agent: Options.text("agent").pipe(Options.optional) },
 		(o) => runCommand(ctx, { command: "briefing", agent: opt(o.agent) }),
 	);
-	return Command.make("pithos-next").pipe(
+	return Command.make("pithos").pipe(
 		Command.withSubcommands([init, scope, runParent, task, graph, events, briefing]),
 	);
 };

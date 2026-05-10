@@ -26,7 +26,7 @@ When this change is implemented, the same implementation change must also update
 
 Current payload APIs are inconsistent:
 
-- `task enqueue` optionally accepts `--body` or `--body-file`
+- `task enqueue` requires one of `--body` or `--body-file`
 - `task supersede` optionally accepts `--body` or `--body-file`
 - `task artifact add` optionally accepts `--body-file`, otherwise stores an empty body
 - `task complete` optionally accepts `--result-file`, otherwise stores `{}`
@@ -55,7 +55,6 @@ Desired design language:
 - No DB schema change
 - No new compound command that both adds an artifact and completes a task in one step
 - No change to non-payload flags such as `--run`, `--scope`, `--capability`, `--reason`, or `--token`
-- No requirement that `task complete` validate stdin as JSON text
 - No requirement that the typed engine API itself consume stdin directly
 
 ## Decisions
@@ -69,8 +68,8 @@ Desired design language:
 - **Decision:** `task artifact add` must receive an artifact body via `--stdin`.
   - **Rationale:** Empty artifacts are weak evidence and usually accidental. If an artifact is worth recording, it should carry content.
 
-- **Decision:** `task complete` may omit `--stdin` and continue to default `result_json` to `{}`.
-  - **Rationale:** The durable human-facing work product should live in artifacts. Completion result payloads are secondary machine-facing metadata, so "mark done without extra result payload" remains a valid operation.
+- **Decision:** `task complete` may omit `--stdin` and continue to default `result_json` to `{}`, but when `--stdin` is used it must decode to a valid JSON object.
+  - **Rationale:** The durable human-facing work product should live in artifacts. Completion result payloads are secondary machine-facing metadata, but they still cross an IO boundary into durable DB state and should remain machine-readable.
 
 - **Decision:** No command will accept more than one stdin document.
   - **Rationale:** Once multiple payload slots exist, stdin becomes ambiguous. Multi-document workflows should be modeled as multiple commands.
@@ -160,10 +159,10 @@ Rules:
 
 - `--stdin` is optional
 - without `--stdin`, the command must not read stdin and `result_json` remains `{}`
-- with `--stdin`, stdin text is stored verbatim in `result_json`
+- with `--stdin`, stdin must decode to a valid JSON object and that object becomes `result_json`
 - `--result-file` is removed
-- this change does not itself require stronger JSON validation than current behavior
 - `PITHOS_RUN_ID` resolution stays unchanged
+- `--run` may be omitted only when `PITHOS_RUN_ID` resolves it; otherwise fail loudly
 
 ## stdin behavior contract
 
@@ -178,21 +177,39 @@ Minimum service-level states are:
 Command behavior:
 
 - commands with required payloads (`enqueue`, `supersede`, `artifact add`) must require `--stdin`
-- if a required-payload command is invoked without `--stdin`, it fails with `VALIDATION_ERROR`
+- if a required-payload command is invoked without `--stdin`, the CLI boundary must normalize that to tagged `VALIDATION_ERROR` JSON rather than raw parser usage output
 - if `--stdin` is present for a required-payload command but no redirected stdin is available, it fails with `VALIDATION_ERROR`
-- if `--stdin` is present and decoded stdin length is `0`, it fails with `VALIDATION_ERROR`
+- if `--stdin` is present and decoded stdin length is `0`, it fails with tagged `VALIDATION_ERROR`
 - decoded stdin emptiness is checked by string length only; no trimming is applied
 - `task complete` without `--stdin` never reads stdin and always uses `{}`
-- `task complete --stdin` reads stdin exactly once and stores the decoded text verbatim in `result_json`
-- `task complete --stdin` fails with `VALIDATION_ERROR` when no redirected stdin is available
-- `task complete --stdin` fails with `VALIDATION_ERROR` when decoded stdin length is `0`
+- `task complete --stdin` reads stdin exactly once, parses the decoded text as JSON, and requires the parsed value to be a JSON object
+- `task complete --stdin` fails with tagged `VALIDATION_ERROR` when no redirected stdin is available
+- `task complete --stdin` fails with tagged `VALIDATION_ERROR` when decoded stdin length is `0`
+- `task complete --stdin` fails with tagged `VALIDATION_ERROR` when stdin is not valid JSON or is valid JSON but not an object
 - stdin read failures map to tagged `PithosError` values through the CLI/service boundary
 
 ## Result payload note
 
-Despite the column name `result_json`, this change does not introduce JSON parsing or validation for `task complete`. When `task complete --stdin` is used, the decoded stdin text is stored verbatim in `result_json`, even if that text is not valid JSON.
+`task complete --stdin` is for machine-readable completion metadata, not the human-facing work product. The stdin payload must parse as a JSON object. Long-form narrative output belongs in task artifacts.
 
-Any future change that wants `task complete` to require valid JSON should be specified separately.
+Representative shapes:
+
+```json
+{ "ok": true }
+```
+
+```json
+{
+  "ok": true,
+  "summary": "implemented fix and verified substrate test",
+  "artifacts": ["artifact_123"],
+  "checks": [
+    { "name": "substrate.test.ts", "ok": true }
+  ]
+}
+```
+
+Implementation note: Effect's schema pretty-print support can help render these example payloads into help text. Use a typed schema plus `Pretty.make(schema)` rather than hand-formatting example JSON strings.
 
 ## Examples
 
@@ -237,6 +254,7 @@ printf '%s\n' '{"verified":true,"tests":["substrate.test.ts"]}' | \
 - Docs and demos must replace `--body`, `--body-file`, and `--result-file` examples
 - `specs/control-plane-supervision.md` and `specs/task-graph.md` must be updated in the same implementation change
 - `packages/pithos/src/services.ts` plus live/test implementations must grow the stdin/input boundary needed for deterministic CLI behavior
+- Engine inputs for `task complete` and `task artifact add` should be revised to accept explicit resolved payload text rather than file-path indirection, so the CLI does not reintroduce hidden temp-file plumbing
 - Any wrapper or harness helper currently materializing temp files for payload submission can be simplified
 
 ## Explicitly rejected alternatives

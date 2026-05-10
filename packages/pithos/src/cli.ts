@@ -46,8 +46,7 @@ type CommandInput =
 			readonly scope: string;
 			readonly capability: Capability;
 			readonly title: string;
-			readonly body: string | undefined;
-			readonly bodyFile: string | undefined;
+			readonly stdin: boolean;
 			readonly runId: string | undefined;
 			readonly dependsOn: readonly string[];
 	  }
@@ -131,10 +130,44 @@ const fromEngine = <A>(thunk: () => A): Effect.Effect<A, PithosError> =>
 					}),
 	});
 
+const readRequiredStdinBody = (ctx: CliContext): Effect.Effect<string, PithosError> =>
+	Effect.gen(function* () {
+		const stdin = yield* ctx.services.input.readStdin();
+		switch (stdin._tag) {
+			case "NoRedirectedStdin":
+				return yield* Effect.fail(
+					new PithosError({
+						code: "VALIDATION_ERROR",
+						message: "--stdin requires redirected stdin",
+					}),
+				);
+			case "ReadFailure":
+				return yield* Effect.fail(stdin.error);
+			case "RedirectedText":
+				if (stdin.text.length === 0) {
+					return yield* Effect.fail(
+						new PithosError({ code: "VALIDATION_ERROR", message: "stdin body must be non-empty" }),
+					);
+				}
+				return stdin.text;
+		}
+	});
+
 const runCommand = (ctx: CliContext, input: CommandInput) =>
 	Effect.gen(function* () {
-		const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
 		const writeJson = (value: unknown) => ctx.services.output.write(json(value));
+		const enqueueBody =
+			input.command === "task.enqueue"
+				? input.stdin
+					? yield* readRequiredStdinBody(ctx)
+					: yield* Effect.fail(
+							new PithosError({
+								code: "VALIDATION_ERROR",
+								message: "task enqueue requires --stdin",
+							}),
+						)
+				: undefined;
+		const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
 		const result = yield* fromEngine(() => {
 			switch (input.command) {
 				case "init":
@@ -154,7 +187,7 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "events.tail":
 					return engine.eventsTail({ limit: input.limit });
 				case "task.enqueue":
-					return engine.enqueue(input);
+					return engine.enqueue({ ...input, body: enqueueBody, bodyFile: undefined });
 				case "task.claim":
 					return engine.claim(input);
 				case "task.heartbeat":
@@ -276,8 +309,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 			scope: Options.text("scope"),
 			capability,
 			title: Options.text("title"),
-			body: Options.text("body").pipe(Options.optional),
-			bodyFile: Options.text("body-file").pipe(Options.optional),
+			stdin: Options.boolean("stdin"),
 			runId: Options.text("run").pipe(Options.optional),
 			dependsOn: Options.text("depends-on").pipe(Options.repeated),
 		},
@@ -287,8 +319,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				scope: o.scope,
 				capability: o.capability,
 				title: o.title,
-				body: opt(o.body),
-				bodyFile: opt(o.bodyFile),
+				stdin: o.stdin,
 				runId: opt(o.runId),
 				dependsOn: o.dependsOn,
 			}),

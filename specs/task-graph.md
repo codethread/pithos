@@ -173,7 +173,7 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 | Command                           | Change           | Contract                                                                                                                                                                                                                                 |
 | --------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pithos task enqueue`             | Modify           | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. Requires a resolved run, non-empty body, known capability, and `agent_enqueues` authorization.                              |
+| `pithos task enqueue`             | Modify           | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, and `agent_enqueues` authorization.               |
 | `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
 | `pithos task inspect <id>`        | Expand output    | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links.                                                                                                               |
 | `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                     |
@@ -185,14 +185,14 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 New flag surface:
 
-| Flag                                   | Description                                                    | Default                       |
-| -------------------------------------- | -------------------------------------------------------------- | ----------------------------- | ---------- | ------------------------------ | -------- |
-| `--scope <scope-id>`                   | Scope for the new task                                         | required                      |
-| `--capability <triage                  | design                                                         | execute                       | escalate>` | Capability for matching agents | required |
-| `--title <title>`                      | Human-readable title for the task                              | required                      |
-| `--body <text>` / `--body-file <path>` | Task body                                                      | required                      |
-| `--run <run-id>`                       | Creating run; defaults from `PITHOS_RUN_ID` for spawned agents | required after env resolution |
-| `--depends-on <task-id>`               | Dependency edge to an existing task; repeatable                | none                          |
+| Flag                     | Description                                                    | Default                       |
+| ------------------------ | -------------------------------------------------------------- | ----------------------------- | ---------- | ------------------------------ | -------- |
+| `--scope <scope-id>`     | Scope for the new task                                         | required                      |
+| `--capability <triage    | design                                                         | execute                       | escalate>` | Capability for matching agents | required |
+| `--title <title>`        | Human-readable title for the task                              | required                      |
+| `--stdin`                | Read task body from redirected stdin                           | required                      |
+| `--run <run-id>`         | Creating run; defaults from `PITHOS_RUN_ID` for spawned agents | required after env resolution |
+| `--depends-on <task-id>` | Dependency edge to an existing task; repeatable                | none                          |
 
 Behavioral rules:
 
@@ -202,7 +202,7 @@ Behavioral rules:
 - duplicate dependency IDs are rejected with `VALIDATION_ERROR`
 - the creating run must exist and its agent kind must be authorized in `agent_enqueues` for the requested capability
 - manual/operator enqueue without a resolved run is not exposed
-- body must be non-empty; capability-specific scope/body rules from `control-plane-supervision.md` apply
+- `--stdin` is required, stdin must be redirected, and decoded body length must be non-zero; capability-specific scope/body rules from `control-plane-supervision.md` apply
 - the transaction must fail if the resulting graph would contain a cycle
 - `task.created` event payload must include `depends_on_task_ids`
 

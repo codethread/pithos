@@ -1,15 +1,21 @@
 import { CliConfig, Command } from "@effect/cli";
 import { NodeContext } from "@effect/platform-node";
+import Database from "better-sqlite3";
 import { Effect, Layer } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { makePithosCommand, type Services } from "../src/index.js";
+import { makePithosCommand, PithosError, type Services } from "../src/index.js";
 
 const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-cli-")), "pithos.db");
 
-const services = (): Services & { stdout: string[]; stderr: string[] } => {
+const services = (
+	stdin:
+		| { readonly _tag: "NoRedirectedStdin" }
+		| { readonly _tag: "RedirectedText"; readonly text: string }
+		| { readonly _tag: "ReadFailure"; readonly error: PithosError } = { _tag: "NoRedirectedStdin" },
+): Services & { stdout: string[]; stderr: string[] } => {
 	const stdout: string[] = [];
 	const stderr: string[] = [];
 	return {
@@ -18,6 +24,9 @@ const services = (): Services & { stdout: string[]; stderr: string[] } => {
 		fs: {
 			readText: () => Effect.succeed("body"),
 			removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
+		},
+		input: {
+			readStdin: () => Effect.succeed(stdin),
 		},
 		output: {
 			write: (text) => Effect.sync(() => void stdout.push(text)),
@@ -28,9 +37,13 @@ const services = (): Services & { stdout: string[]; stderr: string[] } => {
 	};
 };
 
-const runCli = async (args: readonly string[], dbPath: string) => {
+const runCli = async (
+	args: readonly string[],
+	dbPath: string,
+	stdin?: Parameters<typeof services>[0],
+) => {
 	process.exitCode = undefined;
-	const svc = services();
+	const svc = services(stdin);
 	let configRead = false;
 	const command = makePithosCommand({
 		config: () => {
@@ -183,6 +196,148 @@ describe("pithos cli", () => {
 			},
 		]);
 		expect(result.exitCode).toBe(3);
+	});
+
+	it("enqueues multiline task bodies from explicit stdin", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await runCli(
+			[
+				"run",
+				"upsert",
+				"--agent",
+				"pandora",
+				"--mode",
+				"hitl",
+				"--scope",
+				"global",
+				"--cwd",
+				"/tmp",
+				"--session-id",
+				"session",
+				"--harness-kind",
+				"pi",
+				"--session-log-path",
+				"/tmp/session.jsonl",
+				"--run",
+				"run_pandora",
+			],
+			dbPath,
+		);
+
+		const enqueue = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"stdin task",
+				"--stdin",
+				"--run",
+				"run_pandora",
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "line 1\nline 2\n" },
+		);
+		const created = JSON.parse(enqueue.stdout[0] ?? "") as { task: { id: string } };
+		const inspect = await runCli(["task", "inspect", created.task.id], dbPath);
+		const inspected = JSON.parse(inspect.stdout[0] ?? "") as {
+			readonly ok: true;
+			readonly dependencies: readonly unknown[];
+			readonly task: { readonly title: string };
+		};
+		expect(inspected).toMatchObject({
+			ok: true,
+			dependencies: [],
+		});
+		expect(inspected.dependencies).toEqual([]);
+		expect(inspected.task.title).toBe("stdin task");
+		const db = new Database(dbPath, { readonly: true });
+		try {
+			expect(db.prepare("SELECT body FROM tasks WHERE id = ?").pluck().get(created.task.id)).toBe(
+				"line 1\nline 2\n",
+			);
+		} finally {
+			db.close();
+		}
+	});
+
+	it("returns validation JSON when enqueue omits --stdin", async () => {
+		const result = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"missing stdin",
+			],
+			tempDb(),
+		);
+		expect(JSON.parse(result.stderr[0] ?? "")).toMatchObject({
+			ok: false,
+			error: { code: "VALIDATION_ERROR" },
+		});
+		expect(result.exitCode).toBe(2);
+		expect(result.configRead).toBe(false);
+	});
+
+	it("validates required stdin availability and non-empty content", async () => {
+		for (const stdin of [
+			{ _tag: "NoRedirectedStdin" as const },
+			{ _tag: "RedirectedText" as const, text: "" },
+		]) {
+			const result = await runCli(
+				[
+					"task",
+					"enqueue",
+					"--scope",
+					"global",
+					"--capability",
+					"triage",
+					"--title",
+					"bad stdin",
+					"--stdin",
+				],
+				tempDb(),
+				stdin,
+			);
+			expect(JSON.parse(result.stderr[0] ?? "")).toMatchObject({
+				ok: false,
+				error: { code: "VALIDATION_ERROR" },
+			});
+			expect(result.exitCode).toBe(2);
+		}
+	});
+
+	it("surfaces stdin read failures as tagged JSON", async () => {
+		const result = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"read failure",
+				"--stdin",
+			],
+			tempDb(),
+			{
+				_tag: "ReadFailure",
+				error: new PithosError({ code: "USER_ERROR", message: "stdin exploded" }),
+			},
+		);
+		expect(JSON.parse(result.stderr[0] ?? "")).toEqual({
+			ok: false,
+			error: { code: "USER_ERROR", message: "stdin exploded" },
+		});
 	});
 
 	it("renders help without loading config", async () => {

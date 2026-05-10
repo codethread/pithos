@@ -250,7 +250,7 @@ tasks:
   - id: task-015
     description: "Enqueue stdin payload CLI slice"
     task_file: ./task-015.md
-    status: pending
+    status: complete
     blocked_by:
       - task-013c
   - id: task-016

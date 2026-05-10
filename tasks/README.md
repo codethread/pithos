@@ -46,3 +46,9 @@ Append notes here. Do not rewrite earlier notes.
 - Existing `tasks/index.yml` uses the repository's established `task-015` string-id dependency style rather than integer ids; new stdin tasks keep that id style but use the requested `description` and `task_file` fields for AFK loop consumption.
 - Task 015 is intentionally blocked by completed concrete prerequisite `task-013c`, not epic `task-013`, so the stdin payload work is the next runnable AFK task while older pending follow-up tasks remain blocked on the epic placeholder.
 - Deep review found that delaying all spec sync to task 019 would leave implemented behavior conflicting with normative specs. Tasks 015-018 now each require updating command-contract text for the command they change; task 019 remains the final audit/status/docs/prompts sync.
+
+### Task 015: Enqueue stdin payload CLI slice — 2026-05-10
+
+- Added the shared Pithos input service with typed stdin states and wired `task enqueue --stdin` through the CLI boundary before calling the existing engine string-body API.
+- Updated enqueue command-contract specs to remove `--body`/`--body-file` from current enqueue behavior; supersede/artifact/complete payload flags remain for their later slices.
+- Validation run: `pnpm verify`.

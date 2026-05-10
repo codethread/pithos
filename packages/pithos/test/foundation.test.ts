@@ -26,6 +26,7 @@ const services = (): Services & { stdout: string[]; stderr: string[] } => {
 			readText: () => Effect.succeed("body"),
 			removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
 		},
+		input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
 		output: {
 			write: (text) => Effect.sync(() => void stdout.push(text)),
 			writeError: (text) => Effect.sync(() => void stderr.push(text)),

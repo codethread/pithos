@@ -173,6 +173,7 @@ const pithosTestServices = (): PithosServices => {
 	let counter = 0;
 	return {
 		fs: { readText: () => Effect.succeed("{}"), removeFile: () => Effect.void },
+		input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
 		output: { write: () => Effect.void, writeError: () => Effect.void },
 		ids: {
 			make: (prefix) =>

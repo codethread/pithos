@@ -25,5 +25,5 @@ export {
 	type TaskRow,
 } from "./rows.js";
 export { PithosError, exitCodeFor, type ErrorCode } from "./errors.js";
-export { liveServices } from "./services.js";
-export type { FsService, OutputService, Services } from "./services.js";
+export { liveServices, LiveServicesLayer, PithosServices } from "./services.js";
+export type { FsService, InputService, OutputService, Services, StdinState } from "./services.js";

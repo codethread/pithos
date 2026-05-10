@@ -381,7 +381,7 @@ pithos task enqueue \
   --scope <scope-id> \
   --capability <triage|design|execute|escalate> \
   --title <text> \
-  (--body <text> | --body-file <path>) \
+  --stdin \
   [--run <run-id>] \
   [--depends-on <task-id> ...]
 

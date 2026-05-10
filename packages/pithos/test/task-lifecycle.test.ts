@@ -14,6 +14,7 @@ const services = (): Services => ({
 		readText: () => Effect.succeed(JSON.stringify({ ok: true })),
 		removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
 	},
+	input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
 	output: { write: () => Effect.void, writeError: () => Effect.void },
 	ids: {
 		make: (prefix) => Effect.succeed(`${prefix}_${randomUUID().replaceAll("-", "").slice(0, 8)}`),

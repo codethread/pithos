@@ -22,8 +22,18 @@ export interface OutputService {
 	readonly writeError: (text: string) => Effect.Effect<void>;
 }
 
+export type StdinState =
+	| { readonly _tag: "NoRedirectedStdin" }
+	| { readonly _tag: "RedirectedText"; readonly text: string }
+	| { readonly _tag: "ReadFailure"; readonly error: PithosError };
+
+export interface InputService {
+	readonly readStdin: () => Effect.Effect<StdinState>;
+}
+
 export interface Services {
 	readonly fs: FsService;
+	readonly input: InputService;
 	readonly output: OutputService;
 	readonly ids: IdService;
 	readonly clock: ClockService;
@@ -50,6 +60,23 @@ export const liveServices: Services = {
 						code: "USER_ERROR",
 						message: error instanceof Error ? error.message : String(error),
 					}),
+			}),
+	},
+	input: {
+		readStdin: () =>
+			Effect.sync(() => {
+				if (process.stdin.isTTY) return { _tag: "NoRedirectedStdin" as const };
+				try {
+					return { _tag: "RedirectedText" as const, text: readFileSync(0, "utf8") };
+				} catch (error) {
+					return {
+						_tag: "ReadFailure" as const,
+						error: new PithosError({
+							code: "USER_ERROR",
+							message: error instanceof Error ? error.message : String(error),
+						}),
+					};
+				}
 			}),
 	},
 	output: {

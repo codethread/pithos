@@ -107,7 +107,7 @@ export interface Engine {
 		readonly taskId: string;
 		readonly runId: string | undefined;
 		readonly token: number;
-		readonly resultFile: string | undefined;
+		readonly resultJson: string;
 	}) => { readonly ok: true; readonly task: { readonly id: string; readonly status: "done" } };
 	readonly failTask: (input: {
 		readonly taskId: string;
@@ -1259,12 +1259,10 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			})();
 			return { ok: true, status: "running" };
 		}),
-	complete: ({ taskId, runId, token, resultFile }) =>
+	complete: ({ taskId, runId, token, resultJson }) =>
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);
 			liveRun(db, actorRunId);
-			const resultJson =
-				resultFile === undefined ? "{}" : Effect.runSync(ctx.services.fs.readText(resultFile));
 			db.transaction(() => {
 				const result = db
 					.prepare(sql`

@@ -66,3 +66,10 @@ Append notes here. Do not rewrite earlier notes.
 - Public artifact add CLI no longer defines `--body-file`; engine artifact add no longer has file-path indirection or empty-body omission behavior.
 - Updated artifact add command contracts in `control-plane-supervision.md` and `control-plane-design-notes.md`.
 - Validation run: `pnpm verify`.
+
+### Task 018: Complete stdin result metadata — 2026-05-10
+
+- `task complete` now defaults to `{}` without touching the input service, and `--stdin` reads once at the CLI boundary before passing resolved result metadata to the engine.
+- Public complete CLI no longer defines `--result-file`; stdin metadata must parse as a JSON object and non-object JSON is rejected with tagged validation JSON.
+- Updated complete command contracts in `control-plane-supervision.md` and `control-plane-design-notes.md`.
+- Validation run: `pnpm verify`.

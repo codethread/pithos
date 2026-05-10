@@ -136,7 +136,7 @@ pithos task enqueue \
   --scope <scope-id> \
   --capability <triage|design|execute|escalate> \
   --title <text> \
-  (--body <text> | --body-file <path>) \
+  --stdin \
   [--run <run-id>] \
   [--depends-on <task-id> ...]
 
@@ -157,9 +157,9 @@ pithos task heartbeat \
 
 pithos task complete \
   <task-id> \
-  --run <run-id> \
+  [--run <run-id>] \
   --token <n> \
-  [--result-file <path>]
+  [--stdin]
 
 pithos task fail \
   <task-id> \
@@ -172,7 +172,7 @@ pithos task supersede \
   --run <run-id> \
   --reason <text> \
   [--title <text>] \
-  [(--body <text> | --body-file <path>)] \
+  --stdin \
   [--scope <scope-id>] \
   [--capability <triage|design|execute|escalate>]
 

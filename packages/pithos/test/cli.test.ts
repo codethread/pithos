@@ -17,19 +17,25 @@ const services = (
 		| { readonly _tag: "NoRedirectedStdin" }
 		| { readonly _tag: "RedirectedText"; readonly text: string }
 		| { readonly _tag: "ReadFailure"; readonly error: PithosError } = { _tag: "NoRedirectedStdin" },
-): Services & { stdout: string[]; stderr: string[] } => {
+): Services & { stdout: string[]; stderr: string[]; stdinReads: () => number } => {
 	const stdout: string[] = [];
 	const stderr: string[] = [];
+	let stdinReadCount = 0;
 
 	return {
 		stdout,
 		stderr,
+		stdinReads: () => stdinReadCount,
 		fs: {
 			readText: () => Effect.succeed("body"),
 			removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
 		},
 		input: {
-			readStdin: () => Effect.succeed(stdin),
+			readStdin: () =>
+				Effect.sync(() => {
+					stdinReadCount += 1;
+					return stdin;
+				}),
 		},
 		output: {
 			write: (text) => Effect.sync(() => void stdout.push(text)),
@@ -93,6 +99,31 @@ const upsertRun = (dbPath: string, runId: string, agent = "toil") =>
 		dbPath,
 	);
 
+const upsertRepoWarRun = (dbPath: string) =>
+	runCli(
+		[
+			"run",
+			"upsert",
+			"--agent",
+			"war",
+			"--mode",
+			"afk",
+			"--scope",
+			"repo:/tmp/pithos-cli",
+			"--cwd",
+			"/tmp/pithos-cli",
+			"--session-id",
+			"session_run_war",
+			"--harness-kind",
+			"pi",
+			"--session-log-path",
+			"/tmp/session_run_war.jsonl",
+			"--run",
+			"run_war",
+		],
+		dbPath,
+	);
+
 const enqueueGlobalTriage = async (dbPath: string, runId: string, title: string, body: string) => {
 	const result = await runCli(
 		[
@@ -132,6 +163,15 @@ const artifactBody = (dbPath: string, artifactId: string) => {
 	}
 };
 
+const taskResultJson = (dbPath: string, taskId: string) => {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return db.prepare("SELECT result_json FROM tasks WHERE id = ?").pluck().get(taskId);
+	} finally {
+		db.close();
+	}
+};
+
 const artifactAddArgs = (taskId = "task_missing", extra: readonly string[] = []) => [
 	"task",
 	"artifact",
@@ -142,6 +182,17 @@ const artifactAddArgs = (taskId = "task_missing", extra: readonly string[] = [])
 	"note",
 	"--title",
 	"evidence",
+	...extra,
+];
+
+const completeArgs = (taskId: string, extra: readonly string[] = []) => [
+	"task",
+	"complete",
+	taskId,
+	"--run",
+	"run_war",
+	"--token",
+	"1",
 	...extra,
 ];
 
@@ -426,6 +477,129 @@ describe("pithos cli", () => {
 		await expect(
 			runCli(artifactAddArgs("task_missing", ["--body-file", "payload.txt"]), tempDb()),
 		).rejects.toThrow("--body-file");
+	});
+
+	it("completes with default result metadata without reading stdin", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await runCli(["scope", "upsert", "--kind", "repo", "--path", "/tmp/pithos-cli"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		await upsertRepoWarRun(dbPath);
+		const taskId = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"repo:/tmp/pithos-cli",
+				"--capability",
+				"execute",
+				"--title",
+				"complete task",
+				"--stdin",
+				"--run",
+				"run_toil",
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "body" },
+		).then((r) => (JSON.parse(r.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(
+			[
+				"task",
+				"claim",
+				"--run",
+				"run_war",
+				"--scope",
+				"repo:/tmp/pithos-cli",
+				"--capability",
+				"execute",
+			],
+			dbPath,
+		);
+
+		const result = await runCli(completeArgs(taskId), dbPath, {
+			_tag: "ReadFailure",
+			error: new PithosError({ code: "USER_ERROR", message: "stdin should not be read" }),
+		});
+
+		expect(JSON.parse(result.stdout[0] ?? "")).toEqual({
+			ok: true,
+			task: { id: taskId, status: "done" },
+		});
+		expect(result.stdinReads()).toBe(0);
+		expect(taskResultJson(dbPath, taskId)).toBe("{}");
+	});
+
+	it("completes with JSON object result metadata from explicit stdin", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await runCli(["scope", "upsert", "--kind", "repo", "--path", "/tmp/pithos-cli"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		await upsertRepoWarRun(dbPath);
+		const taskId = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"repo:/tmp/pithos-cli",
+				"--capability",
+				"execute",
+				"--title",
+				"metadata task",
+				"--stdin",
+				"--run",
+				"run_toil",
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "body" },
+		).then((r) => (JSON.parse(r.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(
+			[
+				"task",
+				"claim",
+				"--run",
+				"run_war",
+				"--scope",
+				"repo:/tmp/pithos-cli",
+				"--capability",
+				"execute",
+			],
+			dbPath,
+		);
+
+		const result = await runCli(completeArgs(taskId, ["--stdin"]), dbPath, {
+			_tag: "RedirectedText",
+			text: '{"ok":true}',
+		});
+
+		expect(result.stdinReads()).toBe(1);
+		expect(taskResultJson(dbPath, taskId)).toBe('{"ok":true}');
+	});
+
+	it("validates complete stdin availability, empty content, invalid JSON, and non-object JSON", async () => {
+		for (const stdin of [
+			{ _tag: "NoRedirectedStdin" as const },
+			{ _tag: "RedirectedText" as const, text: "" },
+			{ _tag: "RedirectedText" as const, text: "not json" },
+			{ _tag: "RedirectedText" as const, text: "[]" },
+			{ _tag: "RedirectedText" as const, text: '"text"' },
+			{ _tag: "RedirectedText" as const, text: "1" },
+			{ _tag: "RedirectedText" as const, text: "true" },
+			{ _tag: "RedirectedText" as const, text: "null" },
+		]) {
+			const result = await runCli(completeArgs("task_missing", ["--stdin"]), tempDb(), stdin);
+			expect(JSON.parse(result.stderr[0] ?? "")).toMatchObject({
+				ok: false,
+				error: { code: "VALIDATION_ERROR" },
+			});
+			expect(result.exitCode).toBe(2);
+			expect(result.configRead).toBe(false);
+		}
+	});
+
+	it("returns parser errors for removed complete result-file flag", async () => {
+		await expect(
+			runCli(completeArgs("task_missing", ["--result-file", "result.json"]), tempDb()),
+		).rejects.toThrow("--result-file");
 	});
 
 	it("returns validation JSON when enqueue omits --stdin", async () => {

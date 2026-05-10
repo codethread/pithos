@@ -268,7 +268,7 @@ tasks:
   - id: task-018
     description: "Complete stdin result metadata"
     task_file: ./task-018.md
-    status: pending
+    status: complete
     blocked_by:
       - task-015
   - id: task-019

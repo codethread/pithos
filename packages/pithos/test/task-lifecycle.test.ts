@@ -93,7 +93,7 @@ describe("task lifecycle", () => {
 		expect(artifact.ok).toBe(true);
 		expect(artifact.artifact.id.startsWith("artifact_")).toBe(true);
 		expect(
-			engine.complete({ taskId: enq.task.id, runId: "run_war", token: 1, resultFile: undefined }),
+			engine.complete({ taskId: enq.task.id, runId: "run_war", token: 1, resultJson: "{}" }),
 		).toEqual({ ok: true, task: { id: enq.task.id, status: "done" } });
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(enq.task.id)).toBe("done");
@@ -219,7 +219,7 @@ describe("task lifecycle", () => {
 			PithosError,
 		);
 		expect(() =>
-			engine.complete({ taskId: task, runId: "run_war", token: 99, resultFile: undefined }),
+			engine.complete({ taskId: task, runId: "run_war", token: 99, resultJson: "{}" }),
 		).toThrow(PithosError);
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(task)).toBe("claimed");
@@ -386,7 +386,7 @@ describe("task lifecycle", () => {
 		}).task.id;
 		engine.claim({ runId: "run_war2", scope: repo, capability: "execute" });
 		expect(() => engine.runTimeout({ runId: "run_war2", reason: "no claim" })).toThrow(PithosError);
-		engine.complete({ taskId: held, runId: "run_war2", token: 1, resultFile: undefined });
+		engine.complete({ taskId: held, runId: "run_war2", token: 1, resultJson: "{}" });
 		expect(() => engine.runTimeout({ runId: "run_war2", reason: "no claim" })).toThrow(PithosError);
 	});
 

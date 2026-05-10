@@ -67,7 +67,7 @@ type CommandInput =
 			readonly taskId: string;
 			readonly runId: string | undefined;
 			readonly token: number;
-			readonly resultFile: string | undefined;
+			readonly stdin: boolean;
 	  }
 	| {
 			readonly command: "task.fail";
@@ -129,13 +129,8 @@ const fromEngine = <A>(thunk: () => A): Effect.Effect<A, PithosError> =>
 					}),
 	});
 
-const readRequiredStdinBody = (ctx: CliContext, command: string, enabled: boolean) =>
+const readStdinText = (ctx: CliContext) =>
 	Effect.gen(function* () {
-		if (!enabled) {
-			return yield* Effect.fail(
-				new PithosError({ code: "VALIDATION_ERROR", message: `${command} requires --stdin` }),
-			);
-		}
 		const stdin = yield* ctx.services.input.readStdin();
 		switch (stdin._tag) {
 			case "NoRedirectedStdin":
@@ -157,6 +152,42 @@ const readRequiredStdinBody = (ctx: CliContext, command: string, enabled: boolea
 		}
 	});
 
+const readRequiredStdinBody = (ctx: CliContext, command: string, enabled: boolean) =>
+	Effect.gen(function* () {
+		if (!enabled) {
+			return yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: `${command} requires --stdin` }),
+			);
+		}
+		return yield* readStdinText(ctx);
+	});
+
+const parseResultMetadata = (text: string): string => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text) as unknown;
+	} catch {
+		throw new PithosError({
+			code: "VALIDATION_ERROR",
+			message: "stdin result metadata must be valid JSON object",
+		});
+	}
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new PithosError({
+			code: "VALIDATION_ERROR",
+			message: "stdin result metadata must be a JSON object",
+		});
+	}
+	return JSON.stringify(parsed);
+};
+
+const readOptionalResultMetadata = (ctx: CliContext, enabled: boolean) =>
+	Effect.gen(function* () {
+		if (!enabled) return "{}";
+		const text = yield* readStdinText(ctx);
+		return yield* fromEngine(() => parseResultMetadata(text));
+	});
+
 const runCommand = (ctx: CliContext, input: CommandInput) =>
 	Effect.gen(function* () {
 		const writeJson = (value: unknown) => ctx.services.output.write(json(value));
@@ -171,6 +202,10 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 		const artifactBody =
 			input.command === "task.artifact.add"
 				? yield* readRequiredStdinBody(ctx, "task artifact add", input.stdin)
+				: undefined;
+		const completeResult =
+			input.command === "task.complete"
+				? yield* readOptionalResultMetadata(ctx, input.stdin)
 				: undefined;
 		const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
 		const result = yield* fromEngine(() => {
@@ -198,7 +233,7 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "task.heartbeat":
 					return engine.heartbeat(input);
 				case "task.complete":
-					return engine.complete(input);
+					return engine.complete({ ...input, resultJson: completeResult! });
 				case "task.fail":
 					return engine.failTask(input);
 				case "task.artifact.add":
@@ -361,7 +396,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 			taskId: Args.text({ name: "task-id" }),
 			runId: Options.text("run").pipe(Options.optional),
 			token: Options.integer("token"),
-			resultFile: Options.text("result-file").pipe(Options.optional),
+			stdin: Options.boolean("stdin"),
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -369,7 +404,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				taskId: o.taskId,
 				runId: opt(o.runId),
 				token: o.token,
-				resultFile: opt(o.resultFile),
+				stdin: o.stdin,
 			}),
 	);
 	const taskFail = Command.make(

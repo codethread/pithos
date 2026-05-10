@@ -400,7 +400,7 @@ pithos task heartbeat \
 
 # Heartbeat records liveness/observability. With --task and --token, it may advance that held task from claimed to running. No hook names, lease extension, or CLI throttling exist in MVP.
 
-pithos task complete <task-id> --run <run-id> --token <n> [--result-file <path>]
+pithos task complete <task-id> [--run <run-id>] --token <n> [--stdin]
 
 pithos task fail <task-id> --run <run-id> --token <n> --reason <text>
 

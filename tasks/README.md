@@ -52,3 +52,10 @@ Append notes here. Do not rewrite earlier notes.
 - Added the shared Pithos input service with typed stdin states and wired `task enqueue --stdin` through the CLI boundary before calling the existing engine string-body API.
 - Updated enqueue command-contract specs to remove `--body`/`--body-file` from current enqueue behavior; supersede/artifact/complete payload flags remain for their later slices.
 - Validation run: `pnpm verify`.
+
+### Task 016: Supersede stdin replacement body — 2026-05-10
+
+- `task supersede` now resolves replacement body from explicit `--stdin` at the CLI boundary and emits tagged validation JSON before config/DB access when `--stdin` is omitted or invalid.
+- Public supersede CLI no longer defines `--body` or `--body-file`; the in-process engine API still accepts explicit body/bodyFile for non-CLI callers while the CLI always passes stdin text.
+- Updated normative supersede command contracts in `control-plane-supervision.md` and `task-graph.md`.
+- Validation run: `pnpm verify`.

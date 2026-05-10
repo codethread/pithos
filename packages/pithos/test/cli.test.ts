@@ -10,6 +10,8 @@ import { makePithosCommand, PithosError, type Services } from "../src/index.js";
 
 const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-cli-")), "pithos.db");
 
+let idCounter = 0;
+
 const services = (
 	stdin:
 		| { readonly _tag: "NoRedirectedStdin" }
@@ -18,6 +20,7 @@ const services = (
 ): Services & { stdout: string[]; stderr: string[] } => {
 	const stdout: string[] = [];
 	const stderr: string[] = [];
+
 	return {
 		stdout,
 		stderr,
@@ -32,7 +35,7 @@ const services = (
 			write: (text) => Effect.sync(() => void stdout.push(text)),
 			writeError: (text) => Effect.sync(() => void stderr.push(text)),
 		},
-		ids: { make: (prefix) => Effect.succeed(`${prefix}_cli_${stdout.length}_${stderr.length}`) },
+		ids: { make: (prefix) => Effect.sync(() => `${prefix}_cli_${idCounter++}`) },
 		clock: { nowIso: () => Effect.succeed("2026-05-08T00:00:00.000Z") },
 	};
 };
@@ -63,6 +66,61 @@ const runCli = async (
 		),
 	);
 	return { ...svc, configRead, exitCode: process.exitCode };
+};
+
+const upsertRun = (dbPath: string, runId: string, agent = "toil") =>
+	runCli(
+		[
+			"run",
+			"upsert",
+			"--agent",
+			agent,
+			"--mode",
+			agent === "pandora" ? "hitl" : "afk",
+			"--scope",
+			"global",
+			"--cwd",
+			"/tmp",
+			"--session-id",
+			`session_${runId}`,
+			"--harness-kind",
+			"pi",
+			"--session-log-path",
+			`/tmp/session_${runId}.jsonl`,
+			"--run",
+			runId,
+		],
+		dbPath,
+	);
+
+const enqueueGlobalTriage = async (dbPath: string, runId: string, title: string, body: string) => {
+	const result = await runCli(
+		[
+			"task",
+			"enqueue",
+			"--scope",
+			"global",
+			"--capability",
+			"triage",
+			"--title",
+			title,
+			"--stdin",
+			"--run",
+			runId,
+		],
+		dbPath,
+		{ _tag: "RedirectedText", text: body },
+	);
+	return (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id;
+};
+
+const taskBody = (dbPath: string, taskId: string) => {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return db.prepare("SELECT body FROM tasks WHERE id = ?").pluck().get(taskId);
+	} finally {
+		db.close();
+	}
 };
 
 afterEach(() => {
@@ -201,67 +259,93 @@ describe("pithos cli", () => {
 	it("enqueues multiline task bodies from explicit stdin", async () => {
 		const dbPath = tempDb();
 		await runCli(["init", "--fresh"], dbPath);
-		await runCli(
-			[
-				"run",
-				"upsert",
-				"--agent",
-				"pandora",
-				"--mode",
-				"hitl",
-				"--scope",
-				"global",
-				"--cwd",
-				"/tmp",
-				"--session-id",
-				"session",
-				"--harness-kind",
-				"pi",
-				"--session-log-path",
-				"/tmp/session.jsonl",
-				"--run",
-				"run_pandora",
-			],
+		await upsertRun(dbPath, "run_pandora", "pandora");
+		const taskId = await enqueueGlobalTriage(
 			dbPath,
+			"run_pandora",
+			"stdin task",
+			"line 1\nline 2\n",
 		);
 
-		const enqueue = await runCli(
-			[
-				"task",
-				"enqueue",
-				"--scope",
-				"global",
-				"--capability",
-				"triage",
-				"--title",
-				"stdin task",
-				"--stdin",
-				"--run",
-				"run_pandora",
-			],
-			dbPath,
-			{ _tag: "RedirectedText", text: "line 1\nline 2\n" },
-		);
-		const created = JSON.parse(enqueue.stdout[0] ?? "") as { task: { id: string } };
-		const inspect = await runCli(["task", "inspect", created.task.id], dbPath);
+		const inspect = await runCli(["task", "inspect", taskId], dbPath);
 		const inspected = JSON.parse(inspect.stdout[0] ?? "") as {
 			readonly ok: true;
 			readonly dependencies: readonly unknown[];
 			readonly task: { readonly title: string };
 		};
-		expect(inspected).toMatchObject({
-			ok: true,
-			dependencies: [],
-		});
-		expect(inspected.dependencies).toEqual([]);
+		expect(inspected).toMatchObject({ ok: true, dependencies: [] });
 		expect(inspected.task.title).toBe("stdin task");
-		const db = new Database(dbPath, { readonly: true });
-		try {
-			expect(db.prepare("SELECT body FROM tasks WHERE id = ?").pluck().get(created.task.id)).toBe(
-				"line 1\nline 2\n",
+		expect(taskBody(dbPath, taskId)).toBe("line 1\nline 2\n");
+	});
+
+	it("supersedes with explicit stdin replacement body", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		const originalTaskId = await enqueueGlobalTriage(dbPath, "run_toil", "old task", "old body");
+
+		const replacement = await runCli(
+			[
+				"task",
+				"supersede",
+				originalTaskId,
+				"--reason",
+				"replace body",
+				"--title",
+				"new task",
+				"--stdin",
+				"--run",
+				"run_toil",
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "new body\n" },
+		);
+		const replacementTaskId = (JSON.parse(replacement.stdout[0] ?? "") as { task: { id: string } })
+			.task.id;
+		expect(taskBody(dbPath, replacementTaskId)).toBe("new body\n");
+		expect(taskBody(dbPath, originalTaskId)).toBe("old body");
+	});
+
+	it("returns validation JSON when supersede omits --stdin", async () => {
+		const result = await runCli(
+			["task", "supersede", "task_missing", "--reason", "replace body"],
+			tempDb(),
+		);
+		expect(JSON.parse(result.stderr[0] ?? "")).toMatchObject({
+			ok: false,
+			error: { code: "VALIDATION_ERROR" },
+		});
+		expect(result.exitCode).toBe(2);
+		expect(result.configRead).toBe(false);
+	});
+
+	it("validates supersede stdin availability and non-empty content", async () => {
+		for (const stdin of [
+			{ _tag: "NoRedirectedStdin" as const },
+			{ _tag: "RedirectedText" as const, text: "" },
+		]) {
+			const result = await runCli(
+				["task", "supersede", "task_missing", "--reason", "replace body", "--stdin"],
+				tempDb(),
+				stdin,
 			);
-		} finally {
-			db.close();
+			expect(JSON.parse(result.stderr[0] ?? "")).toMatchObject({
+				ok: false,
+				error: { code: "VALIDATION_ERROR" },
+			});
+			expect(result.exitCode).toBe(2);
+			expect(result.configRead).toBe(false);
+		}
+	});
+
+	it("returns parser errors for removed supersede body flags", async () => {
+		for (const flag of ["--body", "--body-file"] as const) {
+			await expect(
+				runCli(
+					["task", "supersede", "task_missing", "--reason", "replace body", flag, "payload"],
+					tempDb(),
+				),
+			).rejects.toThrow(flag);
 		}
 	});
 

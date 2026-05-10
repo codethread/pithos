@@ -97,8 +97,7 @@ type CommandInput =
 			readonly runId: string | undefined;
 			readonly reason: string;
 			readonly title: string | undefined;
-			readonly body: string | undefined;
-			readonly bodyFile: string | undefined;
+			readonly stdin: boolean;
 			readonly scope: string | undefined;
 			readonly capability: Capability | undefined;
 	  }
@@ -130,8 +129,13 @@ const fromEngine = <A>(thunk: () => A): Effect.Effect<A, PithosError> =>
 					}),
 	});
 
-const readRequiredStdinBody = (ctx: CliContext): Effect.Effect<string, PithosError> =>
+const readRequiredStdinBody = (ctx: CliContext, command: string, enabled: boolean) =>
 	Effect.gen(function* () {
+		if (!enabled) {
+			return yield* Effect.fail(
+				new PithosError({ code: "VALIDATION_ERROR", message: `${command} requires --stdin` }),
+			);
+		}
 		const stdin = yield* ctx.services.input.readStdin();
 		switch (stdin._tag) {
 			case "NoRedirectedStdin":
@@ -158,14 +162,11 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 		const writeJson = (value: unknown) => ctx.services.output.write(json(value));
 		const enqueueBody =
 			input.command === "task.enqueue"
-				? input.stdin
-					? yield* readRequiredStdinBody(ctx)
-					: yield* Effect.fail(
-							new PithosError({
-								code: "VALIDATION_ERROR",
-								message: "task enqueue requires --stdin",
-							}),
-						)
+				? yield* readRequiredStdinBody(ctx, "task enqueue", input.stdin)
+				: undefined;
+		const supersedeBody =
+			input.command === "task.supersede"
+				? yield* readRequiredStdinBody(ctx, "task supersede", input.stdin)
 				: undefined;
 		const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
 		const result = yield* fromEngine(() => {
@@ -203,7 +204,7 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "task.cancel":
 					return engine.cancel(input);
 				case "task.supersede":
-					return engine.supersede(input);
+					return engine.supersede({ ...input, body: supersedeBody, bodyFile: undefined });
 				case "graph.inspect":
 					return engine.graphInspect(input);
 				case "briefing":
@@ -429,8 +430,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 			runId: Options.text("run").pipe(Options.optional),
 			reason: Options.text("reason"),
 			title: Options.text("title").pipe(Options.optional),
-			body: Options.text("body").pipe(Options.optional),
-			bodyFile: Options.text("body-file").pipe(Options.optional),
+			stdin: Options.boolean("stdin"),
 			scope: Options.text("scope").pipe(Options.optional),
 			capability: capability.pipe(Options.optional),
 		},
@@ -441,8 +441,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				runId: opt(o.runId),
 				reason: o.reason,
 				title: opt(o.title),
-				body: opt(o.body),
-				bodyFile: opt(o.bodyFile),
+				stdin: o.stdin,
 				scope: opt(o.scope),
 				capability: opt(o.capability),
 			}),

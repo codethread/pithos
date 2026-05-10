@@ -177,7 +177,7 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 | `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
 | `pithos task inspect <id>`        | Expand output    | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links.                                                                                                               |
 | `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                     |
-| `pithos task supersede <task-id>` | New              | Create a replacement task, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.                                                    |
+| `pithos task supersede <task-id>` | New              | Create a replacement task with an explicit `--stdin` replacement body, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.        |
 | `pithos briefing`                 | Modify output    | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items.                                                                                                                                  |
 | `pithos tail`                     | New event types  | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows.                                                                                                                                                   |
 
@@ -206,19 +206,19 @@ Behavioral rules:
 - the transaction must fail if the resulting graph would contain a cycle
 - `task.created` event payload must include `depends_on_task_ids`
 
-### `pithos supersede <task-id>`
+### `pithos task supersede <task-id>`
 
 Required/optional surface:
 
-| Flag / arg                             | Description                                    | Default             |
-| -------------------------------------- | ---------------------------------------------- | ------------------- |
-| `<task-id>`                            | Task being replaced                            | required            |
-| `--run <run-id>`                       | Actor performing the replacement               | required            |
-| `--title <title>`                      | Replacement task title                         | old task title      |
-| `--body <text>` / `--body-file <path>` | Replacement task body                          | old task body       |
-| `--scope <scope-id>`                   | Replacement task scope                         | old task scope      |
-| `--capability <cap>`                   | Replacement task capability                    | old task capability |
-| `--reason <text>`                      | Human-readable reason stored with supersession | required            |
+| Flag / arg           | Description                                    | Default                       |
+| -------------------- | ---------------------------------------------- | ----------------------------- |
+| `<task-id>`          | Task being replaced                            | required                      |
+| `--run <run-id>`     | Actor performing the replacement               | required after env resolution |
+| `--title <title>`    | Replacement task title                         | old task title                |
+| `--stdin`            | Replacement task body from redirected stdin    | required                      |
+| `--scope <scope-id>` | Replacement task scope                         | old task scope                |
+| `--capability <cap>` | Replacement task capability                    | old task capability           |
+| `--reason <text>`    | Human-readable reason stored with supersession | required                      |
 
 Transaction contract:
 
@@ -229,8 +229,9 @@ Transaction contract:
 5. Load direct dependents of the old task.
 6. Reject if any direct dependent has status other than `queued` or `cancelled`. Cancelled dependents are ignored rather than retargeted.
 7. Create the new task with this exact contract:
-   - copy from old task: `scope_id`, `capability`, `title`, `body`, `payload_json`, `max_attempts`
-   - apply explicit CLI overrides on `scope_id`, `capability`, `title`, and body
+   - copy from old task: `scope_id`, `capability`, `title`, `max_attempts`
+   - set `body` from required redirected stdin; old body inheritance is not part of the public CLI contract
+   - apply explicit CLI overrides on `scope_id`, `capability`, and `title`
    - reset operational fields to fresh-task values: `status='queued'`, `fencing_token=0`, `attempts=0`, `result_json='{}'`, `completed_at=NULL`, fresh `created_at`/`updated_at`
    - set `created_by_run_id` to the actor run
 8. Copy all direct upstream dependency edges from old task to new task.

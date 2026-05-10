@@ -256,7 +256,7 @@ tasks:
   - id: task-016
     description: "Supersede stdin replacement body"
     task_file: ./task-016.md
-    status: pending
+    status: complete
     blocked_by:
       - task-015
   - id: task-017

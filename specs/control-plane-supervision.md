@@ -406,12 +406,12 @@ pithos task fail <task-id> --run <run-id> --token <n> --reason <text>
 
 pithos task supersede \
   <task-id> \
-  --run <run-id> \
+  [--run <run-id>] \
   --reason <text> \
   [--title <text>] \
-  [(--body <text> | --body-file <path>)] \
   [--scope <scope-id>] \
-  [--capability <triage|design|execute|escalate>]
+  [--capability <triage|design|execute|escalate>] \
+  --stdin
 
 pithos task cancel <task-id> --run <run-id> --reason <text>
 

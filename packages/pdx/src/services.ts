@@ -154,22 +154,30 @@ export interface RegistryEntry {
 
 export interface RegistryService {
 	readonly list: Effect.Effect<readonly RegistryEntry[]>;
+	readonly lastEscalateClaimableCount: Effect.Effect<number>;
+	readonly setLastEscalateClaimableCount: (count: number) => Effect.Effect<void>;
 	readonly upsert: (entry: RegistryEntry) => Effect.Effect<void>;
 	readonly remove: (runId: string) => Effect.Effect<void>;
 }
 export class Registry extends Context.Tag("pdx/Registry")<Registry, RegistryService>() {}
 
 export const makeRegistry = Effect.gen(function* () {
-	const ref = yield* SynchronizedRef.make<readonly RegistryEntry[]>([]);
+	const entriesRef = yield* SynchronizedRef.make<readonly RegistryEntry[]>([]);
+	const lastEscalateClaimableCountRef = yield* SynchronizedRef.make(0);
 	return Registry.of({
-		list: SynchronizedRef.get(ref),
+		list: SynchronizedRef.get(entriesRef),
+		lastEscalateClaimableCount: SynchronizedRef.get(lastEscalateClaimableCountRef),
+		setLastEscalateClaimableCount: (count) =>
+			SynchronizedRef.set(lastEscalateClaimableCountRef, count),
 		upsert: (entry) =>
-			SynchronizedRef.update(ref, (entries) => [
+			SynchronizedRef.update(entriesRef, (entries) => [
 				...entries.filter((existing) => existing.runId !== entry.runId),
 				entry,
 			]),
 		remove: (runId) =>
-			SynchronizedRef.update(ref, (entries) => entries.filter((entry) => entry.runId !== runId)),
+			SynchronizedRef.update(entriesRef, (entries) =>
+				entries.filter((entry) => entry.runId !== runId),
+			),
 	});
 });
 

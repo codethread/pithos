@@ -1889,6 +1889,82 @@ describe("pdx substrate", () => {
 		expect(existsSync(`${path}.tmp`)).toBe(false);
 	});
 
+	it("wakes Pandora exactly when global escalate work transitions to claimable", async () => {
+		const home = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		let ready: readonly ReadyTaskInput[] = [];
+		const sends: string[] = [];
+		const pithos = makePithos([], [], {
+			briefing: () =>
+				Effect.succeed(
+					ready.map((task) => ({
+						scope_kind: task.scope_kind ?? "global",
+						canonical_path: task.canonical_path ?? null,
+						...task,
+					})),
+				),
+		});
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
+			pasteBuffer: () => Effect.void,
+		});
+		const tick = async () =>
+			run(
+				reconcileTick(await parseConfig(home)).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(
+						Ids,
+						Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+					),
+					Effect.provideService(
+						Spawner,
+						Spawner.of({
+							launchAgent: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+						}),
+					),
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(Process, alwaysLiveProcess),
+					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, testClock),
+				),
+			);
+		await tick();
+		expect(sends).toEqual([]);
+		ready = [{ scope_id: "global", capability: "escalate" }];
+		await tick();
+		expect(sends).toEqual([`${PANDORA_TARGET}:# wakeup: claimable escalate`]);
+		await tick();
+		expect(sends).toHaveLength(1);
+		ready = [
+			{ scope_id: "global", capability: "escalate" },
+			{ scope_id: "global", capability: "escalate" },
+		];
+		await tick();
+		expect(sends).toHaveLength(1);
+		ready = [];
+		await tick();
+		ready = [{ scope_id: "global", capability: "escalate" }];
+		await tick();
+		expect(sends).toHaveLength(2);
+	});
+
+	it("Pandora template documents wakeup marker recognition", async () => {
+		const template = await readFile(
+			join(process.cwd(), "../spawner/templates/pandora.md.tmpl"),
+			"utf8",
+		);
+		expect(template).toContain("# wakeup: claimable escalate");
+		expect(template).toContain("must not treat it as task content");
+	});
+
 	it("starts registry empty and supports typed operations", async () => {
 		const registryContext = await run(makeRegistry);
 		const listEmpty = await run(
@@ -1898,6 +1974,7 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(listEmpty).toEqual([]);
+		expect(await run(registryContext.lastEscalateClaimableCount)).toBe(0);
 		await run(
 			Registry.pipe(
 				Effect.flatMap((registry) =>

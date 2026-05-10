@@ -450,6 +450,31 @@ const hasAgentScopeCap = (
 const hasAfkCapacity = (entries: readonly RegistryEntry[], maxAfk: number): boolean =>
 	entries.filter((entry) => entry.agent !== "pandora" && entry.mode === "afk").length < maxAfk;
 
+const WAKEUP_MARKER = "# wakeup: claimable escalate";
+
+const sendEscalateWakeupIfNeeded = () =>
+	Effect.gen(function* () {
+		const registry = yield* Registry;
+		const pithos = yield* PithosClient;
+		const tmux = yield* Tmux;
+		const log = yield* SupervisorLog;
+		const ready = yield* pithos.briefing();
+		const claimableEscalateCount = ready.filter(
+			(task) => task.scope_id === "global" && task.capability === "escalate",
+		).length;
+		const previousCount = yield* registry.lastEscalateClaimableCount;
+		if (previousCount === 0 && claimableEscalateCount > 0) {
+			yield* tmux.sendLiteralLine(PANDORA_TARGET, WAKEUP_MARKER);
+			yield* log.write({
+				level: "info",
+				span: "pdx.wakeup",
+				msg: "sent Pandora wakeup",
+				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
+			});
+		}
+		yield* registry.setLastEscalateClaimableCount(claimableEscalateCount);
+	});
+
 const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 	Effect.gen(function* () {
 		const registry = yield* Registry;
@@ -693,6 +718,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				data: { run_id: runId },
 			});
 		}
+		yield* sendEscalateWakeupIfNeeded();
 		yield* spawnReadyAgent(config, maxAfk);
 	});
 

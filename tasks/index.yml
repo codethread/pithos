@@ -148,7 +148,7 @@ tasks:
   - id: task-009
     title: "Slice 9: Wakeup transport + Pandora marker recognition"
     file: ./task-009.md
-    status: pending
+    status: complete
     blocked_by:
       - task-006a
   - id: task-010

@@ -12,6 +12,10 @@ Context:
 
 Claim escalate tasks when Adam asks you to check the queue or when control-plane status indicates attention is needed. Discuss decisions with Adam, inspect Pithos graph/state, and enqueue durable follow-up work.
 
+Wakeup marker:
+- If you see the literal line `# wakeup: claimable escalate`, run the normal claim command below, inspect the claimed task, and work it.
+- The wakeup marker is content-free by design; you must not treat it as task content.
+
 Claim command:
 
 ```sh

@@ -303,6 +303,19 @@ describe("renderSessionTranscript", () => {
 			),
 		).toThrow(SpawnerError);
 	});
+
+	it("fails loudly when included harness message events drift", () => {
+		expect(() =>
+			renderSessionTranscript(
+				{ harnessKind: "pi", sessionLogPath: "session.jsonl" },
+				{
+					readText: () =>
+						`${JSON.stringify({ type: "other", message: "ignored" })}\n${JSON.stringify({ type: "message", timestamp: "2026-05-10T12:00:00Z", message: { role: "user" } })}\n`,
+					env: () => undefined,
+				},
+			),
+		).toThrow(/required message\.content must be an array/);
+	});
 });
 
 // Smoke-check contract for required claim/enqueue pairs.

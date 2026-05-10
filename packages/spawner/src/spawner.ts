@@ -441,73 +441,94 @@ const parseJsonl = (path: string, raw: string): readonly JsonRecord[] =>
 			});
 		});
 
-const fmtTs = (value: unknown): string =>
-	typeof value === "string" ? value.slice(0, 19).replace("T", " ") : "";
+const harnessError = (path: string, line: number, message: string): SpawnerError =>
+	new SpawnerError({ code: "HARNESS_ERROR", message: `${path}:${line}: ${message}` });
 
-const textFromClaudeContent = (content: unknown): string => {
+const requiredString = (value: unknown, path: string, line: number, field: string): string => {
+	if (typeof value === "string") return value;
+	throw harnessError(path, line, `required ${field} must be a string`);
+};
+
+const requiredRecord = (value: unknown, path: string, line: number, field: string): JsonRecord => {
+	if (isRecord(value)) return value;
+	throw harnessError(path, line, `required ${field} must be an object`);
+};
+
+const fmtTs = (value: unknown, path: string, line: number): string =>
+	requiredString(value, path, line, "timestamp").slice(0, 19).replace("T", " ");
+
+const contentArray = (
+	content: unknown,
+	path: string,
+	line: number,
+	field: string,
+): readonly JsonRecord[] => {
+	if (!Array.isArray(content)) {
+		throw harnessError(path, line, `required ${field} must be an array`);
+	}
+	return content.map((item, index) =>
+		requiredRecord(item, path, line, `${field}[${index.toString()}]`),
+	);
+};
+
+const textFromClaudeContent = (content: unknown, path: string, line: number): string => {
 	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	const text = content
-		.filter(isRecord)
-		.filter((item) => item.type === "text" && typeof item.text === "string")
-		.map((item) => item.text as string)
+	const blocks = contentArray(content, path, line, "message.content");
+	const text = blocks
+		.filter((item) => item.type === "text")
+		.map((item) => requiredString(item.text, path, line, "message.content[].text"))
 		.join("\n");
 	if (text.length > 0) return text;
-	const tools = content
-		.filter(isRecord)
-		.filter((item) => item.type === "tool_use" && typeof item.name === "string")
-		.map((item) => item.name as string);
+	const tools = blocks
+		.filter((item) => item.type === "tool_use")
+		.map((item) => requiredString(item.name, path, line, "message.content[].name"));
 	return tools.length > 0 ? `[tools: ${tools.join(", ")}]` : "";
 };
 
-const textFromPiUserContent = (content: unknown): string => {
+const textFromPiUserContent = (content: unknown, path: string, line: number): string => {
 	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter(isRecord)
-		.filter((item) => item.type === "text" && typeof item.text === "string")
-		.map((item) => item.text as string)
+	return contentArray(content, path, line, "message.content")
+		.filter((item) => item.type === "text")
+		.map((item) => requiredString(item.text, path, line, "message.content[].text"))
 		.join("\n");
 };
 
-const textFromPiAssistantContent = (content: unknown): string => {
-	if (!Array.isArray(content)) return "";
-	const text = content
-		.filter(isRecord)
-		.filter((item) => item.type === "text" && typeof item.text === "string")
-		.map((item) => item.text as string)
+const textFromPiAssistantContent = (content: unknown, path: string, line: number): string => {
+	const blocks = contentArray(content, path, line, "message.content");
+	const text = blocks
+		.filter((item) => item.type === "text")
+		.map((item) => requiredString(item.text, path, line, "message.content[].text"))
 		.join("\n");
 	if (text.length > 0) return text;
-	const tools = content
-		.filter(isRecord)
-		.filter((item) => item.type === "toolCall" && typeof item.name === "string")
-		.map((item) => item.name as string);
+	const tools = blocks
+		.filter((item) => item.type === "toolCall")
+		.map((item) => requiredString(item.name, path, line, "message.content[].name"));
 	return tools.length > 0 ? `[tools: ${tools.join(", ")}]` : "";
 };
 
 const parseClaudeTranscript = (path: string, raw: string): readonly TranscriptMessage[] =>
-	parseJsonl(path, raw).flatMap((entry) => {
+	parseJsonl(path, raw).flatMap((entry, index) => {
+		const line = index + 1;
 		if (entry.type !== "user" && entry.type !== "assistant") return [];
-		const message = entry.message;
-		if (!isRecord(message)) return [];
-		const text = textFromClaudeContent(message.content);
+		const message = requiredRecord(entry.message, path, line, "message");
+		const text = textFromClaudeContent(message.content, path, line);
 		if (text.length === 0) return [];
-		return [{ ts: fmtTs(entry.timestamp), role: String(entry.type).toUpperCase(), text }];
+		return [{ ts: fmtTs(entry.timestamp, path, line), role: entry.type.toUpperCase(), text }];
 	});
 
 const parsePiTranscript = (path: string, raw: string): readonly TranscriptMessage[] =>
-	parseJsonl(path, raw).flatMap((entry) => {
+	parseJsonl(path, raw).flatMap((entry, index) => {
+		const line = index + 1;
 		if (entry.type !== "message") return [];
-		const message = entry.message;
-		if (!isRecord(message) || typeof message.role !== "string") return [];
+		const message = requiredRecord(entry.message, path, line, "message");
+		const role = requiredString(message.role, path, line, "message.role");
+		if (role !== "user" && role !== "assistant") return [];
 		const text =
-			message.role === "user"
-				? textFromPiUserContent(message.content)
-				: message.role === "assistant"
-					? textFromPiAssistantContent(message.content)
-					: "";
+			role === "user"
+				? textFromPiUserContent(message.content, path, line)
+				: textFromPiAssistantContent(message.content, path, line);
 		if (text.length === 0) return [];
-		return [{ ts: fmtTs(entry.timestamp), role: message.role.toUpperCase(), text }];
+		return [{ ts: fmtTs(entry.timestamp, path, line), role: role.toUpperCase(), text }];
 	});
 
 const formatTranscript = (messages: readonly TranscriptMessage[], limit: number): string =>

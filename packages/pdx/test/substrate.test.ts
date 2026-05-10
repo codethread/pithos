@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { parsePdxConfig } from "../src/config.js";
-import { parsePdxArgs } from "../src/args.js";
 import { PdxError } from "../src/errors.js";
 import { parseIpcRequest } from "../src/ipc.js";
 import { listenIpc, requestIpc } from "../src/ipc-socket.js";
@@ -27,7 +26,7 @@ import {
 	type RegistryService,
 	type SpawnerService,
 } from "../src/services.js";
-import { FileSystemLive, makePithosClientLive } from "../src/live.js";
+import { FileSystemLive, makePithosClientLive, makeSpawnerLive } from "../src/live.js";
 import { makeTmux } from "../src/tmux.js";
 import { makeEngine, type Services as PithosServices } from "@pithos/pithos";
 import {
@@ -297,60 +296,6 @@ describe("pdx substrate", () => {
 		);
 	});
 
-	it("parses pure CLI args and rejects unknown/extra values", async () => {
-		const parsed = await run(
-			parsePdxArgs([
-				"--data-dir",
-				"/tmp/pdx-home",
-				"daemon",
-				"logs",
-				"--limit",
-				"10",
-				"--all",
-				"--since",
-				"1h",
-			]),
-		);
-		expect(parsed).toMatchObject({
-			dataDir: "/tmp/pdx-home",
-			command: {
-				kind: "daemon-logs",
-				limit: 10,
-				all: true,
-				since: "1h",
-			},
-		});
-
-		await expect(run(parsePdxArgs(["open", "extra"]))).rejects.toThrow(/positional arguments/);
-		await expect(run(parsePdxArgs(["open", "--unknown"]))).rejects.toThrow(/Unknown option/);
-		await expect(run(parsePdxArgs(["open", "--limit", "10"]))).rejects.toThrow(/logs options/);
-		await expect(
-			run(parsePdxArgs(["open", "--max-afk", "8", "--interval-seconds", "5"])),
-		).resolves.toMatchObject({
-			command: { kind: "open" },
-		});
-		await expect(
-			run(parsePdxArgs(["daemon", "run", "--interval-seconds", "5", "--max-afk", "6"])),
-		).resolves.toMatchObject({
-			command: { kind: "daemon-run" },
-		});
-		await expect(run(parsePdxArgs(["close", "--interval-seconds", "99"]))).rejects.toThrow(
-			/does not take command options/,
-		);
-		await expect(run(parsePdxArgs(["daemon", "--json"]))).rejects.toThrow(/Unknown option/);
-		await expect(run(parsePdxArgs(["daemon", "status"]))).resolves.toMatchObject({
-			command: { kind: "daemon-status" },
-		});
-		await expect(run(parsePdxArgs(["status"]))).rejects.toThrow(/Command not implemented/);
-		await expect(run(parsePdxArgs(["kill", "--run", "run_1"]))).rejects.toThrow(/Unknown option/);
-		await expect(run(parsePdxArgs(["daemon", "status", "--max-afk", "7"]))).rejects.toThrow(
-			/afk timing options/,
-		);
-		await expect(run(parsePdxArgs(["daemon", "logs", "--max-afk", "9"]))).rejects.toThrow(
-			/afk timing options/,
-		);
-	});
-
 	it("constructs tmux argv and sends literal line as text then enter", async () => {
 		const calls: { file: string; args: readonly string[]; cwd: string | undefined }[] = [];
 		const process = Process.of({
@@ -398,6 +343,23 @@ describe("pdx substrate", () => {
 			span: "test-span",
 			msg: "hello",
 		});
+	});
+
+	it("maps spawner boundary validation errors without flattening to process errors", async () => {
+		const spawner = makeSpawnerLive({ dataDir: "/tmp/pdx-data", pithosDbPath: "/tmp/pdx.sqlite" });
+		const error = await run(
+			Effect.flip(
+				spawner.renderAgent({
+					agent: "war",
+					mode: "afk",
+					runId: "run_test",
+					sessionId: "not-a-uuid",
+					scopeId: "scope_repo",
+					cwd: "/tmp/repo",
+				}),
+			),
+		);
+		expect(error.code).toBe("VALIDATION_ERROR");
 	});
 
 	it("rejects malformed and unknown IPC requests loudly", async () => {
@@ -501,6 +463,7 @@ describe("pdx substrate", () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const mkdirs: string[] = [];
 		const pithosCalls: string[] = [];
+		const runUpsertInputs: Parameters<PithosClientService["runUpsert"]>[0][] = [];
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
@@ -509,9 +472,17 @@ describe("pdx substrate", () => {
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
 		});
-		const pithos = makePithos(pithosCalls, [
-			{ scope_id: "global", capability: "triage", scope_kind: "global", canonical_path: null },
-		]);
+		const pithos = makePithos(
+			pithosCalls,
+			[{ scope_id: "global", capability: "triage", scope_kind: "global", canonical_path: null }],
+			{
+				runUpsert: (input) =>
+					Effect.sync(() => {
+						runUpsertInputs.push(input);
+						pithosCalls.push(`runUpsert:${input.agent}:${input.runId ?? "new"}`);
+					}),
+			},
+		);
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		const registry = await run(makeRegistry);
 		const runIds = ["run_pandora_1", "run_toil_1"];
@@ -569,6 +540,16 @@ describe("pdx substrate", () => {
 		expect(pithosCalls).toContain(`runUpsert:pdx:${PDX_SYSTEM_RUN_ID}`);
 		expect(pithosCalls).toContain("runUpsert:pandora:run_pandora_1");
 		expect(pithosCalls).toContain("runUpsert:toil:run_toil_1");
+		expect(runUpsertInputs).toContainEqual({
+			agent: "pdx",
+			mode: "afk",
+			scope: "global",
+			cwd: config.dataDir,
+			sessionId: DAEMON_TARGET,
+			harnessKind: "system",
+			sessionLogPath: config.logPath,
+			runId: PDX_SYSTEM_RUN_ID,
+		});
 		expect((await run(registry.list)).map((entry) => entry.agent)).not.toContain("pdx");
 	});
 

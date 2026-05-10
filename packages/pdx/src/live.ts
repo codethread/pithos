@@ -16,6 +16,7 @@ import {
 	LiveSpawnerServices as liveSpawnerServices,
 	renderAgent,
 	renderSessionTranscript,
+	SpawnerError,
 } from "@pithos/spawner";
 import { liveServices, makeEngine, PithosError } from "@pithos/pithos";
 import type { Config as PithosConfig } from "@pithos/pithos";
@@ -222,8 +223,24 @@ const pithosClient = (dbPath: string): PithosClientService => {
 };
 
 export const makePithosClientLive = (dbPath: string) => PithosClient.of(pithosClient(dbPath));
-const spawnerError = (operation: string, error: unknown) =>
-	new PdxError({ code: "PROCESS_ERROR", message: `${operation} failed: ${String(error)}` });
+const spawnerError = (operation: string, error: unknown) => {
+	if (error instanceof PdxError) return error;
+	if (error instanceof SpawnerError) {
+		const code =
+			error.code === "VALIDATION_ERROR"
+				? "VALIDATION_ERROR"
+				: error.code === "TEMPLATE_ERROR"
+					? "CONFIG_ERROR"
+					: error.code === "HARNESS_ERROR"
+						? "HARNESS_ERROR"
+						: "LAUNCH_ERROR";
+		return new PdxError({
+			code,
+			message: `${operation} failed (${error.code}): ${error.message}`,
+		});
+	}
+	return new PdxError({ code: "PROCESS_ERROR", message: `${operation} failed: ${String(error)}` });
+};
 
 export const makeSpawnerLive = (config: {
 	readonly dataDir: string;

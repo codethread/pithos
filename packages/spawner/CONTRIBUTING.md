@@ -14,5 +14,5 @@ pnpm --filter @pithos/spawner build
 ## Manual preview
 
 ```sh
-pnpm --filter @pithos/spawner start -- preview --agent war --mode afk --scope scope_repo --run run_demo --session-id session_demo --cwd "$PWD" | jq .
+pnpm --filter @pithos/spawner start -- preview --agent war --mode afk --scope scope_repo --run run_demo --session-id 123e4567-e89b-12d3-a456-426614174000 --cwd "$PWD" | jq .
 ```

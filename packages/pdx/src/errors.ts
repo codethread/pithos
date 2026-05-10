@@ -5,6 +5,8 @@ export type PdxErrorCode =
 	| "CONFIG_ERROR"
 	| "IPC_ERROR"
 	| "PROCESS_ERROR"
+	| "HARNESS_ERROR"
+	| "LAUNCH_ERROR"
 	| "FS_ERROR"
 	| "USER_ERROR"
 	| "NOT_FOUND"

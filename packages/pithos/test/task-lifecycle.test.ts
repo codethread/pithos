@@ -5,7 +5,14 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { PithosError, makeEngine, type Services } from "../src/index.js";
+import {
+	PithosError,
+	makeEngine,
+	type Capability,
+	type ChainPolicy,
+	type Engine,
+	type Services,
+} from "../src/index.js";
 
 const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-task-")), "pithos.db");
 
@@ -48,6 +55,16 @@ const setup = (runIdEnv?: string) => {
 		runId: "run_war",
 	});
 	engine.runUpsert({
+		agent: "greed",
+		mode: "afk",
+		scope: "global",
+		cwd: "/tmp",
+		sessionId: "s_greed",
+		harnessKind: "claude",
+		sessionLogPath: "/tmp/s_greed.jsonl",
+		runId: "run_greed",
+	});
+	engine.runUpsert({
 		agent: "pdx",
 		mode: "afk",
 		scope: "global",
@@ -59,6 +76,28 @@ const setup = (runIdEnv?: string) => {
 	});
 	return { dbPath, engine, repo };
 };
+
+const enqueueTask = (
+	engine: Engine,
+	input: {
+		readonly title: string;
+		readonly capability?: Capability;
+		readonly scope?: string;
+		readonly runId?: string;
+		readonly dependsOn?: readonly string[];
+		readonly chain?: ChainPolicy;
+	},
+) =>
+	engine.enqueue({
+		scope: input.scope ?? "global",
+		capability: input.capability ?? "triage",
+		title: input.title,
+		body: "body",
+		bodyFile: undefined,
+		runId: input.runId ?? "run_toil",
+		dependsOn: input.dependsOn ?? [],
+		chain: input.chain ?? "auto",
+	});
 
 describe("task lifecycle", () => {
 	it("round trips enqueue claim heartbeat complete with fencing", () => {
@@ -256,6 +295,89 @@ describe("task lifecycle", () => {
 		expect(() => engine.claim({ runId: "run_war", scope: repo, capability: "execute" })).toThrow(
 			PithosError,
 		);
+	});
+
+	it("auto-chains ordinary follow-up to the actor run's held task", () => {
+		const { dbPath, engine } = setup();
+		const upstream = enqueueTask(engine, { title: "triage upstream" }).task.id;
+		const claimed = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+		const followUp = enqueueTask(engine, { title: "design follow-up", capability: "design" });
+
+		expect(followUp.chain).toMatchObject({
+			applied: "depends_on_held",
+			held_task_id: upstream,
+			implicit_dependency_ids: [upstream],
+			final_dependency_ids: [upstream],
+		});
+		expect(() =>
+			engine.claim({ runId: "run_greed", scope: "global", capability: "design" }),
+		).toThrow(PithosError);
+		const inspect = engine.taskInspect({ taskId: followUp.task.id });
+		expect(inspect.task.unresolved_dependency_ids).toEqual([upstream]);
+		expect(inspect.dependencies.map((task) => task.id)).toEqual([upstream]);
+		expect(inspect.lineage.map((entry) => entry.task.id)).toEqual([upstream]);
+		const eventPayload = JSON.parse(
+			new Database(dbPath)
+				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
+				.pluck()
+				.get(followUp.task.id) as string,
+		) as unknown as { chain: { implicit_dependency_ids: readonly string[] } };
+		expect(eventPayload.chain.implicit_dependency_ids).toEqual([upstream]);
+
+		engine.complete({
+			taskId: upstream,
+			runId: "run_toil",
+			token: claimed.task.token,
+			resultJson: "{}",
+		});
+		expect(
+			engine.claim({ runId: "run_greed", scope: "global", capability: "design" }).task.id,
+		).toBe(followUp.task.id);
+	});
+
+	it("combines manual fan-in and rejects duplicate final dependencies", () => {
+		const { engine } = setup();
+		const manual = enqueueTask(engine, { title: "manual blocker" }).task.id;
+		const manualClaim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+		engine.complete({
+			taskId: manual,
+			runId: "run_toil",
+			token: manualClaim.task.token,
+			resultJson: "{}",
+		});
+		const held = enqueueTask(engine, { title: "held blocker" }).task.id;
+		engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+
+		const fanIn = enqueueTask(engine, {
+			title: "fan in",
+			capability: "design",
+			dependsOn: [manual],
+		});
+		expect(fanIn.chain.final_dependency_ids).toEqual([manual, held]);
+		expect(
+			engine
+				.taskInspect({ taskId: fanIn.task.id })
+				.dependencies.map((task) => task.id)
+				.sort(),
+		).toEqual([held, manual].sort());
+		expect(() =>
+			enqueueTask(engine, { title: "duplicate", capability: "design", dependsOn: [held] }),
+		).toThrow(/duplicate dependency task id/);
+	});
+
+	it("requires held ordinary work for explicit held chaining", () => {
+		const { engine } = setup();
+		expect(() =>
+			enqueueTask(engine, { title: "no held", capability: "design", chain: "held" }),
+		).toThrow(/--chain held requires a held task/);
+		const held = enqueueTask(engine, { title: "held" }).task.id;
+		engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+		expect(() =>
+			enqueueTask(engine, { title: "bad escalation", capability: "escalate", chain: "held" }),
+		).toThrow(/--chain held cannot be used when enqueueing escalation tasks/);
+		expect(
+			enqueueTask(engine, { title: "explicit held", capability: "design", chain: "held" }).chain,
+		).toMatchObject({ applied: "depends_on_held", final_dependency_ids: [held] });
 	});
 
 	it("heartbeat and stale token updates fail without partial mutation", () => {

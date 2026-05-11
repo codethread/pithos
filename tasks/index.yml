@@ -313,7 +313,7 @@ tasks:
   - id: task-025
     description: "Auto dependency chain continuation"
     task_file: ./task-025.md
-    status: pending
+    status: complete
     blocked_by:
       - task-024
   - id: task-026

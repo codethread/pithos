@@ -782,6 +782,7 @@ describe("pithos cli", () => {
 			applied: "flat_no_held_task",
 			held_task_id: null,
 			source_task_id: null,
+			implicit_dependency_ids: [],
 			final_dependency_ids: [],
 		});
 		expect(taskCreatedPayload(dbPath, output.task.id)).toMatchObject({ chain: output.chain });
@@ -822,6 +823,7 @@ describe("pithos cli", () => {
 			applied: "none_selected",
 			held_task_id: null,
 			source_task_id: null,
+			implicit_dependency_ids: [],
 			final_dependency_ids: [blocker],
 		});
 		expect(taskDependencies(dbPath, output.task.id)).toEqual([blocker]);

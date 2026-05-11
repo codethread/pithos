@@ -276,6 +276,7 @@ export interface ChainOutput {
 	readonly applied: ChainPolicyDecision["applied"];
 	readonly held_task_id: string | null;
 	readonly source_task_id: string | null;
+	readonly implicit_dependency_ids: readonly string[];
 	readonly final_dependency_ids: readonly string[];
 }
 
@@ -1436,41 +1437,37 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 	enqueue: ({ scope, capability, title, body, bodyFile, runId, dependsOn, chain }) =>
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);
-			const actorRun = authorized(db, "agent_enqueues", actorRunId, capability);
+			authorized(db, "agent_enqueues", actorRunId, capability);
 			enforceCapScope(db, scope, capability);
 			const uniqueDepends = new Set(dependsOn);
 			if (uniqueDepends.size !== dependsOn.length) {
 				fail("VALIDATION_ERROR", "duplicate --depends-on task id");
 			}
-			const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
-			if (heldTask !== null && chain !== "none") {
-				fail(
-					"VALIDATION_ERROR",
-					`--chain ${chain} with a held task is implemented by a later chaining slice`,
-				);
-			}
-			const decision = resolveChainPolicy({
-				policy: chain,
-				newTaskCapability: capability,
-				heldTask,
-				heldSourceTaskId: null,
-			});
-			const dependencyIds = finalDependencyIds({
-				manualDependencyIds: dependsOn,
-				implicitDependencyIds: decision.implicitDependencyIds,
-			});
-			const chainOutput: ChainOutput = {
-				policy: decision.policy,
-				applied: decision.applied,
-				held_task_id: decision.heldTaskId,
-				source_task_id: decision.sourceTaskId,
-				final_dependency_ids: dependencyIds,
-			};
 			const taskBody = resolveBody(ctx, body, bodyFile);
 			const taskTitle = requireNonEmpty(title, "--title");
 			const taskId = Effect.runSync(ctx.services.ids.make("task"));
 
-			db.transaction(() => {
+			const chainOutput = db.transaction((): ChainOutput => {
+				const actorRun = liveRun(db, actorRunId);
+				const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
+				const decision = resolveChainPolicy({
+					policy: chain,
+					newTaskCapability: capability,
+					heldTask,
+					heldSourceTaskId: null,
+				});
+				const dependencyIds = finalDependencyIds({
+					manualDependencyIds: dependsOn,
+					implicitDependencyIds: decision.implicitDependencyIds,
+				});
+				const output: ChainOutput = {
+					policy: decision.policy,
+					applied: decision.applied,
+					held_task_id: decision.heldTaskId,
+					source_task_id: decision.sourceTaskId,
+					implicit_dependency_ids: decision.implicitDependencyIds,
+					final_dependency_ids: dependencyIds,
+				};
 				for (const depId of dependencyIds) {
 					const dep = db.prepare(sql`SELECT 1 FROM tasks WHERE id = ?`).get(depId);
 					if (dep === undefined) fail("NOT_FOUND", `dependency task not found: ${depId}`);
@@ -1499,14 +1496,16 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						title: taskTitle,
 						depends_on_task_ids: dependencyIds,
 						chain: {
-							policy: chainOutput.policy,
-							applied: chainOutput.applied,
-							held_task_id: chainOutput.held_task_id,
-							source_task_id: chainOutput.source_task_id,
-							final_dependency_ids: chainOutput.final_dependency_ids,
+							policy: output.policy,
+							applied: output.applied,
+							held_task_id: output.held_task_id,
+							source_task_id: output.source_task_id,
+							implicit_dependency_ids: output.implicit_dependency_ids,
+							final_dependency_ids: output.final_dependency_ids,
 						},
 					},
 				});
+				return output;
 			})();
 			return { ok: true, task: { id: taskId, status: "queued" }, chain: chainOutput };
 		}),

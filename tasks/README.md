@@ -72,6 +72,13 @@ No HITL slice is required: Adam confirmed the core language and prompt-surface d
 
 Append notes here. Do not rewrite earlier notes.
 
+### Task 025: Auto dependency chain continuation — 2026-05-11
+
+- Wired enqueue's DB path to resolve the actor run's held task after authorization and feed it through the pure chain-policy resolver, enabling default `--chain auto` and explicit `--chain held` to add blocking dependencies for ordinary follow-up work.
+- Enqueue output and `task.created` chain metadata now include `implicit_dependency_ids` so implicit held-task chaining is distinguishable from flat/manual-only enqueue.
+- Added lifecycle coverage for claim blocking until the held upstream task is completed, lineage/dependency inspection, manual fan-in, duplicate final dependency rejection, and explicit held precondition failures.
+- Validation run: `pnpm typecheck && pnpm lint && pnpm test && pnpm run build`.
+
 ### Task 024: Enqueue chain flag baseline — 2026-05-11
 
 - Added `pithos task enqueue --chain auto|none|held|source` with CLI-boundary validation, default `auto`, and chain metadata in enqueue output plus `task.created` payloads.

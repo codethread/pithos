@@ -1,6 +1,6 @@
 # Task Graph
 
-**Status:** Implemented
+**Status:** Partial
 **Last Updated:** 2026-05-11
 
 ## 1. Overview
@@ -17,6 +17,8 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 - Preserve history when one task replaces another.
 - Let agents inspect blockers, dependents, and the current connected graph without reconstructing it from prose.
 - Surface ready versus blocked work in `pithos briefing`.
+- Preserve task-chain lineage automatically for ordinary follow-up enqueues from a run that already holds work.
+- Preserve escalation provenance without making escalation tasks block on the work they are meant to unblock.
 
 ### Non-Goals
 
@@ -25,6 +27,8 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 - Priority scheduling, critical-path scheduling, or any optimizer beyond FIFO among claimable tasks.
 - Performance work for large graphs or remote databases; correctness and clarity win.
 - Automatic downstream repair once work has already started from superseded input.
+- Inferring semantic relationships for unrelated operator/Pandora “Q” requests; those must stay intentionally flat unless Adam or Pandora names a source.
+- Treating escalation provenance as readiness gating. Escalations must remain immediately claimable even when they point at source work.
 
 ## 2. Design Decisions
 
@@ -54,6 +58,21 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 
 - **Decision:** The schema is a clean break. Fresh databases get the DAG and supersession tables directly, with no legacy parent-model compatibility path.
 
+- **Decision:** Add an engine-owned enqueue chaining policy instead of relying on prompts to remember `--depends-on`.
+  - **Rationale:** The engine already resolves the actor run and knows whether that run holds a task. Forgetting `--depends-on` silently creates flat islands, while the engine can derive the ordinary follow-up edge transactionally and report what it did.
+
+- **Decision:** Split blocking dependencies from non-blocking source provenance.
+  - **Rationale:** A dependency means “do not claim this task until the upstream task is `done`.” Escalations need to point at the work they are about without waiting for that work, so they need a source/provenance edge rather than a `task_dependencies` row.
+
+- **Decision:** Make `--chain auto` the default, with explicit `none`, `held`, and `source` modes.
+  - **Rationale:** Normal agents should get lineage by omission. Operators and Pandora still need an obvious escape hatch for unrelated work and an explicit way to route from an escalation back to its source.
+
+- **Decision:** Manual `--depends-on` edges combine with implicit chain edges unless `--chain none` is selected.
+  - **Rationale:** Fan-in is common: a follow-up can naturally depend on the held triage/design task and on additional named prerequisites. `--chain none --depends-on <task-id>` remains the manual-only form.
+
+- **Decision:** Pandora’s Adam-facing “Q” convention defaults to `--chain none`, while escalation-resolution handoffs use `--chain source`.
+  - **Rationale:** Pandora is long-lived and may hold an escalation while Adam asks for unrelated work. Those operator-created tasks must not all inherit the same graph origin. When Pandora is actually resolving the held escalation, the source edge provides the correct dependency target.
+
 ## 3. Architecture
 
 ### Component structure
@@ -79,9 +98,16 @@ Tests live beside commands and in `packages/pithos/test/` for end-to-end SQLite 
 ### Data flow
 
 ```text
-enqueue/supersede
+enqueue
+  -> resolve actor run and optional held task
+  -> resolve chain policy into dependency edges and/or source provenance
   -> validate referenced runs/scopes/tasks
-  -> transaction writes tasks + relationship rows + events
+  -> transaction writes task + relationship rows + events
+  -> commit only if resulting dependency graph is acyclic
+
+supersede
+  -> validate referenced runs/scopes/tasks
+  -> transaction writes replacement task + relationship rows + events
   -> commit only if resulting dependency graph is acyclic
 
 claim
@@ -97,7 +123,7 @@ inspect/briefing
 
 ### Schema deployment
 
-The initial schema (migration 1) creates all tables — `tasks`, `task_dependencies`, `task_supersessions`, etc. — in a single atomic migration. There is no separate migration 2. The `tasks` table does not include `parent_id`; the DAG tables are the sole relationship model from the start.
+The initial schema (migration 1) creates all existing graph tables — `tasks`, `task_dependencies`, `task_supersessions`, etc. The planned automatic chaining extension adds a source/provenance table in the same clean-break style before the next durable schema is treated as stable. The `tasks` table does not include `parent_id`; blocking edges and source edges are explicit relationship tables.
 
 ## 4. Data Model
 
@@ -131,6 +157,19 @@ CREATE TABLE IF NOT EXISTS task_supersessions (
 
 CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
   ON task_supersessions(new_task_id);
+
+-- Planned: non-blocking provenance/source edge used by automatic chaining.
+CREATE TABLE IF NOT EXISTS task_sources (
+  task_id        TEXT PRIMARY KEY REFERENCES tasks(id),
+  source_task_id TEXT NOT NULL REFERENCES tasks(id),
+  source_run_id  TEXT NOT NULL REFERENCES runs(id),
+  kind           TEXT NOT NULL CHECK (kind IN ('chain_source')),
+  created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (task_id <> source_task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_sources_source
+  ON task_sources(source_task_id);
 ```
 
 ### Readiness contract
@@ -148,6 +187,7 @@ The last rule is enforced operationally by `supersede`: if the old task is still
 ```ts
 type GraphEdge =
 	| { kind: "depends_on"; from_task_id: string; to_task_id: string; satisfied: boolean }
+	| { kind: "source"; from_task_id: string; to_task_id: string }
 	| { kind: "supersedes"; from_task_id: string; to_task_id: string };
 
 type GraphNode = {
@@ -160,6 +200,7 @@ type GraphNode = {
 	unresolved_dependency_ids: readonly string[];
 	supersedes_task_id: string | null;
 	superseded_by_task_id: string | null;
+	source_task_id: string | null;
 };
 ```
 
@@ -173,7 +214,7 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 | Command                           | Change           | Contract                                                                                                                                                                                                                                 |
 | --------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pithos task enqueue`             | Modify           | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, and `agent_enqueues` authorization.               |
+| `pithos task enqueue`             | Modify           | Support repeatable manual `--depends-on <task-id>` plus `--chain auto|none|held|source`. All referenced dependency/source tasks must exist. Duplicate dependency IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, and `agent_enqueues` authorization. |
 | `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
 | `pithos task inspect <id>`        | Expand output    | Return full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                     |
 | `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                     |
@@ -186,25 +227,159 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 New flag surface:
 
 | Flag                     | Description                                                    | Default                       |
-| ------------------------ | -------------------------------------------------------------- | ----------------------------- | ---------- | ------------------------------ | -------- |
+| ------------------------ | -------------------------------------------------------------- | ----------------------------- |
 | `--scope <scope-id>`     | Scope for the new task                                         | required                      |
-| `--capability <triage    | design                                                         | execute                       | escalate>` | Capability for matching agents | required |
+| `--capability <cap>`     | Capability for matching agents: `triage`, `design`, `execute`, `escalate` | required            |
 | `--title <title>`        | Human-readable title for the task                              | required                      |
 | `--stdin`                | Read task body from redirected stdin                           | required                      |
 | `--run <run-id>`         | Creating run; defaults from `PITHOS_RUN_ID` for spawned agents | required after env resolution |
-| `--depends-on <task-id>` | Dependency edge to an existing task; repeatable                | none                          |
+| `--depends-on <task-id>` | Manual blocking dependency edge; repeatable                    | none                          |
+| `--chain <mode>`         | Implicit chaining policy: `auto`, `none`, `held`, or `source`  | `auto`                        |
 
 Behavioral rules:
 
 - all dependency targets must already exist
 - dependency targets may be in any scope
 - if a dependency target has already been superseded, `enqueue` must fail with a tagged user-facing error that points at the replacement task; the command must not silently rewrite to a different task ID
-- duplicate dependency IDs are rejected with `VALIDATION_ERROR`
+- duplicate dependency IDs are rejected with `VALIDATION_ERROR` after manual and implicit dependencies are combined
+- source targets must exist; if a source target has already been superseded, creating a source edge must fail with a tagged error pointing at the replacement
 - the creating run must exist and its agent kind must be authorized in `agent_enqueues` for the requested capability
 - manual/operator enqueue without a resolved run is not exposed
 - `--stdin` is required, stdin must be redirected, and decoded body length must be non-zero; capability-specific scope/body rules from `control-plane-supervision.md` apply
-- the transaction must fail if the resulting graph would contain a cycle
-- `task.created` event payload must include `depends_on_task_ids`
+- the transaction must fail if the resulting dependency graph would contain a cycle
+- `task.created` event payload must include `depends_on_task_ids` and chain/source metadata
+
+A successful enqueue returns the applied chain decision so agents can see whether the task is intentionally flat, implicitly chained, or source-linked:
+
+```json
+{
+  "ok": true,
+  "task": { "id": "task_new", "status": "queued" },
+  "chain": {
+    "policy": "auto",
+    "applied": "depends_on_source",
+    "held_task_id": "task_escalation",
+    "source_task_id": "task_design",
+    "depends_on_task_ids": ["task_design"]
+  }
+}
+```
+
+#### Chain policy
+
+`--chain` controls implicit relationships derived from the actor run's currently held task. `--depends-on` controls explicit manual blocking dependencies. The final blocking dependency set is:
+
+```text
+final_dependencies = manual --depends-on ids + implicit ids from --chain
+```
+
+Use `--chain none --depends-on <task-id>` for manual-only dependencies.
+
+| Mode | Contract | Failure cases |
+| ---- | -------- | ------------- |
+| `auto` | Default. For ordinary held work, add a dependency on the held task. For held ordinary work enqueueing `escalate`, add no dependency and record the held task as source. For a held escalation with a source, ordinary follow-up depends on that source. | No held task is not an error; the task is flat and output says no chain was applied. |
+| `none` | Add no implicit dependency and no source. Manual `--depends-on` flags still apply. | None beyond normal dependency validation. |
+| `held` | Require the actor run to hold a task and add that held task as a blocking dependency. | Fails if the run holds no task, or if the new task is `escalate` because escalations must not block on held work. |
+| `source` | Require the held task to have a source and add that source task as a blocking dependency. | Fails if the run holds no task, the held task has no source, or the new task is `escalate`. |
+
+Automatic chaining treats capabilities as two classes:
+
+| Held task | New task | `--chain auto` result |
+| --------- | -------- | --------------------- |
+| none | any | no implicit edge |
+| `triage`/`design`/`execute` | `triage`/`design`/`execute` | `new --depends_on--> held` |
+| `triage`/`design`/`execute` | `escalate` | no dependency; `new --source--> held` |
+| `escalate` with source `S` | `triage`/`design`/`execute` | `new --depends_on--> S` |
+| `escalate` without source | `triage`/`design`/`execute` | no implicit edge; output says no source was available |
+| `escalate` | `escalate` | no implicit edge |
+
+Escalations are never auto-blocked. An explicit `--depends-on` on an escalation is allowed only when the caller intentionally wants a blocked escalation; agent prompts must not use it for normal attention routing.
+
+#### Relationship scenarios
+
+Normal triage-to-execute handoff:
+
+```text
+T triage [claimed by Toil]
+
+Toil enqueues E execute with --chain auto
+
+E execute ──depends_on──▶ T triage
+```
+
+Manual fan-in while preserving the held-task chain:
+
+```text
+T triage [claimed]
+D design [queued/done]
+
+Toil enqueues E execute with --depends-on D and --chain auto
+
+E execute ──depends_on──▶ T triage   # implicit
+E execute ──depends_on──▶ D design   # manual
+```
+
+Manual-only or intentionally flat work:
+
+```text
+Pandora/Adam queues unrelated work with --chain none
+
+Q triage
+# no implicit dependency/source edge
+```
+
+Escalation from held design:
+
+```text
+D design [claimed by Greed]
+
+Greed enqueues A escalate with --chain auto
+
+A escalate ──source──────▶ D design   # non-blocking provenance
+# no depends_on edge, so Pandora can claim A immediately
+```
+
+Pandora resolving that escalation after approval:
+
+```text
+A escalate [claimed by Pandora] ──source──▶ D design [done/approved]
+
+Pandora enqueues H triage with --chain source or --chain auto
+
+H triage ──depends_on──▶ D design
+```
+
+Full design-review chain:
+
+```text
+             non-blocking attention/provenance
+A escalate ─────────────source────────────▶ D design
+                                             ▲
+                                             │ blocking execution lineage
+H triage / execute ─────depends_on──────────┘
+```
+
+Pandora's Adam-facing Q convention:
+
+```text
+Pandora holds A escalate ──source──▶ D design
+
+Adam: "Q this unrelated polish idea"
+Pandora enqueues P triage with --chain none
+
+P triage
+# intentionally flat; does not inherit D as origin
+```
+
+Pandora has two distinct enqueue intents while holding an escalation:
+
+| Pandora intent | Required/default chain mode | Result |
+| -------------- | --------------------------- | ------ |
+| Resolve the held escalation by routing approved source work onward | `--chain source` (or raw CLI `auto`, when the held escalation has a source) | new task blocks on the source task |
+| Adam says “Q this” without naming the held escalation/source as context | `--chain none` by Pandora prompt/Q convention | new task is intentionally flat |
+| Adam says “Q this for task_X” | `--chain none --depends-on task_X` | manual dependency on the named task only |
+
+The engine cannot infer Adam's conversational intent, so the Pandora prompt/Q convention must make unrelated Qs flat by default. Raw `task enqueue` keeps `--chain auto` as the universal default for agents; Pandora uses `--chain none` when acting as Adam's general queueing interface.
 
 ### `pithos task supersede <task-id>`
 
@@ -335,11 +510,12 @@ Success response shape:
 Requirements:
 
 - `task` is full task detail (`body`, `fencing_token`, `attempts`, `max_attempts`) plus computed `claimable` and `unresolved_dependency_ids`
-- `lineage` walks `task_dependencies` upstream only; it never traverses dependents or supersession edges
+- `lineage` walks `task_dependencies` upstream only; it never traverses dependents, supersession edges, or non-blocking source edges
 - each lineage entry appears once at its shortest upstream depth; `via_task_ids` lists the child task ids through which that shortest-depth ancestor is reached
 - `lineage` is sorted by `depth DESC`, then task `created_at ASC`, then task `id ASC`
 - direct `dependencies`, direct `dependents`, and artifact arrays remain deterministic and sorted by `created_at`, then `id`
 - dependency/dependent summaries must always include `scope_id`
+- source summaries, when present, include `id`, `scope_id`, `status`, and `title`
 - `claimable` and `unresolved_dependency_ids` are computed, never stored
 
 ### `pithos graph inspect`
@@ -348,9 +524,9 @@ Selectors are mutually exclusive:
 
 | Selector             | Result                                                                                                                                                                           |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--task <id>`        | Transitive closure around that task following dependency and supersession edges both directions                                                                                  |
-| `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency and supersession edges in both directions recursively until the response is closed                         |
-| `--all`              | All non-cancelled tasks and all current graph edges, plus any referenced dependency or supersession neighbors needed to keep the response closed (deprecated alias: `--current`) |
+| `--task <id>`        | Transitive closure around that task following dependency, source, and supersession edges both directions                                                                                  |
+| `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency, source, and supersession edges in both directions recursively until the response is closed                         |
+| `--all`              | All non-cancelled tasks and all current graph edges, plus any referenced dependency or source or supersession neighbors needed to keep the response closed (deprecated alias: `--current`) |
 
 Output flags:
 
@@ -371,8 +547,8 @@ When `--flat` is used without `--dump`, the output is filtered to show only acti
 
 Graph closure requirement:
 
-- every `from_task_id`, `to_task_id`, `supersedes_task_id`, and `superseded_by_task_id` emitted in the response must refer to a node present in `graph.nodes`
-- this may require including cancelled supersession neighbors when they are referenced by returned supersession edges or node fields
+- every `from_task_id`, `to_task_id`, `source_task_id`, `supersedes_task_id`, and `superseded_by_task_id` emitted in the response must refer to a node present in `graph.nodes`
+- this may require including source neighbors or cancelled supersession neighbors when they are referenced by returned edges or node fields
 
 Success response shape:
 
@@ -477,7 +653,7 @@ New/changed event contracts:
 
 | Event             | `task_id`   | Payload                                                                                |
 | ----------------- | ----------- | -------------------------------------------------------------------------------------- |
-| `task.created`    | new task id | existing fields plus `depends_on_task_ids: string[]` and optional `supersedes_task_id` |
+| `task.created`    | new task id | existing fields plus `depends_on_task_ids: string[]`, optional `supersedes_task_id`, and chain metadata (`chain_policy`, `chain_applied`, `source_task_id`, `held_task_id`) |
 | `task.superseded` | old task id | `new_task_id`, `reason`, `retargeted_dependent_task_ids`                               |
 | `task.cancelled`  | old task id | `reason`, `superseded_by_task_id`                                                      |
 
@@ -511,23 +687,34 @@ New/changed event contracts:
 - [x] Update `packages/pithos/README.md` help surface and exit-code references
 - [x] Run `pnpm verify`
 
+### Phase 5: Automatic enqueue chaining (planned, 0.5-1 day)
+
+- [ ] Add `--chain auto|none|held|source` to `pithos task enqueue`.
+- [ ] Add source/provenance storage for non-blocking escalation origins.
+- [ ] Resolve chain policy inside `engine.enqueue` after actor-run authorization and before dependency validation.
+- [ ] Include chain/source metadata in enqueue output and `task.created` events.
+
+- [ ] Extend `task inspect` and `graph inspect` to show source edges without treating them as lineage dependencies.
+- [ ] Update agent templates so normal agents rely on auto chaining, Pandora Qs use `--chain none`, and escalation-resolution handoffs use source chaining.
+- [ ] Add CLI/engine tests for the chain-policy matrix and prompt help snapshots.
+
 ## 7. Code Locations
 
-| File                                         | Change                                                                       |
-| -------------------------------------------- | ---------------------------------------------------------------------------- |
-| `packages/pithos/src/db/migrate.ts`          | Modify: add `task_dependencies` and `task_supersessions` to initial schema   |
-| `packages/pithos/src/db/rows.ts`             | Modify: add relationship row decoders                                        |
-| `packages/pithos/src/domain/task-graph.ts`   | New: graph queries, summaries, cycle detection, claimability helpers         |
-| `packages/pithos/src/commands/enqueue.ts`    | Modify: repeated `--depends-on`, dependency validation, event payload update |
-| `packages/pithos/src/commands/claim.ts`      | Modify: dependency-aware claim query                                         |
-| `packages/pithos/src/commands/inspect.ts`    | Modify: relationship-aware task inspect; add graph inspect                   |
-| `packages/pithos/src/commands/briefing.ts`   | Modify: blocked vs ready sections and blocker rendering                      |
-| `packages/pithos/src/commands/supersede.ts`  | New: replacement flow                                                        |
-| `packages/pithos/src/cli/commands.ts`        | Modify: wire new flags and subcommands into `--help`                         |
-| `packages/pithos/src/commands/*.test.ts`     | Modify/add: unit coverage for new command contracts                          |
-| `packages/pithos/test/*.integration.test.ts` | Modify/add: end-to-end SQLite coverage for DAG + supersession flows          |
-| `packages/pithos/README.md`                  | Modify: document new command surface and semantics                           |
+| File | Change |
+| ---- | ------ |
+| `packages/pithos/src/engine.ts` | Modify: resolve chain policy, persist source edges, include chain metadata in enqueue output/events, and include source edges in inspect/graph reads |
+| `packages/pithos/src/cli.ts` | Modify: add `--chain auto|none|held|source` to `task enqueue` and thread it into engine input |
+| `packages/pithos/src/db.ts` | Modify: add non-blocking source/provenance table in the clean-break schema |
+| `packages/pithos/src/rows.ts` | Modify: add source/provenance row decoder if source rows are parsed outside engine-local query shapes |
+| `packages/pithos/test/task-lifecycle.test.ts` | Modify/add: cover auto chaining, explicit/manual combinations, escalation source behavior, Pandora source handoff, and `--chain none` |
+| `packages/pithos/test/cli.test.ts` | Modify: cover CLI flag parsing/help for `--chain` and enqueue output contract |
+| `packages/spawner/templates/_common.md` | Modify: document automatic chain behavior and replace routine manual `--depends-on <held-task-id>` recipes |
+| `packages/spawner/templates/pandora.md.tmpl` | Modify: distinguish escalation-resolution handoffs (`--chain source`) from Adam-facing unrelated Qs (`--chain none`) |
+| `packages/spawner/templates/toil.md.tmpl`, `packages/spawner/templates/greed.md.tmpl`, `packages/spawner/templates/war.md.tmpl` | Modify: role-specific reminders for automatic chaining and escalation/source exceptions |
+| `packages/pithos/README.md` | Modify: document `task enqueue --chain` and source-vs-dependency semantics |
 
 ## 8. Open Questions
 
 - Do we need an explicit future `pithos dependency waive` command for human-approved unblocking, or is `supersede` enough until a real workflow demands waivers?
+- Should explicit `--depends-on` plus default `--chain auto` always combine, or should any manual dependency imply `--chain none`? Current design chooses combination for fan-in, with `--chain none` as the manual-only escape hatch.
+- Should source/provenance be limited to a single source task per task, or should future graph inspection support multiple non-blocking sources? Current design chooses one source to keep Pandora escalation routing simple.

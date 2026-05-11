@@ -223,9 +223,16 @@ const makeCommand = (runtime: RuntimeInput) => {
 	const open = Command.make(
 		"open",
 		{
-			dataDir: Options.text("data-dir").pipe(Options.optional),
-			maxAfk: Options.integer("max-afk").pipe(Options.withDefault(defaultMaxAfk)),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+			maxAfk: Options.integer("max-afk").pipe(
+				Options.withDescription("Maximum number of supervised AFK agent runs pdx may keep active."),
+				Options.withDefault(defaultMaxAfk),
+			),
 			intervalSeconds: Options.integer("interval-seconds").pipe(
+				Options.withDescription("Seconds between pdx reconciliation loops."),
 				Options.withDefault(defaultIntervalSeconds),
 			),
 		},
@@ -240,29 +247,52 @@ const makeCommand = (runtime: RuntimeInput) => {
 					intervalSeconds,
 				});
 			}),
+	).pipe(
+		Command.withDescription("Open the box: start pdx supervision and the Pandora HITL singleton."),
 	);
 
 	const close = Command.make(
 		"close",
 		{
-			dataDir: Options.text("data-dir").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
 		},
 		({ dataDir }) => runCommand(runtime, { command: "close", dataDir: opt(dataDir) }),
+	).pipe(
+		Command.withDescription("Close the box: stop pdx supervision and clean up supervised runs."),
 	);
 
 	const daemonStatus = Command.make(
 		"status",
-		{ dataDir: Options.text("data-dir").pipe(Options.optional) },
+		{
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+		},
 		({ dataDir }) => runCommand(runtime, { command: "daemon.status", dataDir: opt(dataDir) }),
 	).pipe(Command.withDescription("Show daemon state, supervised agents, and queue counts."));
 
 	const daemonLogs = Command.make(
 		"logs",
 		{
-			dataDir: Options.text("data-dir").pipe(Options.optional),
-			limit: Options.integer("limit").pipe(Options.optional),
-			since: Options.text("since").pipe(Options.optional),
-			all: Options.boolean("all"),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+			limit: Options.integer("limit").pipe(
+				Options.withDescription("Maximum number of newest supervisor log records to print."),
+				Options.optional,
+			),
+			since: Options.text("since").pipe(
+				Options.withDescription("Only print supervisor log records at or after this timestamp."),
+				Options.optional,
+			),
+			all: Options.boolean("all").pipe(
+				Options.withDescription("Include all supervisor log records instead of the default limit."),
+			),
 		},
 		({ dataDir, limit, since, all }) =>
 			Effect.gen(function* () {
@@ -289,19 +319,32 @@ const makeCommand = (runtime: RuntimeInput) => {
 		"kill",
 		{
 			runId: Args.text({ name: "run-id" }),
-			dataDir: Options.text("data-dir").pipe(Options.optional),
-			reason: Options.text("reason"),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+			reason: Options.text("reason").pipe(
+				Options.withDescription(
+					"Operator-readable reason recorded before pdx kills the live resource.",
+				),
+			),
 		},
 		({ dataDir, runId, reason }) =>
 			runCommand(runtime, { command: "run.kill", dataDir: opt(dataDir), runId, reason }),
-	);
+	).pipe(Command.withDescription("Kill one live agent run after interrupting Pithos state."));
 
 	const runTranscript = Command.make(
 		"transcript",
 		{
 			runId: Args.text({ name: "run-id" }),
-			dataDir: Options.text("data-dir").pipe(Options.optional),
-			limit: Options.integer("limit").pipe(Options.optional),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+			limit: Options.integer("limit").pipe(
+				Options.withDescription("Maximum number of newest harness transcript events to render."),
+				Options.optional,
+			),
 		},
 		({ dataDir, runId, limit }) =>
 			Effect.gen(function* () {
@@ -318,22 +361,42 @@ const makeCommand = (runtime: RuntimeInput) => {
 			}),
 	).pipe(Command.withDescription("Render an agent harness transcript for a run."));
 
-	const run = Command.make("run").pipe(Command.withSubcommands([runKill, runTranscript]));
+	const run = Command.make("run").pipe(
+		Command.withDescription("Inspect or stop supervised agent runs owned by pdx."),
+		Command.withSubcommands([runKill, runTranscript]),
+	);
 
 	const taskKill = Command.make(
 		"kill",
 		{
 			taskId: Args.text({ name: "task-id" }),
-			dataDir: Options.text("data-dir").pipe(Options.optional),
-			reason: Options.text("reason"),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+			reason: Options.text("reason").pipe(
+				Options.withDescription(
+					"Operator-readable reason recorded before pdx kills the holder run.",
+				),
+			),
 		},
 		({ dataDir, taskId, reason }) =>
 			runCommand(runtime, { command: "task.kill", dataDir: opt(dataDir), taskId, reason }),
+	).pipe(
+		Command.withDescription("Kill the live run holding a task after interrupting Pithos state."),
 	);
 
-	const task = Command.make("task").pipe(Command.withSubcommands([taskKill]));
+	const task = Command.make("task").pipe(
+		Command.withDescription("Operate on live supervision for Pithos tasks."),
+		Command.withSubcommands([taskKill]),
+	);
 
-	return Command.make("pdx").pipe(Command.withSubcommands([open, close, daemon, run, task]));
+	return Command.make("pdx").pipe(
+		Command.withDescription(
+			"Local supervisor for Pithos agent runs, processes, tmux sessions, and Pandora.",
+		),
+		Command.withSubcommands([open, close, daemon, run, task]),
+	);
 };
 
 const program = captureRuntimeInput.pipe(

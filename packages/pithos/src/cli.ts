@@ -262,30 +262,77 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 		),
 	);
 
+const runIdOption = Options.text("run").pipe(
+	Options.withDescription("Pithos run id for the agent run making or owning this transition."),
+);
+const taskIdOption = Options.text("task").pipe(
+	Options.withDescription("Pithos task id for the held task or graph root."),
+);
+const reasonOption = Options.text("reason").pipe(
+	Options.withDescription("Operator-readable reason recorded in Pithos events."),
+);
+const stdinFlag = Options.boolean("stdin").pipe(
+	Options.withDescription("Read the task or artifact body from stdin."),
+);
+
 export const makePithosCommand = (ctx: CliContext) => {
-	const init = Command.make("init", { fresh: Options.boolean("fresh") }, ({ fresh }) =>
-		runCommand(ctx, { command: "init", fresh }),
+	const init = Command.make(
+		"init",
+		{
+			fresh: Options.boolean("fresh").pipe(
+				Options.withDescription(
+					"Remove any existing Pithos database before creating schema and seed data.",
+				),
+			),
+		},
+		({ fresh }) => runCommand(ctx, { command: "init", fresh }),
+	).pipe(
+		Command.withDescription("Create the Pithos database schema and seed built-in agent kinds."),
 	);
 	const scopeUpsert = Command.make(
 		"upsert",
 		{
-			kind: Options.choice("kind", ["global", "repo", "worktree"] as const),
-			path: Options.text("path").pipe(Options.optional),
+			kind: Options.choice("kind", ["global", "repo", "worktree"] as const).pipe(
+				Options.withDescription("Scope kind: global, repository, or worktree."),
+			),
+			path: Options.text("path").pipe(
+				Options.withDescription("Filesystem path for repo/worktree scopes; omit for global scope."),
+				Options.optional,
+			),
 		},
 		({ kind, path }) => runCommand(ctx, { command: "scope.upsert", kind, path: opt(path) }),
+	).pipe(Command.withDescription("Create or update a durable Pithos scope."));
+	const scope = Command.make("scope").pipe(
+		Command.withDescription("Manage durable Pithos scopes used to partition task queues."),
+		Command.withSubcommands([scopeUpsert]),
 	);
-	const scope = Command.make("scope").pipe(Command.withSubcommands([scopeUpsert]));
 	const runUpsert = Command.make(
 		"upsert",
 		{
-			agent: Options.text("agent"),
-			mode: Options.choice("mode", ["afk", "hitl"] as const),
-			scope: Options.text("scope"),
-			cwd: Options.text("cwd"),
-			harnessKind: Options.choice("harness-kind", ["claude", "pi", "system"] as const),
-			sessionLogPath: Options.text("session-log-path"),
-			sessionId: Options.text("session-id"),
-			runId: Options.text("run").pipe(Options.optional),
+			agent: Options.text("agent").pipe(
+				Options.withDescription(
+					"Agent kind for this run, for example pandora, toil, greed, or war.",
+				),
+			),
+			mode: Options.choice("mode", ["afk", "hitl"] as const).pipe(
+				Options.withDescription("Supervision mode: AFK process or HITL tmux session."),
+			),
+			scope: Options.text("scope").pipe(
+				Options.withDescription("Pithos scope id this run belongs to."),
+			),
+			cwd: Options.text("cwd").pipe(
+				Options.withDescription("Working directory the harness should run in."),
+			),
+			harnessKind: Options.choice("harness-kind", ["claude", "pi", "system"] as const).pipe(
+				Options.withDescription("Underlying harness runtime used by the agent run."),
+			),
+			sessionLogPath: Options.text("session-log-path").pipe(
+				Options.withDescription("JSONL harness session log path for agent-facing observability."),
+			),
+			sessionId: Options.text("session-id").pipe(
+				Options.withDescription("Harness session id assigned by the launcher."),
+			),
+			runId: runIdOption.pipe(Options.optional),
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -299,21 +346,25 @@ export const makePithosCommand = (ctx: CliContext) => {
 				sessionId: o.sessionId,
 				runId: opt(o.runId),
 			}),
-	);
+	).pipe(Command.withDescription("Create or update the durable run row for one agent invocation."));
 	const runInspect = Command.make("inspect", { id: Args.text({ name: "run-id" }) }, ({ id }) =>
 		runCommand(ctx, { command: "run.inspect", runId: id }),
-	);
+	).pipe(Command.withDescription("Show one durable Pithos run record."));
 	const runCleanup = Command.make(
 		"cleanup",
-		{ runId: Options.text("run"), reason: Options.text("reason") },
+		{ runId: runIdOption, reason: reasonOption },
 		({ runId, reason }) => runCommand(ctx, { command: "run.cleanup", runId, reason }),
+	).pipe(
+		Command.withDescription(
+			"Mark a naturally ended agent run as cleaned up and release any held task.",
+		),
 	);
 	const runInterrupt = Command.make(
 		"interrupt",
 		{
-			runId: Options.text("run").pipe(Options.optional),
-			taskId: Options.text("task").pipe(Options.optional),
-			reason: Options.text("reason"),
+			runId: runIdOption.pipe(Options.optional),
+			taskId: taskIdOption.pipe(Options.optional),
+			reason: reasonOption,
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -322,36 +373,60 @@ export const makePithosCommand = (ctx: CliContext) => {
 				taskId: opt(o.taskId),
 				reason: o.reason,
 			}),
+	).pipe(
+		Command.withDescription("Deliberately interrupt a live run and fail its held task if present."),
 	);
 	const runTimeout = Command.make(
 		"timeout",
-		{ runId: Options.text("run"), reason: Options.text("reason") },
+		{ runId: runIdOption, reason: reasonOption },
 		({ runId, reason }) => runCommand(ctx, { command: "run.timeout", runId, reason }),
-	);
+	).pipe(Command.withDescription("Mark a non-Pandora no-claim session as timed out."));
 	const runParent = Command.make("run").pipe(
+		Command.withDescription("Manage durable Pithos run records for agent invocations."),
 		Command.withSubcommands([runUpsert, runInspect, runCleanup, runInterrupt, runTimeout]),
 	);
 	const eventsTail = Command.make(
 		"tail",
-		{ limit: Options.integer("limit").pipe(Options.optional) },
+		{
+			limit: Options.integer("limit").pipe(
+				Options.withDescription("Maximum number of newest Pithos events to print."),
+				Options.optional,
+			),
+		},
 		({ limit }) => runCommand(ctx, { command: "events.tail", limit: opt(limit) }),
+	).pipe(Command.withDescription("Print newest durable Pithos events."));
+	const events = Command.make("events").pipe(
+		Command.withDescription("Inspect durable Pithos event history."),
+		Command.withSubcommands([eventsTail]),
 	);
-	const events = Command.make("events").pipe(Command.withSubcommands([eventsTail]));
 	const capability = Options.choice("capability", [
 		"triage",
 		"design",
 		"execute",
 		"escalate",
-	] as const);
+	] as const).pipe(
+		Options.withDescription(
+			"Task capability used for claim authorization: triage, design, execute, or escalate.",
+		),
+	);
 	const taskEnqueue = Command.make(
 		"enqueue",
 		{
-			scope: Options.text("scope"),
+			scope: Options.text("scope").pipe(
+				Options.withDescription("Pithos scope id where the task will be queued."),
+			),
 			capability,
-			title: Options.text("title"),
-			stdin: Options.boolean("stdin"),
-			runId: Options.text("run").pipe(Options.optional),
-			dependsOn: Options.text("depends-on").pipe(Options.repeated),
+			title: Options.text("title").pipe(
+				Options.withDescription("Short task title shown in graph and inspection output."),
+			),
+			stdin: stdinFlag,
+			runId: runIdOption.pipe(Options.optional),
+			dependsOn: Options.text("depends-on").pipe(
+				Options.withDescription(
+					"Upstream task id that must be done before this task is claimable; repeatable.",
+				),
+				Options.repeated,
+			),
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -363,10 +438,16 @@ export const makePithosCommand = (ctx: CliContext) => {
 				runId: opt(o.runId),
 				dependsOn: o.dependsOn,
 			}),
+	).pipe(
+		Command.withDescription("Queue a new durable task; body is read from stdin when requested."),
 	);
 	const taskClaim = Command.make(
 		"claim",
-		{ runId: Options.text("run").pipe(Options.optional), scope: Options.text("scope"), capability },
+		{
+			runId: runIdOption.pipe(Options.optional),
+			scope: Options.text("scope").pipe(Options.withDescription("Pithos scope id to claim from.")),
+			capability,
+		},
 		(o) =>
 			runCommand(ctx, {
 				command: "task.claim",
@@ -374,13 +455,18 @@ export const makePithosCommand = (ctx: CliContext) => {
 				scope: o.scope,
 				capability: o.capability,
 			}),
+	).pipe(
+		Command.withDescription("Claim one claimable task for a run and return its fencing token."),
 	);
 	const taskHeartbeat = Command.make(
 		"heartbeat",
 		{
-			runId: Options.text("run").pipe(Options.optional),
-			taskId: Options.text("task").pipe(Options.optional),
-			token: Options.integer("token").pipe(Options.optional),
+			runId: runIdOption.pipe(Options.optional),
+			taskId: taskIdOption.pipe(Options.optional),
+			token: Options.integer("token").pipe(
+				Options.withDescription("Current fencing token for the held task."),
+				Options.optional,
+			),
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -389,14 +475,16 @@ export const makePithosCommand = (ctx: CliContext) => {
 				taskId: opt(o.taskId),
 				token: opt(o.token),
 			}),
-	);
+	).pipe(Command.withDescription("Record liveness for a held task claim."));
 	const taskComplete = Command.make(
 		"complete",
 		{
 			taskId: Args.text({ name: "task-id" }),
-			runId: Options.text("run").pipe(Options.optional),
-			token: Options.integer("token"),
-			stdin: Options.boolean("stdin"),
+			runId: runIdOption.pipe(Options.optional),
+			token: Options.integer("token").pipe(
+				Options.withDescription("Current fencing token proving ownership of the held task."),
+			),
+			stdin: stdinFlag,
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -406,14 +494,16 @@ export const makePithosCommand = (ctx: CliContext) => {
 				token: o.token,
 				stdin: o.stdin,
 			}),
-	);
+	).pipe(Command.withDescription("Complete a held task using its current fencing token."));
 	const taskFail = Command.make(
 		"fail",
 		{
 			taskId: Args.text({ name: "task-id" }),
-			runId: Options.text("run").pipe(Options.optional),
-			token: Options.integer("token"),
-			reason: Options.text("reason"),
+			runId: runIdOption.pipe(Options.optional),
+			token: Options.integer("token").pipe(
+				Options.withDescription("Current fencing token proving ownership of the held task."),
+			),
+			reason: reasonOption,
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -423,15 +513,19 @@ export const makePithosCommand = (ctx: CliContext) => {
 				token: o.token,
 				reason: o.reason,
 			}),
-	);
+	).pipe(Command.withDescription("Fail a held task using its current fencing token."));
 	const artifactAdd = Command.make(
 		"add",
 		{
 			taskId: Args.text({ name: "task-id" }),
-			runId: Options.text("run").pipe(Options.optional),
-			kind: Options.text("kind"),
-			title: Options.text("title"),
-			stdin: Options.boolean("stdin"),
+			runId: runIdOption.pipe(Options.optional),
+			kind: Options.text("kind").pipe(
+				Options.withDescription("Artifact kind, for example note, patch, log, or decision."),
+			),
+			title: Options.text("title").pipe(
+				Options.withDescription("Short artifact title shown with the task."),
+			),
+			stdin: stdinFlag,
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -442,17 +536,26 @@ export const makePithosCommand = (ctx: CliContext) => {
 				title: o.title,
 				stdin: o.stdin,
 			}),
+	).pipe(
+		Command.withDescription(
+			"Attach an artifact to a task; body is read from stdin when requested.",
+		),
 	);
-	const taskArtifact = Command.make("artifact").pipe(Command.withSubcommands([artifactAdd]));
+	const taskArtifact = Command.make("artifact").pipe(
+		Command.withDescription("Attach evidence or output to a Pithos task."),
+		Command.withSubcommands([artifactAdd]),
+	);
 	const taskInspect = Command.make("inspect", { taskId: Args.text({ name: "task-id" }) }, (o) =>
 		runCommand(ctx, { command: "task.inspect", taskId: o.taskId }),
+	).pipe(
+		Command.withDescription("Show one durable Pithos task record and related graph metadata."),
 	);
 	const taskCancel = Command.make(
 		"cancel",
 		{
 			taskId: Args.text({ name: "task-id" }),
-			runId: Options.text("run").pipe(Options.optional),
-			reason: Options.text("reason"),
+			runId: runIdOption.pipe(Options.optional),
+			reason: reasonOption,
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -461,16 +564,22 @@ export const makePithosCommand = (ctx: CliContext) => {
 				runId: opt(o.runId),
 				reason: o.reason,
 			}),
-	);
+	).pipe(Command.withDescription("Cancel non-held work that should not continue."));
 	const taskSupersede = Command.make(
 		"supersede",
 		{
 			taskId: Args.text({ name: "task-id" }),
-			runId: Options.text("run").pipe(Options.optional),
-			reason: Options.text("reason"),
-			title: Options.text("title").pipe(Options.optional),
-			stdin: Options.boolean("stdin"),
-			scope: Options.text("scope").pipe(Options.optional),
+			runId: runIdOption.pipe(Options.optional),
+			reason: reasonOption,
+			title: Options.text("title").pipe(
+				Options.withDescription("Replacement task title; defaults to the superseded task title."),
+				Options.optional,
+			),
+			stdin: stdinFlag,
+			scope: Options.text("scope").pipe(
+				Options.withDescription("Replacement task scope; defaults to the superseded task scope."),
+				Options.optional,
+			),
 			capability: capability.pipe(Options.optional),
 		},
 		(o) =>
@@ -484,8 +593,13 @@ export const makePithosCommand = (ctx: CliContext) => {
 				scope: opt(o.scope),
 				capability: opt(o.capability),
 			}),
+	).pipe(
+		Command.withDescription(
+			"Replace a task with a fresh successor while preserving supersession history.",
+		),
 	);
 	const task = Command.make("task").pipe(
+		Command.withDescription("Manage durable Pithos tasks, claims, fencing, and supersession."),
 		Command.withSubcommands([
 			taskEnqueue,
 			taskClaim,
@@ -501,11 +615,20 @@ export const makePithosCommand = (ctx: CliContext) => {
 	const graphInspect = Command.make(
 		"inspect",
 		{
-			taskId: Options.text("task").pipe(Options.optional),
-			scope: Options.text("scope").pipe(Options.optional),
-			all: Options.boolean("all"),
-			flat: Options.boolean("flat"),
-			dump: Options.boolean("dump"),
+			taskId: taskIdOption.pipe(Options.optional),
+			scope: Options.text("scope").pipe(
+				Options.withDescription("Restrict graph output to one Pithos scope."),
+				Options.optional,
+			),
+			all: Options.boolean("all").pipe(
+				Options.withDescription("Include all tasks instead of only active graph roots."),
+			),
+			flat: Options.boolean("flat").pipe(
+				Options.withDescription("Print a flat task list instead of a dependency tree."),
+			),
+			dump: Options.boolean("dump").pipe(
+				Options.withDescription("Print raw graph data for agents instead of the human tree."),
+			),
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -516,14 +639,27 @@ export const makePithosCommand = (ctx: CliContext) => {
 				flat: o.flat,
 				dump: o.dump,
 			}),
+	).pipe(Command.withDescription("Render dependency DAGs and supersession history for tasks."));
+	const graph = Command.make("graph").pipe(
+		Command.withDescription("Inspect Pithos task dependency and supersession graphs."),
+		Command.withSubcommands([graphInspect]),
 	);
-	const graph = Command.make("graph").pipe(Command.withSubcommands([graphInspect]));
 	const briefing = Command.make(
 		"briefing",
-		{ agent: Options.text("agent").pipe(Options.optional) },
+		{
+			agent: Options.text("agent").pipe(
+				Options.withDescription("Agent kind to tailor the briefing for."),
+				Options.optional,
+			),
+		},
 		(o) => runCommand(ctx, { command: "briefing", agent: opt(o.agent) }),
+	).pipe(
+		Command.withDescription("Print an agent-facing briefing of current claimable work and state."),
 	);
 	return Command.make("pithos").pipe(
+		Command.withDescription(
+			"Durable state CLI for tasks, runs, claims, artifacts, events, and graph invariants.",
+		),
 		Command.withSubcommands([init, scope, runParent, task, graph, events, briefing]),
 	);
 };

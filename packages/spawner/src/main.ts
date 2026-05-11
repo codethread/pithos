@@ -1,4 +1,4 @@
-import { CliConfig, Command, HelpDoc, Options } from "@effect/cli";
+import { CliConfig, Command, Options } from "@effect/cli";
 import * as ValidationError from "@effect/cli/ValidationError";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, ParseResult, Schema } from "effect";
@@ -75,20 +75,14 @@ const previewCommand = Command.make(
 		preview({ agent, mode, scopeId, runId, sessionId, cwd }),
 ).pipe(
 	Command.withDescription(
-		HelpDoc.blocks([
-			HelpDoc.p(
-				"Render an agent prompt and harness launch description without touching Pithos state.",
-			),
-			HelpDoc.p("Example:"),
-			HelpDoc.p(
-				"  pandora-spawn preview --agent war --mode afk --scope scope_repo --run run_1 --session-id session_1 --cwd /repo",
-			),
-		]),
+		"Render an agent prompt and harness launch description without touching Pithos state.",
 	),
 );
 
 const command = Command.make("pandora-spawn").pipe(
-	Command.withDescription("Spawner preview CLI. Launch/status/kill are owned by pdx."),
+	Command.withDescription(
+		"Harness prompt renderer for Pithos agent runs. Launch, kill, and supervision are owned by pdx.",
+	),
 	Command.withSubcommands([previewCommand]),
 );
 

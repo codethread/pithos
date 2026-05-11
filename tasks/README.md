@@ -36,9 +36,49 @@ Tasks 015-018 are AFK vertical slices through the public `pithos` CLI, service b
 
 No HITL slice is required: the stdin payload decisions are already captured in the pending change spec, and the normative specs identify the exact command-contract sections to update.
 
+## Automatic task chaining and source-link plan
+
+### Problem statement / MVP goal
+
+Implement automatic task-chain preservation so agents create durable work threads instead of flat task islands. The MVP adds `pithos task enqueue --chain auto|none|held|source`, records non-blocking source links for escalations, routes Pandora escalation-resolution handoffs back to the source task, and updates prompts/docs so routine agents rely on default auto chaining.
+
+The product goal is not to teach graph theory. Pithos stores a full task graph for historical interrogation; agents and Adam talk about task chains as the delegation story reconstructed from that graph.
+
+### Important references
+
+- `specs/task-graph.md`
+- `specs/control-plane-supervision.md`
+- `UBIQUITOUS_LANGUAGE.md`
+- `packages/pithos/src/cli.ts`
+- `packages/pithos/src/engine.ts`
+- `packages/pithos/src/db.ts`
+- `packages/pithos/src/rows.ts`
+- `packages/pithos/test/task-lifecycle.test.ts`
+- `packages/pithos/test/cli.test.ts`
+- `packages/spawner/templates/_common.md`
+- `packages/spawner/templates/pandora.md.tmpl`
+- `packages/spawner/templates/toil.md.tmpl`
+- `packages/spawner/templates/greed.md.tmpl`
+- `packages/spawner/templates/war.md.tmpl`
+- `packages/pithos/README.md`
+
+### Task strategy
+
+Tasks 023-027 are AFK slices through pure graph policy, CLI, engine, DB relationships, read surfaces, events, and tests. Task 023 creates a pure in-memory graph/chain policy core with broad fast tests before any DB wiring. Task 024 establishes the flag/output contract. Task 025 implements ordinary held-task dependency continuation. Task 026 adds source links for immediately-claimable escalations. Task 027 completes the Pandora handoff from held escalation back to source work. Task 028 is blocked on behavior and updates prompts/docs after the CLI contract exists.
+
+No HITL slice is required: Adam confirmed the core language and prompt-surface decisions. Routine prompts should teach default auto plus explicit `--chain none`; `--chain held` and `--chain source` remain advanced/fail-loud CLI modes rather than normal recipes.
+
 ## Developer Notes
 
 Append notes here. Do not rewrite earlier notes.
+
+### Task 023-028: Automatic task chaining plan — 2026-05-11
+
+- Plan added after updating `UBIQUITOUS_LANGUAGE.md` and `specs/task-graph.md` to define Task graph, Task chain, Source link, and Attached context.
+- Existing `tasks/index.yml` uses repository-local `task-###` ids and mixed `file`/`task_file` fields rather than the generic integer-id schema, so new slices preserve the established plan format for compatibility.
+- No HITL task is needed: Adam confirmed `source` over `relates_to`, and confirmed the agent prompt surface should be default auto plus `--chain none` mainly for Pandora.
+- Adam requested lots of graph-side tests because this is mostly pure data behavior. Added task 023 as an explicit pure in-memory graph/chain policy core with broad fast Vitest coverage before DB/CLI slices.
+- Keep task 028 blocked until behavior exists; do not update agent prompts to mention `--chain` before the CLI supports it.
 
 ### Task 015-019: Stdin payload API plan — 2026-05-10
 

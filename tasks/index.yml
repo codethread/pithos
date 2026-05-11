@@ -298,3 +298,40 @@ tasks:
     blocked_by:
       - task-020
       - task-021
+  - id: task-023
+    description: "Pure chain graph policy core"
+    task_file: ./task-023.md
+    status: pending
+    blocked_by:
+      - task-022
+  - id: task-024
+    description: "Enqueue chain flag baseline"
+    task_file: ./task-024.md
+    status: pending
+    blocked_by:
+      - task-023
+  - id: task-025
+    description: "Auto dependency chain continuation"
+    task_file: ./task-025.md
+    status: pending
+    blocked_by:
+      - task-024
+  - id: task-026
+    description: "Escalation source links"
+    task_file: ./task-026.md
+    status: pending
+    blocked_by:
+      - task-024
+  - id: task-027
+    description: "Escalation source handoff"
+    task_file: ./task-027.md
+    status: pending
+    blocked_by:
+      - task-025
+      - task-026
+  - id: task-028
+    description: "Auto-chain docs and prompts"
+    task_file: ./task-028.md
+    status: pending
+    blocked_by:
+      - task-027

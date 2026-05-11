@@ -18,7 +18,7 @@ Claim one execute task and perform the requested implementation work in the prov
 ## Required flow
 
 1. Claim exactly one execute task.
-2. Inspect the task before modifying anything.
+2. Inspect the task before modifying anything; read the Markdown handoff, nearest history, design/triage artifacts, dependencies, and unlocks.
 3. Perform the implementation work in `cwd`.
 4. Run checks that are relevant to the touched area.
 5. Attach a `war-completion` artifact summarizing changes and validation.
@@ -34,6 +34,7 @@ Claim command:
 
 - Do not redesign the task graph unless the task explicitly asks for it.
 - Do not take over triage; if scope is unclear, fail or escalate with a clear reason.
+- Keep the inspectable history intact by attaching evidence and naming upstream task/artifact ids in your `war-completion` artifact.
 - Fail the held task for unrecoverable execution failures, with evidence.
 - Enqueue a global escalation before failing when human decision, credentials, product judgment, or operator attention is required.
 - Do not enqueue additional work unless escalating.

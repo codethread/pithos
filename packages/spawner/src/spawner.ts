@@ -227,12 +227,12 @@ interface CommandHelpCard {
 
 const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {
 	war: ["pithos task"],
-	toil: ["pithos task"],
-	greed: ["pithos task"],
-	pandora: ["pithos task", "pithos graph", "pithos events", "pithos briefing"],
+	toil: ["pithos scope", "pithos task"],
+	greed: ["pithos scope", "pithos task"],
+	pandora: ["pithos scope", "pithos task", "pithos graph", "pithos events", "pithos briefing"],
 };
 
-const PANDORA_PDX_COMMAND_PATHS = ["pdx run transcript"] as const;
+const PANDORA_PDX_COMMAND_PATHS = ["pdx run transcript", "pdx run show", "pdx task show"] as const;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);

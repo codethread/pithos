@@ -28,7 +28,7 @@ pandora-spawn preview \
   --cwd "$PWD"
 ```
 
-`pandora-spawn` does not register runs, query Pithos, inject messages, report status, nudge, kill, or clean up lifecycle state. Those policies belong to `pdx` slices.
+`pandora-spawn` does not register runs, query Pithos, inject messages, report status, nudge, kill, or clean up lifecycle state. Those policies belong to `pdx`.
 
 ## Built-in agent roles
 

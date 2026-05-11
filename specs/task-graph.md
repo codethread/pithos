@@ -446,7 +446,7 @@ The command returns JSON:
 
 ### `pithos task inspect <id>`
 
-Default output is an agent-readable Markdown handoff. It expands the current task and at most two upstream dependency-lineage tasks, nesting each task's artifacts under the task that produced them. Older ancestors remain discoverable because every rendered task row includes its task id; agents can inspect any upstream or downstream task id to move the local context window along the chain.
+Default output is an agent-readable Markdown handoff. It expands the current task and the nearest two upstream dependency-lineage tasks, nesting each task's artifacts under the task that produced them. Older ancestors are intentionally omitted from the local window but remain discoverable because every rendered task row includes its task id; agents can inspect any upstream or downstream task id to move the context window along the chain.
 
 Example default shape:
 

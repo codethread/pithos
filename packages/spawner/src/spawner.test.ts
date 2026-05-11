@@ -41,6 +41,31 @@ const pithosHelpTree = {
 		},
 		{
 			tool: "pithos",
+			name: "scope",
+			path: "pithos scope",
+			usage: "scope <command>",
+			description: "Manage durable Pithos scopes used to partition task queues.",
+			subcommands: [
+				{
+					tool: "pithos",
+					name: "list",
+					path: "pithos scope list",
+					usage: "list [--all]",
+					description: "List durable Pithos scopes with task/run counts and archive state.",
+					subcommands: [],
+				},
+				{
+					tool: "pithos",
+					name: "upsert",
+					path: "pithos scope upsert",
+					usage: "upsert --kind global | repo | worktree [--path text]",
+					description: "Create or update a durable Pithos scope.",
+					subcommands: [],
+				},
+			],
+		},
+		{
+			tool: "pithos",
 			name: "run",
 			path: "pithos run",
 			usage: "run <command>",
@@ -193,6 +218,31 @@ const pdxHelpTree = {
 					description: "Render an agent harness transcript for a run.",
 					subcommands: [],
 				},
+				{
+					tool: "pdx",
+					name: "show",
+					path: "pdx run show",
+					usage: "pdx run show [--data-dir text] <run-id>",
+					description: "Jump the current tmux client to a supervised run session.",
+					subcommands: [],
+				},
+			],
+		},
+		{
+			tool: "pdx",
+			name: "task",
+			path: "pdx task",
+			usage: "pdx task",
+			description: "Operate on live supervision for Pithos tasks.",
+			subcommands: [
+				{
+					tool: "pdx",
+					name: "show",
+					path: "pdx task show",
+					usage: "pdx task show [--data-dir text] <task-id>",
+					description: "Jump to the live tmux session holding a task, if any.",
+					subcommands: [],
+				},
 			],
 		},
 	],
@@ -330,6 +380,17 @@ describe("bundled agent templates", () => {
 		expect(templateText).toContain("Use `--chain none` for unrelated work");
 		expect(templateText).toContain("Resolving the held escalation's source: omit `--chain`");
 		expect(templateText).toContain("pass `--chain none --depends-on task_X`");
+		expect(templateText).toContain("`task inspect` renders a Markdown handoff by default");
+		expect(templateText).toContain("Use the fencing token returned by claim");
+		expect(templateText).toContain(
+			"A task chain is the inspectable history Adam will review later",
+		);
+		expect(templateText).toContain(
+			"Use Pithos for durable work state and pdx for live run/session transcripts",
+		);
+		expect(templateText).toContain("Use `$PITHOS_BIN scope list` to discover existing scopes");
+		expect(templateText).toContain("Execution work should usually target a worktree scope");
+		expect(templateText).toContain("use `pdx run show <run-id>` if you know the run");
 		expect(templateText).not.toContain("--depends-on <held-task-id>");
 		expect(templateText).not.toContain("Use Pithos task commands for inspect");
 		expect(templateText).not.toContain("Complete with `pithos task complete");
@@ -396,6 +457,28 @@ describe("renderAgent", () => {
 		expect(rendered.prompt).not.toContain("Use Pithos task commands for inspect");
 	});
 
+	it("renders scope command cards for routing agents", () => {
+		for (const agent of ["toil", "greed"] as const) {
+			const rendered = renderAgent(
+				{ ...base, agent, mode: "afk" },
+				fakeRenderServices(
+					agentsFile({
+						agent,
+						mode: "afk",
+						harnessKind: "pi",
+						claims: agent === "toil" ? ["triage"] : ["design"],
+						enqueues:
+							agent === "toil"
+								? ["triage", "design", "execute", "escalate"]
+								: ["triage", "design", "escalate"],
+					}),
+				),
+			);
+			expect(rendered.prompt).toContain("pithos scope");
+			expect(rendered.prompt).toContain("pithos task");
+		}
+	});
+
 	it("renders Pandora prompt with generated Pithos and pdx command cards", () => {
 		const rendered = renderAgent(
 			{ ...base, agent: "pandora", mode: "hitl" },
@@ -409,12 +492,15 @@ describe("renderAgent", () => {
 				}),
 			),
 		);
+		expect(rendered.prompt).toContain("pithos scope");
 		expect(rendered.prompt).toContain("pithos briefing");
 		expect(rendered.prompt).toContain("pithos graph inspect");
 		expect(rendered.prompt).toContain("pithos events tail");
 		expect(rendered.prompt).not.toContain("pdx daemon status");
 		expect(rendered.prompt).not.toContain("pdx daemon logs");
 		expect(rendered.prompt).toContain("pdx run transcript");
+		expect(rendered.prompt).toContain("pdx run show");
+		expect(rendered.prompt).toContain("pdx task show");
 	});
 
 	it("fails loudly when configured pdx command cards are missing", () => {

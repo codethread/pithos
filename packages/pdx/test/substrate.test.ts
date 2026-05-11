@@ -1306,6 +1306,7 @@ describe("pdx substrate", () => {
 			bodyFile: undefined,
 			runId: "run_hitl",
 			dependsOn: [],
+			chain: "auto",
 		});
 		engine.claim({ runId: "run_hitl", scope: repo, capability: "design" });
 		const server = await run(
@@ -2714,6 +2715,7 @@ describe("pdx substrate", () => {
 			bodyFile: undefined,
 			runId: "run_pandora_seed",
 			dependsOn: [],
+			chain: "auto",
 		});
 		const registry = await run(makeRegistry);
 		const launches: LaunchAgentResult[] = [];
@@ -2831,6 +2833,7 @@ describe("pdx substrate", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		});
 		const claimed = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		expect(claimed.task.id).toBe(enqueued.task.id);

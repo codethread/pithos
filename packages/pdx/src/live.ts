@@ -217,6 +217,7 @@ const pithosClient = (dbPath: string): PithosClientService => {
 						bodyFile: undefined,
 						runId: input.runId,
 						dependsOn: input.dependsOn ?? [],
+						chain: "auto",
 					}),
 			),
 		briefing: () => run("pithos briefing", () => engine.briefing({ agent: undefined }).ready),

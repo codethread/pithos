@@ -138,6 +138,34 @@ const enqueueGlobalTriage = async (dbPath: string, runId: string, title: string,
 	return (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id;
 };
 
+const taskDependencies = (dbPath: string, taskId: string): readonly string[] => {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return db
+			.prepare(
+				"SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ? ORDER BY depends_on_task_id ASC",
+			)
+			.pluck()
+			.all(taskId) as string[];
+	} finally {
+		db.close();
+	}
+};
+
+const taskCreatedPayload = (dbPath: string, taskId: string) => {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return JSON.parse(
+			db
+				.prepare("SELECT payload_json FROM events WHERE type = 'task.created' AND task_id = ?")
+				.pluck()
+				.get(taskId) as string,
+		) as unknown;
+	} finally {
+		db.close();
+	}
+};
+
 const taskBody = (dbPath: string, taskId: string) => {
 	const db = new Database(dbPath, { readonly: true });
 	try {
@@ -722,6 +750,142 @@ describe("pithos cli", () => {
 		await expect(
 			runCli(completeArgs("task_missing", ["--result-file", "result.json"]), tempDb()),
 		).rejects.toThrow("--result-file");
+	});
+
+	it("defaults enqueue chain to auto and returns deterministic chain metadata", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		const result = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"default chain",
+				"--stdin",
+				"--run",
+				"run_toil",
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "body" },
+		);
+		const output = JSON.parse(result.stdout[0] ?? "") as {
+			readonly task: { readonly id: string };
+			readonly chain: unknown;
+		};
+		expect(output.chain).toEqual({
+			policy: "auto",
+			applied: "flat_no_held_task",
+			held_task_id: null,
+			source_task_id: null,
+			final_dependency_ids: [],
+		});
+		expect(taskCreatedPayload(dbPath, output.task.id)).toMatchObject({ chain: output.chain });
+	});
+
+	it("keeps --chain none manual-only with explicit dependencies", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		const blocker = await enqueueGlobalTriage(dbPath, "run_toil", "manual blocker", "body");
+		const result = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"design",
+				"--title",
+				"manual child",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				blocker,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "body" },
+		);
+		const output = JSON.parse(result.stdout[0] ?? "") as {
+			readonly task: { readonly id: string };
+			readonly chain: unknown;
+		};
+		expect(output.chain).toEqual({
+			policy: "none",
+			applied: "none_selected",
+			held_task_id: null,
+			source_task_id: null,
+			final_dependency_ids: [blocker],
+		});
+		expect(taskDependencies(dbPath, output.task.id)).toEqual([blocker]);
+	});
+
+	it("returns validation JSON for invalid --chain values before loading config", async () => {
+		const result = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"bad chain",
+				"--stdin",
+				"--chain",
+				"bogus",
+			],
+			tempDb(),
+			{ _tag: "RedirectedText", text: "body" },
+		);
+		expect(JSON.parse(result.stderr[0] ?? "")).toEqual({
+			ok: false,
+			error: {
+				code: "VALIDATION_ERROR",
+				message: "Invalid --chain value: 'bogus'. Valid values: auto, none, held, source",
+			},
+		});
+		expect(result.exitCode).toBe(2);
+		expect(result.configRead).toBe(false);
+	});
+
+	it("accepts held and source modes and fails loudly without a held task", async () => {
+		for (const chain of ["held", "source"] as const) {
+			const dbPath = tempDb();
+			await runCli(["init", "--fresh"], dbPath);
+			await upsertRun(dbPath, "run_toil");
+			const result = await runCli(
+				[
+					"task",
+					"enqueue",
+					"--scope",
+					"global",
+					"--capability",
+					"triage",
+					"--title",
+					`${chain} chain`,
+					"--stdin",
+					"--run",
+					"run_toil",
+					"--chain",
+					chain,
+				],
+				dbPath,
+				{ _tag: "RedirectedText", text: "body" },
+			);
+			expect(JSON.parse(result.stderr[0] ?? "")).toEqual({
+				ok: false,
+				error: { code: "VALIDATION_ERROR", message: `--chain ${chain} requires a held task` },
+			});
+			expect(result.exitCode).toBe(2);
+		}
 	});
 
 	it("returns validation JSON when enqueue omits --stdin", async () => {

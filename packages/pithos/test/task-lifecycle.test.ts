@@ -71,6 +71,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		});
 		const claimed = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		expect(claimed.task.id).toBe(enq.task.id);
@@ -112,6 +113,7 @@ describe("task lifecycle", () => {
 					bodyFile: undefined,
 					runId: "run_pdx",
 					dependsOn: [],
+					chain: "auto",
 				}),
 			).toThrow(PithosError);
 		}
@@ -124,6 +126,7 @@ describe("task lifecycle", () => {
 				bodyFile: undefined,
 				runId: "run_toil",
 				dependsOn: [],
+				chain: "auto",
 			}),
 		).toThrow(PithosError);
 		for (const capability of ["design", "execute", "escalate"] as const) {
@@ -144,6 +147,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		});
 		expect(engine.claim({ runId: "run_war", scope: repo, capability: "execute" }).task.id).toEqual(
 			expect.any(String),
@@ -166,6 +170,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		const db = new Database(dbPath);
 		db.prepare("UPDATE scopes SET archived_at = CURRENT_TIMESTAMP WHERE id = ?").run(repo);
@@ -182,6 +187,7 @@ describe("task lifecycle", () => {
 				bodyFile: undefined,
 				runId: "run_toil",
 				dependsOn: [],
+				chain: "auto",
 			}),
 		).toThrow(/scope is archived/);
 		expect(() => engine.claim({ runId: "run_war", scope: repo, capability: "execute" })).toThrow(
@@ -212,6 +218,7 @@ describe("task lifecycle", () => {
 				bodyFile: undefined,
 				runId: "other",
 				dependsOn: [],
+				chain: "auto",
 			}),
 		).toThrow(PithosError);
 		const blocker = engine.enqueue({
@@ -222,6 +229,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: undefined,
 			dependsOn: [],
+			chain: "auto",
 		});
 		expect(() =>
 			engine.enqueue({
@@ -232,6 +240,7 @@ describe("task lifecycle", () => {
 				bodyFile: undefined,
 				runId: undefined,
 				dependsOn: [blocker.task.id, blocker.task.id],
+				chain: "auto",
 			}),
 		).toThrow(PithosError);
 		engine.enqueue({
@@ -242,6 +251,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: undefined,
 			dependsOn: [blocker.task.id],
+			chain: "auto",
 		});
 		expect(() => engine.claim({ runId: "run_war", scope: repo, capability: "execute" })).toThrow(
 			PithosError,
@@ -258,6 +268,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		expect(() => engine.heartbeat({ runId: "run_war", taskId: task, token: undefined })).toThrow(
@@ -285,6 +296,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		expect(engine.runCleanup({ runId: "run_war", reason: "process exited" })).toMatchObject({
@@ -358,6 +370,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		expect(() => engine.runInterrupt({ runId: undefined, taskId: task, reason: "stop" })).toThrow(
 			PithosError,
@@ -428,6 +441,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war2", scope: repo, capability: "execute" });
 		expect(() => engine.runTimeout({ runId: "run_war2", reason: "no claim" })).toThrow(PithosError);
@@ -445,6 +459,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		expect(engine.cancel({ taskId: queued, runId: "run_toil", reason: "not needed" })).toEqual({
 			ok: true,
@@ -462,6 +477,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		expect(() => engine.cancel({ taskId: held, runId: "run_toil", reason: "bad" })).toThrow(
@@ -479,6 +495,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		const oldDesign = engine.enqueue({
 			scope: "global",
@@ -488,6 +505,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [triage],
+			chain: "auto",
 		}).task.id;
 		const branchDesign = engine.enqueue({
 			scope: "global",
@@ -497,6 +515,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [triage],
+			chain: "auto",
 		}).task.id;
 		const replacement = engine.supersede({
 			taskId: oldDesign,
@@ -523,6 +542,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [replacement.task.id, branchDesign],
+			chain: "auto",
 		}).task.id;
 		const sibling = engine.enqueue({
 			scope: repo,
@@ -532,6 +552,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [replacement.task.id],
+			chain: "auto",
 		}).task.id;
 		const db = new Database(dbPath);
 		const setCreatedAt = db.prepare("UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?");
@@ -622,6 +643,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		const downstream = engine.enqueue({
 			scope: repo,
@@ -631,6 +653,7 @@ describe("task lifecycle", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [blocker],
+			chain: "auto",
 		}).task.id;
 		expect(engine.taskInspect({ taskId: downstream })).toMatchObject({
 			ok: true,

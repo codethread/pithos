@@ -220,15 +220,15 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 > Note: `control-plane-supervision.md` supersedes the command paths, capability vocabulary, and authorization requirements below. The graph semantics in this spec remain normative, but the post-rewrite public surface uses nested commands such as `pithos task enqueue`, `pithos task claim`, `pithos task inspect`, and `pithos graph inspect`, with capabilities limited to `triage`, `design`, `execute`, and `escalate`.
 
-| Command                           | Change           | Contract                                                                                                                                                                                                                                 |
-| --------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pithos task enqueue`             | Modify           | Support repeatable manual `--depends-on <task-id>` plus `--chain auto                                                                                                                                                                    | none | held | source`. All referenced dependency/source tasks must exist. Duplicate dependency IDs fail validation. Requires a resolved run, `--stdin`with non-empty body, known capability, and`agent_enqueues` authorization. |
-| `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
-| `pithos task inspect <id>`        | Expand output    | Return full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                     |
-| `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                     |
-| `pithos task supersede <task-id>` | New              | Create a replacement task with an explicit `--stdin` replacement body, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.        |
-| `pithos briefing`                 | Modify output    | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items.                                                                                                                                  |
-| `pithos tail`                     | New event types  | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows.                                                                                                                                                   |
+| Command                           | Change           | Contract                                                                                                                                                                                                                                                                                               |
+| --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pithos task enqueue`             | Modify           | Support repeatable manual `--depends-on <task-id>` plus `--chain auto\|none\|held\|source`. All referenced dependency/source tasks must exist. Duplicate dependency IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, and `agent_enqueues` authorization. |
+| `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task.                                                               |
+| `pithos task inspect <id>`        | Expand output    | Return full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                                                                                   |
+| `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                                                                                   |
+| `pithos task supersede <task-id>` | New              | Create a replacement task with an explicit `--stdin` replacement body, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.                                                                      |
+| `pithos briefing`                 | Modify output    | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items.                                                                                                                                                                                                |
+| `pithos tail`                     | New event types  | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows.                                                                                                                                                                                                                 |
 
 ### `pithos task enqueue`
 
@@ -268,12 +268,14 @@ A successful enqueue returns the applied chain decision so agents can see whethe
 		"applied": "depends_on_source",
 		"held_task_id": "task_escalation",
 		"source_task_id": "task_design",
-		"depends_on_task_ids": ["task_design"]
+		"final_dependency_ids": ["task_design"]
 	}
 }
 ```
 
 #### Chain policy
+
+Implementation note: task-024 implements the public flag, default `auto`, no-held baseline, `none`, validation, and chain metadata. Held-task implicit dependencies and source-link persistence are pending the follow-up automatic chaining slices.
 
 `--chain` controls implicit relationships derived from the actor run's currently held task. `--depends-on` controls explicit manual blocking dependencies. The final blocking dependency set is:
 

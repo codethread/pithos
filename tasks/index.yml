@@ -307,7 +307,7 @@ tasks:
   - id: task-024
     description: "Enqueue chain flag baseline"
     task_file: ./task-024.md
-    status: pending
+    status: complete
     blocked_by:
       - task-023
   - id: task-025

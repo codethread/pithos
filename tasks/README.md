@@ -72,6 +72,12 @@ No HITL slice is required: Adam confirmed the core language and prompt-surface d
 
 Append notes here. Do not rewrite earlier notes.
 
+### Task 024: Enqueue chain flag baseline — 2026-05-11
+
+- Added `pithos task enqueue --chain auto|none|held|source` with CLI-boundary validation, default `auto`, and chain metadata in enqueue output plus `task.created` payloads.
+- Wired enqueue through the pure chain-policy resolver for the no-held baseline; `--chain none --depends-on <task-id>` remains manual-only and source-link storage / held-task implicit edges remain later-slice work.
+- Validation run: `pnpm typecheck && pnpm --filter @pithos/pithos test`; `pnpm lint && pnpm test && pnpm run build`.
+
 ### Task 023: Pure chain graph policy core — 2026-05-11
 
 - Added `packages/pithos/src/chain-policy.ts` as a pure, DB-free resolver/helper module for automatic chaining decisions, dependency duplicate detection, dependency cycle checks, source-excluding dependency lineage, unresolved dependency blockers, and closure over dependency/source/supersession neighbors.

@@ -7,6 +7,7 @@ import { NodeContext } from "@effect/platform-node";
 import type { Config } from "./config.js";
 import { makeEngine } from "./engine.js";
 import { exitCodeFor, PithosError } from "./errors.js";
+import type { ChainPolicy } from "./chain-policy.js";
 import type { Capability, HarnessKind, Mode, ScopeKind } from "./db.js";
 import type { Services } from "./services.js";
 
@@ -53,6 +54,7 @@ type CommandInput =
 			readonly stdin: boolean;
 			readonly runId: string | undefined;
 			readonly dependsOn: readonly string[];
+			readonly chain: string;
 	  }
 	| {
 			readonly command: "task.claim";
@@ -326,6 +328,10 @@ const readOptionalResultMetadata = (ctx: CliContext, enabled: boolean) =>
 const runCommand = (ctx: CliContext, input: CommandInput) =>
 	Effect.gen(function* () {
 		const writeJson = (value: unknown) => ctx.services.output.write(json(value));
+		const enqueueChain =
+			input.command === "task.enqueue"
+				? yield* fromEngine(() => parseChainPolicy(input.chain))
+				: undefined;
 		const enqueueBody =
 			input.command === "task.enqueue"
 				? yield* readRequiredStdinBody(ctx, "task enqueue", input.stdin)
@@ -366,7 +372,12 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "events.tail":
 					return engine.eventsTail({ limit: input.limit });
 				case "task.enqueue":
-					return engine.enqueue({ ...input, body: enqueueBody, bodyFile: undefined });
+					return engine.enqueue({
+						...input,
+						chain: enqueueChain!,
+						body: enqueueBody,
+						bodyFile: undefined,
+					});
 				case "task.claim":
 					return engine.claim(input);
 				case "task.heartbeat":
@@ -413,6 +424,20 @@ const reasonOption = Options.text("reason").pipe(
 const stdinFlag = Options.boolean("stdin").pipe(
 	Options.withDescription("Read the task or artifact body from stdin."),
 );
+const chainOption = Options.text("chain").pipe(
+	Options.withDescription("Task chaining policy: auto, none, held, or source."),
+	Options.withDefault("auto"),
+);
+
+const parseChainPolicy = (value: string): ChainPolicy => {
+	if ((["auto", "none", "held", "source"] as const).includes(value as ChainPolicy)) {
+		return value as ChainPolicy;
+	}
+	throw new PithosError({
+		code: "VALIDATION_ERROR",
+		message: `Invalid --chain value: '${value}'. Valid values: auto, none, held, source`,
+	});
+};
 
 export const makePithosCommand = (ctx: CliContext) => {
 	const init = Command.make(
@@ -584,6 +609,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				),
 				Options.repeated,
 			),
+			chain: chainOption,
 		},
 		(o) =>
 			runCommand(ctx, {
@@ -594,6 +620,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				stdin: o.stdin,
 				runId: opt(o.runId),
 				dependsOn: o.dependsOn,
+				chain: o.chain,
 			}),
 	).pipe(
 		Command.withDescription("Queue a new durable task; body is read from stdin when requested."),

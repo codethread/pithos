@@ -261,6 +261,7 @@ describe("pithos foundation", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		expect(() => engine.scopeArchive({ scopeId: repo.scope.id })).toThrow(/non-terminal task/);
 		const db = new Database(dbPath);
@@ -306,6 +307,7 @@ describe("pithos foundation", () => {
 			bodyFile: undefined,
 			runId: "run_toil",
 			dependsOn: [],
+			chain: "auto",
 		}).task.id;
 		engine.cancel({ taskId, runId: "run_toil", reason: "done with history" });
 		const archived = engine.scopeArchive({ scopeId: repo.scope.id });
@@ -338,6 +340,7 @@ describe("pithos foundation", () => {
 				bodyFile: undefined,
 				runId: "run_toil",
 				dependsOn: [],
+				chain: "auto",
 			}),
 		).toThrow(/scope is archived/);
 		expect(() =>

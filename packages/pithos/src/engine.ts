@@ -1,5 +1,11 @@
 import { Effect, Either, ParseResult, Schema } from "effect";
 import { resolve } from "node:path";
+import {
+	finalDependencyIds,
+	resolveChainPolicy,
+	type ChainPolicy,
+	type ChainPolicyDecision,
+} from "./chain-policy.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import {
@@ -95,7 +101,8 @@ export interface Engine {
 		readonly bodyFile: string | undefined;
 		readonly runId: string | undefined;
 		readonly dependsOn: readonly string[];
-	}) => { readonly ok: true; readonly task: { readonly id: string; readonly status: "queued" } };
+		readonly chain: ChainPolicy;
+	}) => EnqueueOutput;
 	readonly claim: (input: {
 		readonly runId: string | undefined;
 		readonly scope: string;
@@ -262,6 +269,20 @@ export interface BriefingOutput {
 	readonly ok: true;
 	readonly ready: readonly TaskSummaryOutput[];
 	readonly blocked: readonly BlockedTaskOutput[];
+}
+
+export interface ChainOutput {
+	readonly policy: ChainPolicy;
+	readonly applied: ChainPolicyDecision["applied"];
+	readonly held_task_id: string | null;
+	readonly source_task_id: string | null;
+	readonly final_dependency_ids: readonly string[];
+}
+
+export interface EnqueueOutput {
+	readonly ok: true;
+	readonly task: { readonly id: string; readonly status: "queued" };
+	readonly chain: ChainOutput;
 }
 
 export interface SupersedeOutput {
@@ -1412,21 +1433,45 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				})),
 			};
 		}),
-	enqueue: ({ scope, capability, title, body, bodyFile, runId, dependsOn }) =>
+	enqueue: ({ scope, capability, title, body, bodyFile, runId, dependsOn, chain }) =>
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);
-			authorized(db, "agent_enqueues", actorRunId, capability);
+			const actorRun = authorized(db, "agent_enqueues", actorRunId, capability);
 			enforceCapScope(db, scope, capability);
 			const uniqueDepends = new Set(dependsOn);
 			if (uniqueDepends.size !== dependsOn.length) {
 				fail("VALIDATION_ERROR", "duplicate --depends-on task id");
 			}
+			const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
+			if (heldTask !== null && chain !== "none") {
+				fail(
+					"VALIDATION_ERROR",
+					`--chain ${chain} with a held task is implemented by a later chaining slice`,
+				);
+			}
+			const decision = resolveChainPolicy({
+				policy: chain,
+				newTaskCapability: capability,
+				heldTask,
+				heldSourceTaskId: null,
+			});
+			const dependencyIds = finalDependencyIds({
+				manualDependencyIds: dependsOn,
+				implicitDependencyIds: decision.implicitDependencyIds,
+			});
+			const chainOutput: ChainOutput = {
+				policy: decision.policy,
+				applied: decision.applied,
+				held_task_id: decision.heldTaskId,
+				source_task_id: decision.sourceTaskId,
+				final_dependency_ids: dependencyIds,
+			};
 			const taskBody = resolveBody(ctx, body, bodyFile);
 			const taskTitle = requireNonEmpty(title, "--title");
 			const taskId = Effect.runSync(ctx.services.ids.make("task"));
 
 			db.transaction(() => {
-				for (const depId of dependsOn) {
+				for (const depId of dependencyIds) {
 					const dep = db.prepare(sql`SELECT 1 FROM tasks WHERE id = ?`).get(depId);
 					if (dep === undefined) fail("NOT_FOUND", `dependency task not found: ${depId}`);
 					const replacement = db
@@ -1439,7 +1484,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				db.prepare(
 					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
 				).run(taskId, scope, capability, taskTitle, taskBody, actorRunId);
-				for (const depId of dependsOn) {
+				for (const depId of dependencyIds) {
 					db.prepare(
 						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
 					).run(taskId, depId);
@@ -1452,11 +1497,18 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						scope_id: scope,
 						capability,
 						title: taskTitle,
-						depends_on_task_ids: dependsOn,
+						depends_on_task_ids: dependencyIds,
+						chain: {
+							policy: chainOutput.policy,
+							applied: chainOutput.applied,
+							held_task_id: chainOutput.held_task_id,
+							source_task_id: chainOutput.source_task_id,
+							final_dependency_ids: chainOutput.final_dependency_ids,
+						},
 					},
 				});
 			})();
-			return { ok: true, task: { id: taskId, status: "queued" } };
+			return { ok: true, task: { id: taskId, status: "queued" }, chain: chainOutput };
 		}),
 	claim: ({ runId, scope, capability }) =>
 		withDb(ctx, (db) => {

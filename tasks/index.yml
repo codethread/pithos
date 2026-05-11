@@ -301,7 +301,7 @@ tasks:
   - id: task-023
     description: "Pure chain graph policy core"
     task_file: ./task-023.md
-    status: pending
+    status: complete
     blocked_by:
       - task-022
   - id: task-024

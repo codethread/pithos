@@ -72,6 +72,12 @@ No HITL slice is required: Adam confirmed the core language and prompt-surface d
 
 Append notes here. Do not rewrite earlier notes.
 
+### Task 023: Pure chain graph policy core — 2026-05-11
+
+- Added `packages/pithos/src/chain-policy.ts` as a pure, DB-free resolver/helper module for automatic chaining decisions, dependency duplicate detection, dependency cycle checks, source-excluding dependency lineage, unresolved dependency blockers, and closure over dependency/source/supersession neighbors.
+- The pure test suite covers the `auto`/`none`/`held`/`source` matrix and source-vs-dependency semantics without SQLite; later slices can wire the resolver into enqueue persistence.
+- Validation run: `pnpm typecheck && pnpm lint && pnpm test && pnpm run build`.
+
 ### Task 023-028: Automatic task chaining plan — 2026-05-11
 
 - Plan added after updating `UBIQUITOUS_LANGUAGE.md` and `specs/task-graph.md` to define Task graph, Task chain, Source link, and Attached context.

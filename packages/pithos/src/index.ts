@@ -18,6 +18,22 @@ export {
 	type CliContext,
 	type PithosHelpCommand,
 } from "./cli.js";
+export {
+	assertDependencyAcyclic,
+	finalDependencyIds,
+	graphClosure,
+	resolveChainPolicy,
+	unresolvedDependencyIds,
+	upstreamDependencyLineage,
+	type ChainCapability,
+	type ChainGraphInput,
+	type ChainPolicy,
+	type ChainPolicyDecision,
+	type ChainTask,
+	type DependencyEdge,
+	type SourceEdge,
+	type SupersessionEdge,
+} from "./chain-policy.js";
 export { makeEngine, type Engine, type EngineContext, type RunOutput } from "./engine.js";
 export { loadConfig, ConfigSchema, type Config, type EnvReader } from "./config.js";
 export { migrate, openDb, type Db, type Mode, type ScopeKind, type TaskStatus } from "./db.js";

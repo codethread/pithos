@@ -156,6 +156,51 @@ describe("task lifecycle", () => {
 		).toThrow(PithosError);
 	});
 
+	it("rejects archived scopes in enqueue, claim, and supersede", () => {
+		const { dbPath, engine, repo } = setup();
+		const taskId = engine.enqueue({
+			scope: "global",
+			capability: "triage",
+			title: "supersede source",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+		}).task.id;
+		const db = new Database(dbPath);
+		db.prepare("UPDATE scopes SET archived_at = CURRENT_TIMESTAMP WHERE id = ?").run(repo);
+		db.prepare(
+			"INSERT INTO tasks(id, scope_id, capability, title, body, created_by_run_id) VALUES (?, ?, ?, ?, ?, ?)",
+		).run("task_archived_claim", repo, "execute", "claim me", "body", "run_toil");
+		db.close();
+		expect(() =>
+			engine.enqueue({
+				scope: repo,
+				capability: "execute",
+				title: "bad",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_toil",
+				dependsOn: [],
+			}),
+		).toThrow(/scope is archived/);
+		expect(() => engine.claim({ runId: "run_war", scope: repo, capability: "execute" })).toThrow(
+			/scope is archived/,
+		);
+		expect(() =>
+			engine.supersede({
+				taskId,
+				runId: "run_toil",
+				reason: "move",
+				title: "move",
+				body: "body",
+				bodyFile: undefined,
+				scope: repo,
+				capability: "execute",
+			}),
+		).toThrow(/scope is archived/);
+	});
+
 	it("resolves PITHOS_RUN_ID, validates dependencies, and blocks claims", () => {
 		const { engine, repo } = setup("run_toil");
 		expect(() =>
@@ -422,6 +467,149 @@ describe("task lifecycle", () => {
 		expect(() => engine.cancel({ taskId: held, runId: "run_toil", reason: "bad" })).toThrow(
 			/use pdx kill or pithos run interrupt/,
 		);
+	});
+
+	it("shows upstream lineage details, artifacts, and supersession metadata without siblings", () => {
+		const { dbPath, engine, repo } = setup();
+		const triage = engine.enqueue({
+			scope: "global",
+			capability: "triage",
+			title: "triage",
+			body: "triage body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+		}).task.id;
+		const oldDesign = engine.enqueue({
+			scope: "global",
+			capability: "design",
+			title: "old design",
+			body: "old design body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [triage],
+		}).task.id;
+		const branchDesign = engine.enqueue({
+			scope: "global",
+			capability: "design",
+			title: "branch design",
+			body: "branch design body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [triage],
+		}).task.id;
+		const replacement = engine.supersede({
+			taskId: oldDesign,
+			runId: "run_toil",
+			reason: "approved revision",
+			title: "approved design",
+			body: "approved design body",
+			bodyFile: undefined,
+			scope: undefined,
+			capability: undefined,
+		}) as { task: { id: string } };
+		engine.artifactAdd({
+			taskId: replacement.task.id,
+			runId: "run_toil",
+			kind: "design-brief",
+			title: "approved brief",
+			body: "design brief body",
+		});
+		const execute = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "implement",
+			body: "execute body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [replacement.task.id, branchDesign],
+		}).task.id;
+		const sibling = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "parallel implement",
+			body: "parallel body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [replacement.task.id],
+		}).task.id;
+		const db = new Database(dbPath);
+		const setCreatedAt = db.prepare("UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?");
+		for (const [createdAt, taskId] of [
+			["2026-05-08 00:00:01", triage],
+			["2026-05-08 00:00:02", oldDesign],
+			["2026-05-08 00:00:03", branchDesign],
+			["2026-05-08 00:00:04", replacement.task.id],
+			["2026-05-08 00:00:05", execute],
+			["2026-05-08 00:00:06", sibling],
+		] as const) {
+			setCreatedAt.run(createdAt, createdAt, taskId);
+		}
+		db.close();
+
+		const inspect = engine.taskInspect({ taskId: execute });
+		expect(inspect.task).toMatchObject({
+			id: execute,
+			body: "execute body",
+			fencing_token: 0,
+			attempts: 0,
+			max_attempts: 3,
+			claimable: false,
+		});
+		expect(inspect.dependencies.map((task) => task.id)).toEqual([
+			branchDesign,
+			replacement.task.id,
+		]);
+		expect(inspect.lineage.map((entry) => ({ depth: entry.depth, id: entry.task.id }))).toEqual([
+			{ depth: 2, id: triage },
+			{ depth: 1, id: branchDesign },
+			{ depth: 1, id: replacement.task.id },
+		]);
+		expect(inspect.lineage[0]).toMatchObject({
+			depth: 2,
+			via_task_ids: [branchDesign, replacement.task.id],
+			task: {
+				id: triage,
+				body: "triage body",
+				claimable: true,
+				unresolved_dependency_ids: [],
+			},
+			artifacts: [],
+			supersedes: null,
+			superseded_by: null,
+		});
+		expect(inspect.lineage[1]).toMatchObject({
+			depth: 1,
+			via_task_ids: [execute],
+			task: {
+				id: branchDesign,
+				body: "branch design body",
+				unresolved_dependency_ids: [triage],
+			},
+			supersedes: null,
+			superseded_by: null,
+			artifacts: [],
+		});
+		expect(inspect.lineage[2]).toMatchObject({
+			depth: 1,
+			via_task_ids: [execute],
+			task: {
+				id: replacement.task.id,
+				body: "approved design body",
+				unresolved_dependency_ids: [triage],
+			},
+			supersedes: oldDesign,
+			superseded_by: null,
+			artifacts: [
+				{
+					kind: "design-brief",
+					title: "approved brief",
+					body: "design brief body",
+				},
+			],
+		});
+		expect(inspect.lineage.some((entry) => entry.task.id === oldDesign)).toBe(false);
+		expect(inspect.lineage.some((entry) => entry.task.id === sibling)).toBe(false);
 	});
 
 	it("inspects outputs and repairs a broken queued chain with supersede", () => {

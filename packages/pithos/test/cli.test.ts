@@ -202,6 +202,28 @@ describe("pithos cli", () => {
 		);
 		const scopeBody = JSON.parse(scope.stdout[0] ?? "") as { scope: { id: string } };
 		expect(scopeBody.scope.id).toBe("repo:/tmp/pithos-cli");
+		const listed = await runCli(["scope", "list"], dbPath);
+		expect(JSON.parse(listed.stdout[0] ?? "")).toEqual({
+			ok: true,
+			scopes: [
+				{
+					id: "global",
+					kind: "global",
+					canonical_path: null,
+					archived_at: null,
+					task_count: 0,
+					run_count: 0,
+				},
+				{
+					id: "repo:/tmp/pithos-cli",
+					kind: "repo",
+					canonical_path: "/tmp/pithos-cli",
+					archived_at: null,
+					task_count: 0,
+					run_count: 0,
+				},
+			],
+		});
 
 		const upsert = await runCli(
 			[
@@ -251,6 +273,91 @@ describe("pithos cli", () => {
 
 		const events = await runCli(["events", "tail", "--limit", "1"], dbPath);
 		expect(JSON.parse(events.stdout[0] ?? "")).toEqual({ ok: true, events: [] });
+	});
+
+	it("archives unreferenced scopes by deleting them through the CLI", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await runCli(["scope", "upsert", "--kind", "repo", "--path", "/tmp/pithos-delete-cli"], dbPath);
+		const archived = await runCli(["scope", "archive", "repo:/tmp/pithos-delete-cli"], dbPath);
+		expect(JSON.parse(archived.stdout[0] ?? "")).toEqual({
+			ok: true,
+			action: "deleted",
+			scope: {
+				id: "repo:/tmp/pithos-delete-cli",
+				kind: "repo",
+				canonical_path: "/tmp/pithos-delete-cli",
+				archived_at: null,
+				task_count: 0,
+				run_count: 0,
+			},
+		});
+		const listed = await runCli(["scope", "list"], dbPath);
+		expect(JSON.parse(listed.stdout[0] ?? "")).toEqual({
+			ok: true,
+			scopes: [
+				{
+					id: "global",
+					kind: "global",
+					canonical_path: null,
+					archived_at: null,
+					task_count: 0,
+					run_count: 0,
+				},
+			],
+		});
+	});
+
+	it("lists archived scopes only with --all through the CLI", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		await runCli(
+			["scope", "upsert", "--kind", "repo", "--path", "/tmp/pithos-archive-cli"],
+			dbPath,
+		);
+		const taskId = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"repo:/tmp/pithos-archive-cli",
+				"--capability",
+				"execute",
+				"--title",
+				"archive me",
+				"--stdin",
+				"--run",
+				"run_toil",
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(["task", "cancel", taskId, "--run", "run_toil", "--reason", "done"], dbPath);
+		const archived = await runCli(["scope", "archive", "repo:/tmp/pithos-archive-cli"], dbPath);
+		const archivedBody = JSON.parse(archived.stdout[0] ?? "") as {
+			ok: true;
+			action: string;
+			scope: { id: string; archived_at: string | null };
+		};
+		expect(archivedBody.ok).toBe(true);
+		expect(archivedBody.action).toBe("archived");
+		expect(archivedBody.scope.id).toBe("repo:/tmp/pithos-archive-cli");
+		expect(archivedBody.scope.archived_at).toEqual(expect.any(String));
+		const activeOnly = await runCli(["scope", "list"], dbPath);
+		expect(
+			(JSON.parse(activeOnly.stdout[0] ?? "") as { scopes: { id: string }[] }).scopes.map(
+				(scope) => scope.id,
+			),
+		).toEqual(["global"]);
+		const allScopes = await runCli(["scope", "list", "--all"], dbPath);
+		const archivedScope = (
+			JSON.parse(allScopes.stdout[0] ?? "") as {
+				scopes: { id: string; archived_at: string | null }[];
+			}
+		).scopes.find((scope) => scope.id === "repo:/tmp/pithos-archive-cli");
+		expect(archivedScope).toBeDefined();
+		expect(archivedScope?.archived_at).toEqual(expect.any(String));
 	});
 
 	it("defers run agent validation to Pithos and renders PithosError JSON", async () => {
@@ -336,10 +443,12 @@ describe("pithos cli", () => {
 		const inspected = JSON.parse(inspect.stdout[0] ?? "") as {
 			readonly ok: true;
 			readonly dependencies: readonly unknown[];
-			readonly task: { readonly title: string };
+			readonly lineage: readonly unknown[];
+			readonly task: { readonly title: string; readonly body: string };
 		};
-		expect(inspected).toMatchObject({ ok: true, dependencies: [] });
+		expect(inspected).toMatchObject({ ok: true, dependencies: [], lineage: [] });
 		expect(inspected.task.title).toBe("stdin task");
+		expect(inspected.task.body).toBe("line 1\nline 2\n");
 		expect(taskBody(dbPath, taskId)).toBe("line 1\nline 2\n");
 	});
 
@@ -713,6 +822,16 @@ describe("pithos cli", () => {
 				"pithos events",
 				"pithos briefing",
 			]);
+			expect(
+				help.subcommands.find((command) => command.path === "pithos scope")?.subcommands,
+			).toMatchObject([
+				{ path: "pithos scope upsert" },
+				{ path: "pithos scope list" },
+				{ path: "pithos scope archive" },
+			]);
+			expect(
+				help.subcommands.find((command) => command.path === "pithos run")?.subcommands?.length,
+			).toBeGreaterThan(0);
 		}
 	});
 

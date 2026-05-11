@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS scopes (
 	canonical_path TEXT,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	archived_at TEXT,
 	CHECK (
 		(kind = 'global' AND canonical_path IS NULL)
 		OR (kind <> 'global' AND canonical_path IS NOT NULL AND length(canonical_path) > 0)
@@ -160,7 +161,15 @@ CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker
 CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
 	ON task_supersessions(new_task_id);
 `);
+	ensureScopesArchivedAtColumn(db);
 	seed(db);
+};
+
+const ensureScopesArchivedAtColumn = (db: Db): void => {
+	const columns = db.prepare(sql`PRAGMA table_info(scopes)`).all() as { name: string }[];
+	if (!columns.some((column) => column.name === "archived_at")) {
+		db.exec(sql`ALTER TABLE scopes ADD COLUMN archived_at TEXT`);
+	}
 };
 
 const seed = (db: Db): void => {

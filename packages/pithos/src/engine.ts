@@ -20,6 +20,7 @@ import {
 	ScopeRowSchema,
 	TaskRowSchema,
 	type RunRow,
+	type ScopeRow,
 } from "./rows.js";
 import type { Services } from "./services.js";
 
@@ -35,11 +36,16 @@ export interface Engine {
 		readonly path: string | undefined;
 	}) => {
 		readonly ok: true;
-		readonly scope: {
-			readonly id: string;
-			readonly kind: ScopeKind;
-			readonly canonical_path: string | null;
-		};
+		readonly scope: ScopeIdentityOutput;
+	};
+	readonly scopeList: (input: { readonly all: boolean }) => {
+		readonly ok: true;
+		readonly scopes: readonly ScopeOutput[];
+	};
+	readonly scopeArchive: (input: { readonly scopeId: string }) => {
+		readonly ok: true;
+		readonly action: "archived" | "deleted";
+		readonly scope: ScopeOutput;
 	};
 	readonly runUpsert: (input: {
 		readonly agent: string;
@@ -174,14 +180,26 @@ export interface TaskDetailOutput extends TaskSummaryOutput {
 	readonly max_attempts: number;
 }
 
+export interface TaskInspectTaskOutput extends TaskDetailOutput {
+	readonly claimable: boolean;
+	readonly unresolved_dependency_ids: readonly string[];
+}
+
+export interface LineageEntryOutput {
+	readonly depth: number;
+	readonly via_task_ids: readonly string[];
+	readonly task: TaskInspectTaskOutput;
+	readonly supersedes: string | null;
+	readonly superseded_by: string | null;
+	readonly artifacts: readonly ArtifactOutput[];
+}
+
 export interface TaskInspectOutput {
 	readonly ok: true;
-	readonly task: TaskSummaryOutput & {
-		readonly claimable: boolean;
-		readonly unresolved_dependency_ids: readonly string[];
-	};
+	readonly task: TaskInspectTaskOutput;
 	readonly dependencies: readonly TaskDetailOutput[];
 	readonly dependents: readonly TaskDetailOutput[];
+	readonly lineage: readonly LineageEntryOutput[];
 	readonly supersedes: string | null;
 	readonly superseded_by: string | null;
 	readonly artifacts: readonly ArtifactOutput[];
@@ -259,6 +277,18 @@ export interface SupersedeOutput {
 		readonly new_task_id: string;
 		readonly retargeted_dependent_task_ids: readonly string[];
 	};
+}
+
+export interface ScopeIdentityOutput {
+	readonly id: string;
+	readonly kind: ScopeKind;
+	readonly canonical_path: string | null;
+	readonly archived_at: string | null;
+}
+
+export interface ScopeOutput extends ScopeIdentityOutput {
+	readonly task_count: number;
+	readonly run_count: number;
 }
 
 export interface RunOutput {
@@ -395,7 +425,9 @@ ON CONFLICT(id)
 DO UPDATE SET
 	kind = excluded.kind,
 	canonical_path = excluded.canonical_path,
+	archived_at = NULL,
 	updated_at = CURRENT_TIMESTAMP
+RETURNING id, kind, canonical_path, archived_at
 `;
 
 const upsertRun = sql`
@@ -436,6 +468,11 @@ SELECT
 	created_at,
 	updated_at
 FROM runs
+`;
+
+const scopeSelect = sql`
+SELECT id, kind, canonical_path, archived_at
+FROM scopes
 `;
 
 const event = (
@@ -486,6 +523,19 @@ const liveRun = (db: Db, runId: string): RunRow => {
 	);
 	if (r.status !== "live") fail("VALIDATION_ERROR", `run is not live: ${runId}`);
 	return r;
+};
+
+const scopeById = (db: Db, scopeId: string): ScopeRow =>
+	decodeRow(
+		ScopeRowSchema,
+		db.prepare(`${scopeSelect} WHERE id=?`).get(scopeId),
+		`scope not found: ${scopeId}`,
+	);
+
+const enforceActiveScope = (scope: ScopeRow): void => {
+	if (scope.archived_at !== null) {
+		fail("VALIDATION_ERROR", `scope is archived: ${scope.id}`);
+	}
 };
 
 const authorized = (
@@ -569,6 +619,47 @@ const parseTaskDetail = (value: unknown, message: string): TaskDetailOutput => {
 	};
 };
 
+const ScopeListRowSchema = Schema.extend(
+	ScopeRowSchema,
+	Schema.Struct({
+		task_count: Schema.Number,
+		run_count: Schema.Number,
+	}),
+);
+
+const ScopeArchiveCheckRowSchema = Schema.extend(
+	ScopeListRowSchema,
+	Schema.Struct({
+		live_run_count: Schema.Number,
+		active_task_count: Schema.Number,
+	}),
+);
+
+type ScopeListRow = typeof ScopeListRowSchema.Type;
+type ScopeArchiveCheckRow = typeof ScopeArchiveCheckRowSchema.Type;
+
+const toScopeIdentityOutput = (row: ScopeRow): ScopeIdentityOutput => ({
+	id: row.id,
+	kind: row.kind,
+	canonical_path: row.canonical_path,
+	archived_at: row.archived_at,
+});
+
+const parseScopeIdentity = (value: unknown, message: string): ScopeIdentityOutput =>
+	toScopeIdentityOutput(decodeRow(ScopeRowSchema, value, message));
+
+const toScopeOutput = (row: ScopeListRow): ScopeOutput => ({
+	...toScopeIdentityOutput(row),
+	task_count: row.task_count,
+	run_count: row.run_count,
+});
+
+const parseScopeOutput = (value: unknown, message: string): ScopeOutput =>
+	toScopeOutput(decodeRow(ScopeListRowSchema, value, message));
+
+const parseScopeArchiveCheck = (value: unknown, message: string): ScopeArchiveCheckRow =>
+	decodeRow(ScopeArchiveCheckRowSchema, value, message);
+
 const ArtifactRowSchema = Schema.Struct({
 	id: Schema.String,
 	kind: Schema.String,
@@ -580,14 +671,114 @@ const ArtifactRowSchema = Schema.Struct({
 const parseArtifact = (value: unknown): ArtifactOutput =>
 	decodeRow(ArtifactRowSchema, value, "malformed artifact row");
 
+const compareTaskCreatedAt = <T extends { readonly created_at: string; readonly id: string }>(
+	a: T,
+	b: T,
+): number => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id);
+
 const taskSummary = (db: Db, taskId: string): TaskSummary =>
 	parseTaskSummary(
 		db.prepare(`${taskSummarySelect} WHERE t.id = ?`).get(taskId),
 		`task not found: ${taskId}`,
 	);
 
+const taskDetail = (db: Db, taskId: string): TaskDetailOutput =>
+	parseTaskDetail(
+		db.prepare(`${taskSummarySelect} WHERE t.id = ?`).get(taskId),
+		`task not found: ${taskId}`,
+	);
+
+const taskArtifacts = (db: Db, taskId: string): readonly ArtifactOutput[] =>
+	db
+		.prepare(
+			sql`SELECT id, kind, title, body, created_at FROM artifacts WHERE task_id=? ORDER BY created_at ASC, id ASC`,
+		)
+		.all(taskId)
+		.map(parseArtifact);
+
+const taskSupersessionLinks = (
+	db: Db,
+	taskId: string,
+): { readonly supersedes: string | null; readonly superseded_by: string | null } => ({
+	supersedes:
+		(db
+			.prepare(sql`SELECT old_task_id FROM task_supersessions WHERE new_task_id=?`)
+			.pluck()
+			.get(taskId) as string | undefined) ?? null,
+	superseded_by:
+		(db
+			.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
+			.pluck()
+			.get(taskId) as string | undefined) ?? null,
+});
+
+const sortTaskIdsDeterministically = (db: Db, taskIds: readonly string[]): readonly string[] =>
+	taskIds
+		.map((taskId) => taskSummary(db, taskId))
+		.sort(compareTaskCreatedAt)
+		.map((task) => task.id);
+
 const isClaimable = (db: Db, task: { readonly id: string; readonly status: string }): boolean =>
 	task.status === "queued" && unresolvedDependencies(db, task.id).length === 0;
+
+const taskInspectTask = (db: Db, taskId: string): TaskInspectTaskOutput => {
+	const task = taskDetail(db, taskId);
+	return {
+		...task,
+		claimable: isClaimable(db, task),
+		unresolved_dependency_ids: unresolvedDependencies(db, taskId),
+	};
+};
+
+const taskLineage = (db: Db, taskId: string): readonly LineageEntryOutput[] => {
+	const parentsByTaskId = new Map<string, string[]>();
+	for (const row of db
+		.prepare(
+			sql`SELECT task_id, depends_on_task_id FROM task_dependencies ORDER BY created_at ASC, task_id ASC, depends_on_task_id ASC`,
+		)
+		.all() as {
+		readonly task_id: string;
+		readonly depends_on_task_id: string;
+	}[]) {
+		parentsByTaskId.set(row.task_id, [
+			...(parentsByTaskId.get(row.task_id) ?? []),
+			row.depends_on_task_id,
+		]);
+	}
+	const lineage = new Map<string, { depth: number; via_task_ids: Set<string> }>();
+	const queue: { readonly taskId: string; readonly depth: number }[] = [{ taskId, depth: 0 }];
+	let index = 0;
+	while (index < queue.length) {
+		const current = queue[index] ?? fail("INTERNAL_ERROR", "missing lineage queue item");
+		index += 1;
+		for (const parentTaskId of parentsByTaskId.get(current.taskId) ?? []) {
+			const depth = current.depth + 1;
+			const existing = lineage.get(parentTaskId);
+			if (existing === undefined || depth < existing.depth) {
+				lineage.set(parentTaskId, { depth, via_task_ids: new Set([current.taskId]) });
+				queue.push({ taskId: parentTaskId, depth });
+				continue;
+			}
+			if (depth === existing.depth) {
+				existing.via_task_ids.add(current.taskId);
+			}
+		}
+	}
+	return [...lineage.entries()]
+		.map(([ancestorTaskId, state]) => {
+			const task = taskInspectTask(db, ancestorTaskId);
+			const supersession = taskSupersessionLinks(db, ancestorTaskId);
+			return {
+				depth: state.depth,
+				via_task_ids: sortTaskIdsDeterministically(db, [...state.via_task_ids]),
+				task,
+				supersedes: supersession.supersedes,
+				superseded_by: supersession.superseded_by,
+				artifacts: taskArtifacts(db, ancestorTaskId),
+			};
+		})
+		.sort((a, b) => b.depth - a.depth || compareTaskCreatedAt(a.task, b.task));
+};
 
 const runById = (db: Db, runId: string): RunRow =>
 	decodeRow(
@@ -801,10 +992,103 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					: requireNonEmpty(path ?? fail("VALIDATION_ERROR", "missing --path"), "--path");
 			const canonical = rawPath === undefined ? null : resolve(rawPath);
 			const sid = kind === "global" ? "global" : `${kind}:${canonical}`;
-
-			db.prepare(upsertScope).run(sid, kind, canonical);
-			return { ok: true, scope: { id: sid, kind, canonical_path: canonical } };
+			const scopeRow = parseScopeIdentity(
+				db.prepare(upsertScope).get(sid, kind, canonical),
+				`scope not found after upsert: ${sid}`,
+			);
+			return { ok: true, scope: scopeRow };
 		}),
+	scopeList: ({ all }) =>
+		withDb(ctx, (db) => ({
+			ok: true,
+			scopes: db
+				.prepare(sql`
+					SELECT
+						s.id,
+						s.kind,
+						s.canonical_path,
+						s.archived_at,
+						COUNT(DISTINCT t.id) AS task_count,
+						COUNT(DISTINCT r.id) AS run_count
+					FROM scopes s
+					LEFT JOIN tasks t ON t.scope_id = s.id
+					LEFT JOIN runs r ON r.scope_id = s.id
+					${all ? "" : "WHERE s.archived_at IS NULL"}
+					GROUP BY s.id, s.kind, s.canonical_path, s.archived_at
+					ORDER BY s.archived_at IS NOT NULL ASC, s.kind ASC, s.canonical_path ASC, s.id ASC
+				`)
+				.all()
+				.map((row) => parseScopeOutput(row, "malformed scope row")),
+		})),
+	scopeArchive: ({ scopeId }) =>
+		withDb(ctx, (db) =>
+			db.transaction(
+				(): {
+					readonly ok: true;
+					readonly action: "archived" | "deleted";
+					readonly scope: ScopeOutput;
+				} => {
+					const scope = parseScopeArchiveCheck(
+						db
+							.prepare(sql`
+						SELECT
+							s.id,
+							s.kind,
+							s.canonical_path,
+							s.archived_at,
+							COUNT(DISTINCT t.id) AS task_count,
+							COUNT(DISTINCT r.id) AS run_count,
+							COUNT(DISTINCT CASE WHEN r.status = 'live' THEN r.id END) AS live_run_count,
+							COUNT(DISTINCT CASE WHEN t.status IN ('queued', 'claimed', 'running') THEN t.id END) AS active_task_count
+						FROM scopes s
+						LEFT JOIN tasks t ON t.scope_id = s.id
+						LEFT JOIN runs r ON r.scope_id = s.id
+						WHERE s.id = ?
+						GROUP BY s.id, s.kind, s.canonical_path, s.archived_at
+					`)
+							.get(scopeId),
+						`scope not found: ${scopeId}`,
+					);
+					if (scope.kind === "global") {
+						fail("VALIDATION_ERROR", "cannot archive built-in global scope");
+					}
+					if (scope.live_run_count > 0) {
+						fail(
+							"VALIDATION_ERROR",
+							`scope ${scopeId} still has ${scope.live_run_count} live run(s)`,
+						);
+					}
+					if (scope.active_task_count > 0) {
+						fail(
+							"VALIDATION_ERROR",
+							`scope ${scopeId} still has ${scope.active_task_count} non-terminal task(s)`,
+						);
+					}
+					if (scope.task_count === 0 && scope.run_count === 0) {
+						const deleted = db.prepare(sql`DELETE FROM scopes WHERE id=?`).run(scopeId);
+						if (deleted.changes === 0) fail("STALE_TOKEN_RACE", "scope changed before archive");
+						return { ok: true, action: "deleted" as const, scope: toScopeOutput(scope) };
+					}
+					const archivedScope = parseScopeIdentity(
+						db
+							.prepare(
+								sql`UPDATE scopes SET archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, kind, canonical_path, archived_at`,
+							)
+							.get(scopeId),
+						`scope not found after archive: ${scopeId}`,
+					);
+					return {
+						ok: true,
+						action: "archived" as const,
+						scope: {
+							...archivedScope,
+							task_count: scope.task_count,
+							run_count: scope.run_count,
+						},
+					};
+				},
+			)(),
+		),
 	runUpsert: ({ agent, mode, scope, cwd, harnessKind, sessionLogPath, sessionId, runId }) =>
 		withDb(ctx, (db) => {
 			const agentExists = db
@@ -812,8 +1096,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				.get(agent);
 			if (agentExists === undefined) fail("VALIDATION_ERROR", `unknown agent kind: ${agent}`);
 
-			const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id = ?`).get(scope);
-			if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
+			enforceActiveScope(scopeById(db, scope));
 
 			const rid = requireNonEmpty(runId ?? Effect.runSync(ctx.services.ids.make("run")), "--run");
 			db.prepare(upsertRun).run(
@@ -1370,7 +1653,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		}),
 	taskInspect: ({ taskId }) =>
 		withDb(ctx, (db) => {
-			const task = taskSummary(db, taskId);
+			const task = taskInspectTask(db, taskId);
 			const dependencies = db
 				.prepare(
 					`${taskSummarySelect} WHERE t.id IN (SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?) ORDER BY t.created_at ASC, t.id ASC`,
@@ -1383,32 +1666,16 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				)
 				.all(taskId)
 				.map((row) => parseTaskDetail(row, "malformed dependent task row"));
-			const artifacts = db
-				.prepare(
-					sql`SELECT id, kind, title, body, created_at FROM artifacts WHERE task_id=? ORDER BY created_at ASC, id ASC`,
-				)
-				.all(taskId)
-				.map(parseArtifact);
+			const { supersedes, superseded_by } = taskSupersessionLinks(db, taskId);
 			return {
 				ok: true,
-				task: {
-					...task,
-					claimable: isClaimable(db, task),
-					unresolved_dependency_ids: unresolvedDependencies(db, taskId),
-				},
+				task,
 				dependencies,
 				dependents,
-				supersedes:
-					(db
-						.prepare(sql`SELECT old_task_id FROM task_supersessions WHERE new_task_id=?`)
-						.pluck()
-						.get(taskId) as string | undefined) ?? null,
-				superseded_by:
-					(db
-						.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
-						.pluck()
-						.get(taskId) as string | undefined) ?? null,
-				artifacts,
+				lineage: taskLineage(db, taskId),
+				supersedes,
+				superseded_by,
+				artifacts: taskArtifacts(db, taskId),
 			};
 		}),
 	graphInspect: ({ taskId, scope, all, flat, dump }) =>
@@ -1597,11 +1864,8 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 });
 
 export const enforceCapScope = (db: Db, scopeId: string, cap: Capability): void => {
-	const s = decodeRow(
-		ScopeRowSchema,
-		db.prepare(sql`SELECT id,kind,canonical_path FROM scopes WHERE id=?`).get(scopeId),
-		`scope not found: ${scopeId}`,
-	);
+	const s = scopeById(db, scopeId);
+	enforceActiveScope(s);
 
 	if (cap === "escalate" && s.kind !== "global") {
 		fail("VALIDATION_ERROR", `escalate requires global scope; got ${scopeId}`);

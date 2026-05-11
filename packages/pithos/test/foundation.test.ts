@@ -19,6 +19,7 @@ const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-")), "pithos.db");
 const services = (): Services & { stdout: string[]; stderr: string[] } => {
 	const stdout: string[] = [];
 	const stderr: string[] = [];
+	let idCounter = 0;
 	return {
 		stdout,
 		stderr,
@@ -31,7 +32,7 @@ const services = (): Services & { stdout: string[]; stderr: string[] } => {
 			write: (text) => Effect.sync(() => void stdout.push(text)),
 			writeError: (text) => Effect.sync(() => void stderr.push(text)),
 		},
-		ids: { make: (prefix) => Effect.succeed(`${prefix}_test_${stdout.length}_${stderr.length}`) },
+		ids: { make: (prefix) => Effect.sync(() => `${prefix}_test_${idCounter++}`) },
 		clock: { nowIso: () => Effect.succeed("2026-05-08T00:00:00.000Z") },
 	};
 };
@@ -82,6 +83,12 @@ describe("pithos foundation", () => {
 				.pluck()
 				.get(),
 		).toContain("WHERE task_id IS NOT NULL");
+		expect(
+			db
+				.prepare("SELECT name FROM pragma_table_info('scopes') WHERE name = 'archived_at'")
+				.pluck()
+				.get(),
+		).toBe("archived_at");
 	});
 
 	it("non-fresh init is idempotent", () => {
@@ -115,6 +122,28 @@ describe("pithos foundation", () => {
 			id: "repo:/tmp/pithos-repo",
 			kind: "repo",
 			canonical_path: "/tmp/pithos-repo",
+			archived_at: null,
+		});
+		expect(engine.scopeList({ all: false })).toEqual({
+			ok: true,
+			scopes: [
+				{
+					id: "global",
+					kind: "global",
+					canonical_path: null,
+					archived_at: null,
+					task_count: 0,
+					run_count: 0,
+				},
+				{
+					id: repo.scope.id,
+					kind: "repo",
+					canonical_path: "/tmp/pithos-repo",
+					archived_at: null,
+					task_count: 0,
+					run_count: 0,
+				},
+			],
 		});
 		const upserted = engine.runUpsert({
 			agent: "war",
@@ -140,6 +169,27 @@ describe("pithos foundation", () => {
 		expect(upserted.run.created_at).toEqual(expect.any(String));
 		expect(upserted.run.updated_at).toEqual(expect.any(String));
 		expect(engine.runInspect({ runId: "run_war" })).toEqual(upserted);
+		expect(engine.scopeList({ all: false })).toEqual({
+			ok: true,
+			scopes: [
+				{
+					id: "global",
+					kind: "global",
+					canonical_path: null,
+					archived_at: null,
+					task_count: 0,
+					run_count: 0,
+				},
+				{
+					id: repo.scope.id,
+					kind: "repo",
+					canonical_path: "/tmp/pithos-repo",
+					archived_at: null,
+					task_count: 0,
+					run_count: 1,
+				},
+			],
+		});
 	});
 
 	it("run upsert rejects empty durable run fields before writing", () => {
@@ -185,6 +235,159 @@ describe("pithos foundation", () => {
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT COUNT(*) FROM runs").pluck().get()).toBe(0);
 		db.close();
+	});
+
+	it("scope archive rejects global, live runs, and non-terminal tasks", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		const repo = engine.scopeUpsert({ kind: "repo", path: "/tmp/pithos-archive-guards" });
+		engine.runUpsert({
+			agent: "toil",
+			mode: "afk",
+			scope: "global",
+			cwd: "/tmp",
+			sessionId: "session_toil",
+			harnessKind: "claude",
+			sessionLogPath: "/tmp/session_toil.jsonl",
+			runId: "run_toil",
+		});
+		expect(() => engine.scopeArchive({ scopeId: "global" })).toThrow(PithosError);
+		const taskId = engine.enqueue({
+			scope: repo.scope.id,
+			capability: "execute",
+			title: "queued repo task",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+		}).task.id;
+		expect(() => engine.scopeArchive({ scopeId: repo.scope.id })).toThrow(/non-terminal task/);
+		const db = new Database(dbPath);
+		for (const status of ["claimed", "running"] as const) {
+			db.prepare("UPDATE tasks SET status = ? WHERE id = ?").run(status, taskId);
+			expect(() => engine.scopeArchive({ scopeId: repo.scope.id })).toThrow(/non-terminal task/);
+		}
+		db.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
+		db.close();
+		engine.runUpsert({
+			agent: "war",
+			mode: "afk",
+			scope: repo.scope.id,
+			cwd: "/tmp/pithos-archive-guards",
+			sessionId: "session_war",
+			harnessKind: "claude",
+			sessionLogPath: "/tmp/session_war.jsonl",
+			runId: "run_war",
+		});
+		expect(() => engine.scopeArchive({ scopeId: repo.scope.id })).toThrow(/live run/);
+	});
+
+	it("scope archive hides historical scopes until upsert reactivates them", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		engine.runUpsert({
+			agent: "toil",
+			mode: "afk",
+			scope: "global",
+			cwd: "/tmp",
+			sessionId: "session_toil",
+			harnessKind: "claude",
+			sessionLogPath: "/tmp/session_toil_archive.jsonl",
+			runId: "run_toil",
+		});
+		const repo = engine.scopeUpsert({ kind: "repo", path: "/tmp/pithos-archive-history" });
+		const taskId = engine.enqueue({
+			scope: repo.scope.id,
+			capability: "execute",
+			title: "terminal repo task",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+		}).task.id;
+		engine.cancel({ taskId, runId: "run_toil", reason: "done with history" });
+		const archived = engine.scopeArchive({ scopeId: repo.scope.id });
+		expect(archived).toMatchObject({
+			ok: true,
+			action: "archived",
+			scope: {
+				id: repo.scope.id,
+				kind: "repo",
+				canonical_path: "/tmp/pithos-archive-history",
+				task_count: 1,
+				run_count: 0,
+			},
+		});
+		expect(archived.scope.archived_at).toEqual(expect.any(String));
+		expect(engine.scopeList({ all: false }).scopes.map((scope) => scope.id)).toEqual(["global"]);
+		const archivedScope = engine
+			.scopeList({ all: true })
+			.scopes.find((scope) => scope.id === repo.scope.id);
+		expect(archivedScope).toBeDefined();
+		expect(archivedScope?.archived_at).toEqual(expect.any(String));
+		expect(archivedScope?.task_count).toBe(1);
+		expect(archivedScope?.run_count).toBe(0);
+		expect(() =>
+			engine.enqueue({
+				scope: repo.scope.id,
+				capability: "execute",
+				title: "blocked while archived",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_toil",
+				dependsOn: [],
+			}),
+		).toThrow(/scope is archived/);
+		expect(() =>
+			engine.runUpsert({
+				agent: "war",
+				mode: "afk",
+				scope: repo.scope.id,
+				cwd: "/tmp/pithos-archive-history",
+				sessionId: "session_war",
+				harnessKind: "pi",
+				sessionLogPath: "/tmp/session_war_archive.jsonl",
+				runId: "run_war",
+			}),
+		).toThrow(/scope is archived/);
+		expect(engine.scopeUpsert({ kind: "repo", path: "/tmp/pithos-archive-history" }).scope).toEqual(
+			{
+				id: repo.scope.id,
+				kind: "repo",
+				canonical_path: "/tmp/pithos-archive-history",
+				archived_at: null,
+			},
+		);
+		expect(engine.scopeList({ all: false }).scopes).toContainEqual(
+			expect.objectContaining({
+				id: repo.scope.id,
+				archived_at: null,
+				task_count: 1,
+				run_count: 0,
+			}),
+		);
+	});
+
+	it("scope archive physically deletes unreferenced scopes", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		const repo = engine.scopeUpsert({ kind: "repo", path: "/tmp/pithos-archive-delete" });
+		expect(engine.scopeArchive({ scopeId: repo.scope.id })).toEqual({
+			ok: true,
+			action: "deleted",
+			scope: {
+				id: repo.scope.id,
+				kind: "repo",
+				canonical_path: "/tmp/pithos-archive-delete",
+				archived_at: null,
+				task_count: 0,
+				run_count: 0,
+			},
+		});
+		expect(engine.scopeList({ all: true }).scopes.map((scope) => scope.id)).toEqual(["global"]);
 	});
 
 	it("scope upsert rejects empty repo/worktree paths", () => {

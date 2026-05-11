@@ -21,6 +21,12 @@ pithos init --fresh
 
 This package owns Pithos DB schema, seeded built-ins, task/run transitions, graph invariants, and the agent/operator CLI surface. `pdx` supervises live processes and reuses this package through its typed library boundary; Spawner only renders and launches harness sessions.
 
+## Scope lifecycle
+
+- `pithos scope list` shows active scopes; pass `--all` to include archived history.
+- `pithos scope archive <scope-id>` archives referenced repo/worktree scopes and physically deletes never-used ones.
+- Re-running `pithos scope upsert` for the same repo/worktree path reactivates an archived scope.
+
 ## Run transcript metadata
 
 Every run record must include the transcript location needed for later inspection:

@@ -22,6 +22,8 @@ type CommandInput =
 			readonly kind: ScopeKind;
 			readonly path: string | undefined;
 	  }
+	| { readonly command: "scope.list"; readonly all: boolean }
+	| { readonly command: "scope.archive"; readonly scopeId: string }
 	| {
 			readonly command: "run.upsert";
 			readonly agent: string;
@@ -347,6 +349,10 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 					return engine.init({ fresh: input.fresh });
 				case "scope.upsert":
 					return engine.scopeUpsert({ kind: input.kind, path: input.path });
+				case "scope.list":
+					return engine.scopeList({ all: input.all });
+				case "scope.archive":
+					return engine.scopeArchive({ scopeId: input.scopeId });
 				case "run.upsert":
 					return engine.runUpsert(input);
 				case "run.inspect":
@@ -435,9 +441,27 @@ export const makePithosCommand = (ctx: CliContext) => {
 		},
 		({ kind, path }) => runCommand(ctx, { command: "scope.upsert", kind, path: opt(path) }),
 	).pipe(Command.withDescription("Create or update a durable Pithos scope."));
+	const scopeList = Command.make(
+		"list",
+		{
+			all: Options.boolean("all").pipe(
+				Options.withDescription("Include archived scopes alongside active scopes."),
+			),
+		},
+		({ all }) => runCommand(ctx, { command: "scope.list", all }),
+	).pipe(
+		Command.withDescription("List durable Pithos scopes with task/run counts and archive state."),
+	);
+	const scopeArchive = Command.make("archive", { id: Args.text({ name: "scope-id" }) }, ({ id }) =>
+		runCommand(ctx, { command: "scope.archive", scopeId: id }),
+	).pipe(
+		Command.withDescription(
+			"Archive one durable Pithos scope, or delete it if nothing has ever referenced it.",
+		),
+	);
 	const scope = Command.make("scope").pipe(
 		Command.withDescription("Manage durable Pithos scopes used to partition task queues."),
-		Command.withSubcommands([scopeUpsert]),
+		Command.withSubcommands([scopeUpsert, scopeList, scopeArchive]),
 	);
 	const runUpsert = Command.make(
 		"upsert",

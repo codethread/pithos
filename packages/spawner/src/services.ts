@@ -1,5 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export interface SpawnedProcess {
 	readonly pid?: number;
@@ -23,6 +26,7 @@ export interface LaunchServices extends RenderServices {
 		args: readonly string[],
 		options: { readonly cwd: string; readonly env: Record<string, string> },
 	) => SpawnedProcess;
+	readonly writeTempText: (prefix: string, content: string) => string;
 }
 
 export interface FakeSpawnerServicesInput {
@@ -49,6 +53,7 @@ export const makeFakeSpawnerServices = (input: FakeSpawnerServicesInput): Launch
 	},
 	env: (key) => input.env?.[key],
 	spawnProcess: () => (input.spawnPid === undefined ? {} : { pid: input.spawnPid }),
+	writeTempText: (prefix, content) => `${prefix}-${content.length}.tmp`,
 	execFile: () => input.commandResult ?? { status: 0, stdout: "1", stderr: "" },
 });
 
@@ -63,6 +68,11 @@ export const LiveSpawnerServices: LaunchServices = {
 			detached: false,
 		});
 		return child.pid === undefined ? {} : { pid: child.pid };
+	},
+	writeTempText: (prefix, content) => {
+		const path = join(tmpdir(), `${prefix}-${randomUUID()}.md`);
+		writeFileSync(path, content, { encoding: "utf8", flag: "wx" });
+		return path;
 	},
 	execFile: (file, args) => spawnSync(file, args, { encoding: "utf8" }),
 };

@@ -287,19 +287,23 @@ const makeLaunchServices = (
 		tmuxStatus,
 		exitCode = 0,
 		panePid,
+		onTmuxNewSession,
 	}: {
 		spawnPid?: number;
 		tmuxStatus?: string;
 		exitCode?: number;
 		panePid?: number;
+		onTmuxNewSession?: (args: readonly string[]) => void;
 	},
 ) =>
 	({
 		...fakeRenderServices(agentsJson),
 		spawnProcess: () => (spawnPid === undefined ? {} : { pid: spawnPid }),
+		writeTempText: (prefix: string, content: string) => `/tmp/${prefix}-${content.length}.md`,
 		execFile: (file: string, args: readonly string[]) => {
 			if (file === "tmux") {
 				if (args[0] === "new-session") {
+					onTmuxNewSession?.(args);
 					return { status: exitCode, stdout: "", stderr: exitCode === 0 ? "" : "tmux failed" };
 				}
 				return { status: 0, stdout: panePid?.toString() ?? "", stderr: "" };
@@ -580,7 +584,7 @@ describe("launchRenderedAgent", () => {
 		expect("harnessEnvKeys" in launched).toBe(false);
 	});
 
-	it("launches hitl through tmux when requested", () => {
+	it("launches Pi hitl through tmux using a temp prompt file", () => {
 		const rendered = renderAgent(
 			{ ...base, agent: "war", mode: "hitl" },
 			fakeRenderServices(
@@ -594,11 +598,23 @@ describe("launchRenderedAgent", () => {
 				}),
 			),
 		);
+		let tmuxNewSessionArgs: readonly string[] = [];
 		const hitl = launchRenderedAgent(
 			rendered,
-			makeLaunchServices("", { exitCode: 0, panePid: 5678, tmuxStatus: "ignored" }),
+			makeLaunchServices("", {
+				exitCode: 0,
+				panePid: 5678,
+				tmuxStatus: "ignored",
+				onTmuxNewSession: (args) => {
+					tmuxNewSessionArgs = args;
+				},
+			}),
 		);
 		expect(hitl.hitl).toEqual({ tmuxTarget: "pdx--war__scope-repo--123e4567", panePid: 5678 });
+		expect(tmuxNewSessionArgs).toContain("sh");
+		expect(tmuxNewSessionArgs).toContain("-c");
+		expect(tmuxNewSessionArgs.join("\0")).not.toContain(rendered.prompt);
+		expect(tmuxNewSessionArgs.join("\0")).toContain("$(cat '/tmp/pithos-spawner-prompt-");
 	});
 });
 

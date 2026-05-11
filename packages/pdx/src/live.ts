@@ -256,6 +256,7 @@ export const makeSpawnerLive = (config: {
 			return liveSpawnerServices.env(key);
 		},
 		execFile: liveSpawnerServices.execFile,
+		writeTempText: liveSpawnerServices.writeTempText,
 	};
 	return Spawner.of({
 		renderAgent: (input) =>

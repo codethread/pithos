@@ -408,6 +408,43 @@ const sessionLogPathFor = (
 		? `${homedir()}/.claude/projects/${claudeProjectSlug(input.cwd)}/${input.sessionId}.jsonl`
 		: `${homedir()}/.pi/agent/sessions/${piSessionBucket(input.cwd)}/${input.sessionId}.jsonl`;
 
+const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
+
+const piPromptArgIndex = (argv: readonly string[]): number => {
+	const index = argv.findIndex(
+		(arg) => arg === "--system-prompt" || arg === "--append-system-prompt",
+	);
+	if (index === -1 || argv[index + 1] === undefined) {
+		throw new SpawnerError({
+			code: "LAUNCH_ERROR",
+			message: "pi harness argv is missing a system prompt argument",
+		});
+	}
+	return index + 1;
+};
+
+const piHitlShellCommand = (
+	rendered: RenderedAgent,
+	services: LaunchServices,
+): readonly string[] => {
+	const promptIndex = piPromptArgIndex(rendered.harness.argv);
+	const promptPath = services.writeTempText(
+		"pithos-spawner-prompt",
+		rendered.harness.argv[promptIndex]!,
+	);
+	const beforePrompt = rendered.harness.argv.slice(0, promptIndex).map(shellQuote).join(" ");
+	const afterPrompt = rendered.harness.argv
+		.slice(promptIndex + 1)
+		.map(shellQuote)
+		.join(" ");
+	const script = [
+		`prompt=$(cat ${shellQuote(promptPath)}) || exit $?`,
+		`rm -f ${shellQuote(promptPath)}`,
+		`exec ${beforePrompt} \"$prompt\"${afterPrompt === "" ? "" : ` ${afterPrompt}`}`,
+	].join("; ");
+	return ["sh", "-c", script];
+};
+
 const harnessArgv = (
 	input: RenderAgentInput,
 	manifest: Manifest,
@@ -548,10 +585,12 @@ export const launchRenderedAgent = (
 			message: `${rendered.agent}: rendered harness argv is empty`,
 		});
 	}
+	const launchArgv =
+		rendered.harness.kind === "pi" ? piHitlShellCommand(rendered, services) : rendered.harness.argv;
 	const envCommand = [
 		"env",
 		...Object.entries(rendered.harness.env).map(([key, value]) => `${key}=${value}`),
-		...rendered.harness.argv,
+		...launchArgv,
 	];
 	const result = services.execFile("tmux", [
 		"new-session",

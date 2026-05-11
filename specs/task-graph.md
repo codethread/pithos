@@ -1,7 +1,7 @@
 # Task Graph
 
 **Status:** Implemented
-**Last Updated:** 2026-05-07
+**Last Updated:** 2026-05-11
 
 ## 1. Overview
 
@@ -175,7 +175,7 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 | --------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pithos task enqueue`             | Modify           | Support repeatable `--depends-on <task-id>`. All referenced tasks must exist. Duplicate IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, and `agent_enqueues` authorization.               |
 | `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task. |
-| `pithos task inspect <id>`        | Expand output    | Return the task, artifacts, direct dependencies, direct dependents, unresolved blockers, and immediate supersession links.                                                                                                               |
+| `pithos task inspect <id>`        | Expand output    | Return full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                     |
 | `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                     |
 | `pithos task supersede <task-id>` | New              | Create a replacement task with an explicit `--stdin` replacement body, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.        |
 | `pithos briefing`                 | Modify output    | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items.                                                                                                                                  |
@@ -267,6 +267,10 @@ Success response shape:
 		"scope_id": "repo:fe",
 		"capability": "execute",
 		"status": "queued",
+		"body": "update the FE client for task_d",
+		"fencing_token": 0,
+		"attempts": 0,
+		"max_attempts": 3,
 		"claimable": false,
 		"unresolved_dependency_ids": ["task_d"]
 	},
@@ -274,6 +278,54 @@ Success response shape:
 		{ "id": "task_d", "scope_id": "repo:be", "status": "queued", "title": "Fix API" }
 	],
 	"dependents": [],
+	"lineage": [
+		{
+			"depth": 2,
+			"via_task_ids": ["task_d"],
+			"task": {
+				"id": "task_a",
+				"scope_id": "global",
+				"capability": "triage",
+				"status": "done",
+				"body": "approved API sketch",
+				"fencing_token": 0,
+				"attempts": 0,
+				"max_attempts": 3,
+				"claimable": false,
+				"unresolved_dependency_ids": []
+			},
+			"supersedes": null,
+			"superseded_by": null,
+			"artifacts": []
+		},
+		{
+			"depth": 1,
+			"via_task_ids": ["task_c"],
+			"task": {
+				"id": "task_d",
+				"scope_id": "repo:be",
+				"capability": "execute",
+				"status": "queued",
+				"body": "Fix API",
+				"fencing_token": 0,
+				"attempts": 0,
+				"max_attempts": 3,
+				"claimable": false,
+				"unresolved_dependency_ids": ["task_a"]
+			},
+			"supersedes": null,
+			"superseded_by": null,
+			"artifacts": [
+				{
+					"id": "artifact_1",
+					"kind": "design-brief",
+					"title": "API brief",
+					"body": "...",
+					"created_at": "2026-05-11 14:00:00"
+				}
+			]
+		}
+	],
 	"supersedes": null,
 	"superseded_by": null,
 	"artifacts": []
@@ -282,7 +334,11 @@ Success response shape:
 
 Requirements:
 
-- relationship arrays must be deterministic and sorted by `created_at`, then `id`
+- `task` is full task detail (`body`, `fencing_token`, `attempts`, `max_attempts`) plus computed `claimable` and `unresolved_dependency_ids`
+- `lineage` walks `task_dependencies` upstream only; it never traverses dependents or supersession edges
+- each lineage entry appears once at its shortest upstream depth; `via_task_ids` lists the child task ids through which that shortest-depth ancestor is reached
+- `lineage` is sorted by `depth DESC`, then task `created_at ASC`, then task `id ASC`
+- direct `dependencies`, direct `dependents`, and artifact arrays remain deterministic and sorted by `created_at`, then `id`
 - dependency/dependent summaries must always include `scope_id`
 - `claimable` and `unresolved_dependency_ids` are computed, never stored
 

@@ -232,11 +232,7 @@ const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {
 	pandora: ["pithos task", "pithos graph", "pithos events", "pithos briefing"],
 };
 
-const PANDORA_PDX_COMMAND_PATHS = [
-	"pdx daemon status",
-	"pdx daemon logs",
-	"pdx run transcript",
-] as const;
+const PANDORA_PDX_COMMAND_PATHS = ["pdx run transcript"] as const;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
@@ -679,8 +675,17 @@ const textFromPiUserContent = (content: unknown, path: string, line: number): st
 const textFromPiAssistantContent = (content: unknown, path: string, line: number): string => {
 	const blocks = contentArray(content, path, line, "message.content");
 	const text = blocks
-		.filter((item) => item.type === "text")
-		.map((item) => requiredString(item.text, path, line, "message.content[].text"))
+		.flatMap((item) => {
+			if (item.type === "text") {
+				return [requiredString(item.text, path, line, "message.content[].text")];
+			}
+			if (item.type === "thinking") {
+				return [requiredString(item.thinking, path, line, "message.content[].thinking")];
+			}
+			return [];
+		})
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0)
 		.join("\n");
 	if (text.length > 0) return text;
 	const tools = blocks

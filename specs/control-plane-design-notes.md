@@ -1,7 +1,7 @@
 # Control Plane Design Notes
 
 **Status:** Discussion notes
-**Last Updated:** 2026-05-09
+**Last Updated:** 2026-05-11
 
 Informal working notes for the control-plane rewrite. This is not the final spec; it is a shared reference for the design discussion.
 
@@ -220,14 +220,17 @@ pdx close
 pdx daemon status
 pdx daemon logs [--limit <n> | --all] [--since <when>]
 pdx run kill <run-id> --reason <text>
+pdx run transcript <run-id>
+pdx run show <run-id>
 pdx task kill <task-id> --reason <text>
+pdx task show <task-id>
 ```
 
 No restart command initially. Recovery is explicit: kill interrupts and escalates; Pandora/Adam decide whether to supersede, cancel, or replan. Normal death may still result in a fresh run after cleanup when reconcile sees claimable work. There is no same-run resurrection.
 
 Each pdx reconcile tick settles lifecycle before spawning: observe registry, cleanup entries whose execution is already gone, finish terminating kills, remove settled entries, write pdx-paced heartbeat for live HITL entries when due, then inspect claimable work and spawn. This preserves the invariant that old execution is gone before its work becomes claimable to a fresh run.
 
-`pdx` never pre-claims. It spawns because work is claimable; the agent claims through Pithos. A launched-but-not-claimed live agent still occupies its `(agent, scope)` cap slot. No-claim timeout is a registry bootstrap rule: it applies only to non-Pandora entries that have never observed an initial claim, not to any later idle period after a run completed a held task.
+`pdx` never pre-claims. It spawns because work is claimable; the agent claims through Pithos. A launched-but-not-claimed live agent still occupies its `(agent, scope)` cap slot. No-claim timeout is a registry bootstrap rule: it applies only to non-Pandora entries that have never observed an initial claim, not to any later idle period after a run completed a held task. Later idle policy is role-specific: Pandora stays resident, while supervised non-Pandora HITL sessions are reaped after their first claimed task clears.
 
 Default reconcile interval is 5 seconds. Each tick settles lifecycle first, then spawns at most one agent in seeded order (`pandora`, `toil`, `greed`, `war`). HITL death detection uses `tmux has-session`; AFK death detection uses the process handle / `kill(pid, 0)`. HITL startup orphans are `^pdx--` tmux sessions; AFK startup orphans are pidfiles under `<home>/runs/`. On successful `pdx open`, the CLI prints `tmux attach -t pdx--pandora` and exits; it does not auto-attach.
 
@@ -241,7 +244,7 @@ Default reconcile interval is 5 seconds. Each tick settles lifecycle first, then
 6. Retry kill once per reconcile tick, structured-log failures, no max retry in MVP.
 7. Remove registry entry after kill succeeds.
 
-`pdx daemon logs` prints raw structured JSONL supervisor log lines. Default limit is 100. `--since` accepts ISO timestamps, durations like `10m`, `1h`, `2d`, `1w`, plus local-time `today` and `yesterday`. Each supervisor log line includes at least `ts`, `level`, `span`, and `msg`.
+`pdx daemon logs` prints raw structured JSONL supervisor log lines. Default limit is 100. `--since` accepts ISO timestamps, durations like `10m`, `1h`, `2d`, `1w`, plus local-time `today` and `yesterday`. Each supervisor log line includes at least `ts`, `level`, `span`, and `msg`. The internal daemon may also print concise lifecycle pulses to its tmux stdout for operator visibility, but those are not the structured log contract.
 
 Wakeups use `tmux send-keys` to `pdx--pandora` with the content-free marker `# wakeup: claimable escalate`.
 
@@ -317,7 +320,7 @@ queued|failed|dead_letter --pithos task cancel--> cancelled
 
 ## `run cleanup` vs `run interrupt`
 
-`run cleanup` is for natural lifecycle cleanup after pdx has confirmed the AFK process or HITL tmux target is gone. Harness hooks and agents do not call it.
+`run cleanup` is for natural lifecycle cleanup after pdx has confirmed the AFK process or HITL tmux target is gone, including non-Pandora HITL single-task reap after a held task clears. Harness hooks and agents do not call it.
 
 `run interrupt` is for deliberate operator kill via `pdx run kill` or `pdx task kill`.
 

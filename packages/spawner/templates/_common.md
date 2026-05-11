@@ -23,6 +23,8 @@ After claiming, inspect the held task:
 $PITHOS_BIN task inspect <task-id>
 ```
 
+`task inspect` includes upstream dependency lineage and ancestor artifacts. Prefer referencing upstream task/artifact ids from that lineage instead of copying approved briefs into downstream task bodies.
+
 Attach an artifact with a stdin body:
 
 ```sh

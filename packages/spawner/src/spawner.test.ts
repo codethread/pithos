@@ -401,8 +401,8 @@ describe("renderAgent", () => {
 		expect(rendered.prompt).toContain("pithos briefing");
 		expect(rendered.prompt).toContain("pithos graph inspect");
 		expect(rendered.prompt).toContain("pithos events tail");
-		expect(rendered.prompt).toContain("pdx daemon status");
-		expect(rendered.prompt).toContain("pdx daemon logs");
+		expect(rendered.prompt).not.toContain("pdx daemon status");
+		expect(rendered.prompt).not.toContain("pdx daemon logs");
 		expect(rendered.prompt).toContain("pdx run transcript");
 	});
 
@@ -623,6 +623,71 @@ describe("renderSessionTranscript", () => {
 		expect(output.split("\n").filter((line) => line.length > 0)).toHaveLength(20);
 		expect(output).toContain("[2026-05-10 12:00:01] USER: Hello 1");
 		expect(output).toContain("[2026-05-10 12:00:20] USER: Hello 20");
+	});
+
+	it("renders Pi assistant thinking blocks", () => {
+		const output = renderSessionTranscript(
+			{ harnessKind: "pi", sessionLogPath: "session.jsonl" },
+			{
+				readText: () =>
+					`${JSON.stringify({ type: "message", timestamp: "2026-05-10T12:00:00Z", message: { role: "assistant", content: [{ type: "thinking", thinking: "Inspecting design brief" }] } })}\n`,
+				env: () => undefined,
+				execFile: noopExec,
+			},
+		);
+		expect(output).toContain("[2026-05-10 12:00:00] ASSISTANT: Inspecting design brief");
+	});
+
+	it("prefers Pi assistant thinking text over tool fallback", () => {
+		const output = renderSessionTranscript(
+			{ harnessKind: "pi", sessionLogPath: "session.jsonl" },
+			{
+				readText: () =>
+					`${JSON.stringify({
+						type: "message",
+						timestamp: "2026-05-10T12:00:00Z",
+						message: {
+							role: "assistant",
+							content: [
+								{ type: "thinking", thinking: "Planning transcript fix" },
+								{
+									type: "toolCall",
+									name: "read",
+									id: "call_1",
+									arguments: { path: "packages/spawner/src/spawner.ts" },
+								},
+							],
+						},
+					})}\n`,
+				env: () => undefined,
+				execFile: noopExec,
+			},
+		);
+		expect(output).toContain("[2026-05-10 12:00:00] ASSISTANT: Planning transcript fix");
+		expect(output).not.toContain("[tools: read]");
+	});
+
+	it("renders Pi assistant tool fallback when no readable text is present", () => {
+		const output = renderSessionTranscript(
+			{ harnessKind: "pi", sessionLogPath: "session.jsonl" },
+			{
+				readText: () =>
+					`${JSON.stringify({
+						type: "message",
+						timestamp: "2026-05-10T12:00:00Z",
+						message: {
+							role: "assistant",
+							content: [
+								{ type: "thinking", thinking: "   \n\t" },
+								{ type: "toolCall", name: "bash", id: "call_1", arguments: { command: "pwd" } },
+							],
+						},
+					})}\n`,
+				env: () => undefined,
+				execFile: noopExec,
+			},
+		);
+		expect(output).toContain("[2026-05-10 12:00:00] ASSISTANT: [tools: bash]");
 	});
 
 	it("fails loudly on missing or corrupt logs", () => {

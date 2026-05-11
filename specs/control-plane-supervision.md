@@ -1,7 +1,7 @@
 # Control Plane Supervision
 
 **Status:** Planned
-**Last Updated:** 2026-05-09
+**Last Updated:** 2026-05-11
 
 ## 1. Overview
 
@@ -103,6 +103,7 @@ pdx reconcile loop (each tick settles lifecycle before spawning)
        HITL death probe: `tmux has-session -t <target>`
        natural death already gone -> pithos run cleanup
        non-Pandora no-claim timeout (>30s) -> kill/confirm gone, then pithos run timeout
+       non-Pandora HITL task cleared after an initial claim -> kill/confirm gone, then pithos run cleanup with reason `task_cleared`
        terminating entries -> retry kill once this tick until gone
   3. remove settled registry entries
   4. write pdx-paced heartbeat for live HITL entries when due
@@ -152,7 +153,8 @@ MVP caps:
 - Pandora: exactly one live singleton while pdx is open.
 - Non-Pandora agents: at most one live entry per `(agent, scope)`.
 - AFK agents also respect global `--max-afk`.
-- Each spawned non-Pandora agent is conventionally expected to claim one task and exit/close, but Pithos only enforces one active task per run at a time.
+- Supervised non-Pandora HITL sessions are single-task under pdx: after a run has ever claimed work and later clears `runs.task_id`, pdx reaps the idle tmux session instead of leaving it resident.
+- Non-Pandora AFK agents are also conventionally expected to claim one task and exit/close, but Pithos only enforces one active task per run at a time.
 
 Caps are counted from the in-memory registry, including `launching`, `live`, and `terminating` entries, not from DB run status. Future versions may expand this to safe concurrent work.
 
@@ -160,7 +162,7 @@ Default reconcile interval is 5 seconds. `pdx open --interval-seconds <n>` remai
 
 Spawn policy is intentionally simple in MVP: one spawn per reconcile tick, after lifecycle settlement, in seeded agent order (`pandora`, `toil`, `greed`, `war`). `repo` and `worktree` scopes use `scope.canonical_path` as cwd. `global` scope uses `<pdx data-dir>` as cwd.
 
-The 30 second No-claim session timeout is a registry bootstrap rule, not a generic `runs.task_id IS NULL` rule. It applies only to non-Pandora registry entries that have never observed an initial claim. Once a run has ever held a task, later idle/null `runs.task_id` periods are not No-claim sessions.
+The 30 second No-claim session timeout is a registry bootstrap rule, not a generic `runs.task_id IS NULL` rule. It applies only to non-Pandora registry entries that have never observed an initial claim. Once a run has ever held a task, later idle/null `runs.task_id` periods are not No-claim sessions. Instead, pdx applies role-specific policy: Pandora remains long-lived, while non-Pandora HITL sessions are reaped after their first claimed task clears.
 
 ## 5. Data Model
 
@@ -356,6 +358,8 @@ Clean-break nested command surface:
 pithos init [--fresh]
 
 pithos scope upsert --kind <global|repo|worktree> [--path <path>]
+pithos scope list [--all]
+pithos scope archive <scope-id>
 
 pithos run upsert \
   --agent <pdx|pandora|toil|greed|war> \
@@ -447,7 +451,7 @@ Drops the existing DB file and initialises the current schema/seed data. Normal 
 
 ### `pithos run cleanup`
 
-Used for natural lifecycle cleanup after pdx has confirmed the AFK process or HITL tmux target is gone. Callers: AFK exit observation, HITL tmux disappearance, pdx startup cleanup after orphan kill, and pdx close after child sessions are gone.
+Used for natural lifecycle cleanup after pdx has confirmed the AFK process or HITL tmux target is gone. Callers: AFK exit observation, HITL tmux disappearance, non-Pandora HITL single-task reap after `task_cleared`, pdx startup cleanup after orphan kill, and pdx close after child sessions are gone.
 
 Agents and harness hooks do not call `run cleanup`; they complete/fail tasks and exit. pdx observes lifecycle and finalizes runs.
 
@@ -516,8 +520,10 @@ pdx daemon logs [--data-dir <path>] [--limit <n> | --all] [--since <when>]
 
 pdx run kill <run-id> --reason <text> [--data-dir <path>]
 pdx run transcript <run-id> [--data-dir <path>] [--limit <n>]
+pdx run show <run-id> [--data-dir <path>]
 
 pdx task kill <task-id> --reason <text> [--data-dir <path>]
+pdx task show <task-id> [--data-dir <path>]
 ```
 
 The internal daemon process entrypoint is `pdx daemon run`; it is used by `pdx open` inside tmux and is intentionally omitted from public help/API docs. `pdx daemon` is the public daemon namespace only.
@@ -562,6 +568,10 @@ If no daemon is running, `pdx daemon status` returns successful JSON with `daemo
 
 System runs, missing session log files, unreadable files, unsupported `harness_kind`, corrupt JSONL, or malformed run metadata fail loudly. DB run state remains `pithos run inspect <run-id>`; task state remains `pithos task inspect <task-id>`.
 
+`pdx run show <run-id>` switches the current tmux client to the supervised HITL session for that run. It fails loudly if the run is not currently supervised or if the run is AFK and therefore has no tmux session.
+
+`pdx task show <task-id>` resolves the active holder run for that task from Pithos, then delegates to `pdx run show`. It fails loudly if the task has no active holder or if the holder run has no live tmux session.
+
 No `pdx restart` in MVP. Recovery is explicit through Pandora/Adam and graph repair.
 
 On successful `pdx open`, the CLI prints `tmux attach -t pdx--pandora` and exits. It does not auto-attach.
@@ -585,6 +595,8 @@ pdx--<agent>__<scope-slug>--<session-short>
 AFK agents use the same `logical_name` convention in logs/status even though they do not have tmux sessions.
 
 Supervisor logs are structured JSONL at an internal pdx-controlled path such as `<data-dir>/pdx.jsonl`. Use structured `Effect.log*` output and spans per project rules; do not write unstructured daemon logs. Every supervisor log line includes at least `ts`, `level`, `span`, and `msg`.
+
+The internal daemon tmux pane may also print concise human-readable lifecycle pulses (for example spawn/remove/wakeup) to stdout for operator visibility. Those pulses are ephemeral operator affordances, not the durable or machine-readable supervisor log contract.
 
 ## 9. Spawner Interface
 
@@ -680,7 +692,7 @@ Spawner/template context contains self-claim context, not task content:
 - generated `claim_command`
 - generated, role-filtered command help JSON
 
-Templates do not receive full `pithos --help` by default. Spawner filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`. Missing configured help paths or malformed help JSON fail rendering loudly.
+Templates do not receive full `pithos --help` by default. Spawner filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`. `pdx run show` and `pdx task show` remain public operator commands, but are not included in Pandora's default filtered command cards. Missing configured help paths or malformed help JSON fail rendering loudly.
 
 Spawner renders `claim_command` from manifest claim capability plus launch context, for example:
 
@@ -773,13 +785,13 @@ pithos task complete <task-id> --run <run-id> --token <token>
 
 `task complete` uses no stdin for the default `{}` result metadata. Use `task complete --stdin` only for JSON object metadata; long-form work products belong in Artifacts.
 
-Pithos invariant: a run may hold at most one active task at a time. After completing/failing a task and clearing `runs.task_id`, the same run may claim another task. Agent behavior is convention: Toil/Greed/War normally claim one task and exit/close for context management; Pandora is long-lived and may repeatedly claim `escalate` tasks sequentially.
+Pithos invariant: a run may hold at most one active task at a time. After completing/failing a task and clearing `runs.task_id`, the same run may claim another task. `pdx` applies a narrower MVP supervision policy on top: Pandora is long-lived and may repeatedly claim `escalate` tasks sequentially, but supervised non-Pandora HITL sessions are single-task and are reaped after their first observed claim clears. Toil/War AFK runs are also conventionally expected to claim one task and exit/close for context management.
 
 Per-agent roles and enqueue authority:
 
-- **Pandora** claims `escalate`, discusses with Adam, investigates with Pithos state plus `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`, and decides whether to supersede/cancel/replan/enqueue follow-up. She may enqueue `triage`, `design`, and `escalate`, but not `execute`; execution goes through Toil.
+- **Pandora** claims `escalate`, discusses with Adam, investigates with Pithos state plus `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`, and decides whether to supersede/cancel/replan/enqueue follow-up. When Adam asks to drain escalations, Pandora processes them sequentially because one run may hold only one task at a time. Routine Greed review nudges with an already-attached `design-brief` artifact count as approved design and may be completed without re-asking Adam. She may enqueue `triage`, `design`, and `escalate`, but not `execute`; execution goes through Toil.
 - **Toil** claims `triage`, decomposes and routes work, and may enqueue `triage`, `design`, `execute`, and checkpoint `escalate` tasks. Toil may supersede/cancel non-held tasks when repairing a broken chain.
-- **Greed** claims `design`, produces `design-brief` artifacts, and may enqueue `design`, `triage`, and `escalate` when the HITL design session branches or is ready for follow-up. Greed does not enqueue `execute` in MVP.
+- **Greed** claims `design`, performs the interactive design review in a live HITL session, and first enqueues a global `escalate` task when ready for Adam review/sign-off. Greed attaches the final `design-brief` artifact only after Adam signs off directly or Pandora relays explicit sign-off, then completes the held task. Once that task clears, pdx reaps the non-Pandora HITL session. Greed may enqueue `design`, `triage`, and `escalate` when the design session branches or is ready for follow-up. Greed does not enqueue `execute` in MVP.
 - **War** claims `execute`, performs repo/worktree execution, produces `war-completion` artifacts, and may enqueue `escalate` when attention is needed. War does not enqueue further `execute` tasks in MVP.
 
 ## 11. Event Vocabulary

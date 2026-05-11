@@ -49,6 +49,7 @@ export interface TmuxService {
 		readonly cwd: string;
 	}) => Effect.Effect<void, PdxError>;
 	readonly killSession: (target: string) => Effect.Effect<void, PdxError>;
+	readonly switchClient: (target: string) => Effect.Effect<void, PdxError>;
 	readonly sendLiteralLine: (target: string, text: string) => Effect.Effect<void, PdxError>;
 	readonly pasteBuffer: (target: string, content: string) => Effect.Effect<void, PdxError>;
 }
@@ -102,6 +103,15 @@ export interface PithosClientService {
 	readonly activeRunForTask: (input: {
 		readonly taskId: string;
 	}) => Effect.Effect<PdxRunOutput | null, PdxError>;
+	readonly taskInspect: (input: { readonly taskId: string }) => Effect.Effect<
+		{
+			readonly task: {
+				readonly id: string;
+				readonly status: string;
+			};
+		},
+		PdxError
+	>;
 	readonly taskHeartbeat: (input: { readonly runId: string }) => Effect.Effect<void, PdxError>;
 	readonly taskEnqueue: (input: {
 		readonly scope: string;
@@ -227,4 +237,39 @@ export interface SupervisorLogService {
 export class SupervisorLog extends Context.Tag("pdx/SupervisorLog")<
 	SupervisorLog,
 	SupervisorLogService
+>() {}
+
+export type LifecycleEvent =
+	| {
+			readonly kind: "spawned";
+			readonly agent: "pandora" | "toil" | "greed" | "war";
+			readonly mode: "afk" | "hitl";
+			readonly runId: string;
+			readonly scopeId: string;
+			readonly sessionId: string;
+			readonly tmuxTarget?: string | undefined;
+			readonly pid?: number | undefined;
+	  }
+	| {
+			readonly kind: "removed";
+			readonly agent: "pandora" | "toil" | "greed" | "war";
+			readonly runId: string;
+			readonly scopeId: string;
+			readonly reason: "terminated" | "natural_death" | "no_claim_timeout";
+			readonly tmuxTarget?: string | undefined;
+			readonly pid?: number | undefined;
+	  }
+	| {
+			readonly kind: "wakeup";
+			readonly reason: "claimable_escalate";
+			readonly target: string;
+			readonly claimableEscalateCount: number;
+	  };
+
+export interface LifecycleReporterService {
+	readonly report: (event: LifecycleEvent) => Effect.Effect<void, PdxError>;
+}
+export class LifecycleReporter extends Context.Tag("pdx/LifecycleReporter")<
+	LifecycleReporter,
+	LifecycleReporterService
 >() {}

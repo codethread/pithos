@@ -9,8 +9,10 @@ import {
 	logsShowPdx,
 	openPdx,
 	runDaemon,
+	runShowPdx,
 	runTranscriptPdx,
 	statusPdx,
+	taskShowPdx,
 } from "./controller.js";
 import { parsePdxConfig } from "./config.js";
 import { PdxError } from "./errors.js";
@@ -23,10 +25,12 @@ import {
 	ProcessLive,
 } from "./live.js";
 import { makeSupervisorLog } from "./log.js";
+import { makeNoopLifecycleReporter, makeStdoutLifecycleReporter } from "./lifecycle.js";
 import {
 	Clock,
 	FileSystem,
 	Ids,
+	LifecycleReporter,
 	makeRegistry,
 	PithosClient,
 	Process,
@@ -77,6 +81,16 @@ type CommandInput =
 			readonly limit: number | undefined;
 	  }
 	| {
+			readonly command: "run.show";
+			readonly dataDir: string | undefined;
+			readonly runId: string;
+	  }
+	| {
+			readonly command: "task.show";
+			readonly dataDir: string | undefined;
+			readonly taskId: string;
+	  }
+	| {
 			readonly command: "daemon.run";
 			readonly dataDir: string | undefined;
 			readonly maxAfk: number;
@@ -87,6 +101,12 @@ const defaultIntervalSeconds = 5;
 const defaultMaxAfk = 4;
 
 const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
+const json = (value: unknown): string => `${JSON.stringify(value)}\n`;
+
+const writePdxError = (code: PdxError["code"], message: string) => {
+	process.stderr.write(json({ ok: false, error: { code, message } }));
+	process.exitCode = 2;
+};
 
 const parsePositiveInt = (value: number, name: string): Effect.Effect<number, PdxError> => {
 	if (!Number.isInteger(value) || value <= 0) {
@@ -119,9 +139,15 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 		const tmux = yield* makeTmux;
 		const supervisorLog = yield* makeSupervisorLog(config.logPath);
 		const registry = yield* makeRegistry;
+		const clock = yield* Clock;
+		const lifecycleReporter =
+			input.command === "daemon.run"
+				? makeStdoutLifecycleReporter(clock)
+				: makeNoopLifecycleReporter();
 		const provided = Layer.mergeAll(
 			Layer.succeed(Tmux, tmux),
 			Layer.succeed(SupervisorLog, supervisorLog),
+			Layer.succeed(LifecycleReporter, lifecycleReporter),
 			Layer.succeed(Registry, registry),
 			Layer.succeed(PithosClient, makePithosClientLive(config.pithosDbPath)),
 			Layer.succeed(Spawner, makeSpawnerLive(config)),
@@ -168,6 +194,20 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 				yield* Effect.sync(() => process.stdout.write(transcript));
 				return;
 			}
+			case "run.show": {
+				const confirmation = yield* runShowPdx(config, { runId: input.runId }).pipe(
+					Effect.provide(provided),
+				);
+				yield* Effect.sync(() => process.stdout.write(json(confirmation)));
+				return;
+			}
+			case "task.show": {
+				const confirmation = yield* taskShowPdx(config, { taskId: input.taskId }).pipe(
+					Effect.provide(provided),
+				);
+				yield* Effect.sync(() => process.stdout.write(json(confirmation)));
+				return;
+			}
 			case "daemon.run": {
 				const handle = yield* runDaemon(config, input.maxAfk, input.intervalSeconds).pipe(
 					Effect.provide(provided),
@@ -181,10 +221,7 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 
 const handleError = (error: unknown): Effect.Effect<void, unknown> => {
 	if (error instanceof PdxError) {
-		return Effect.sync(() => {
-			process.stderr.write(`${error.code}: ${error.message}\n`);
-			process.exitCode = 2;
-		});
+		return Effect.sync(() => writePdxError(error.code, error.message));
 	}
 	return Effect.fail(error);
 };
@@ -490,9 +527,22 @@ const makeCommand = (runtime: RuntimeInput) => {
 			}),
 	).pipe(Command.withDescription("Render an agent harness transcript for a run."));
 
+	const runShow = Command.make(
+		"show",
+		{
+			runId: Args.text({ name: "run-id" }),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+		},
+		({ dataDir, runId }) =>
+			runCommand(runtime, { command: "run.show", dataDir: opt(dataDir), runId }),
+	).pipe(Command.withDescription("Jump the current tmux client to a supervised run session."));
+
 	const run = Command.make("run").pipe(
 		Command.withDescription("Inspect or stop supervised agent runs owned by pdx."),
-		Command.withSubcommands([runKill, runTranscript]),
+		Command.withSubcommands([runKill, runTranscript, runShow]),
 	);
 
 	const taskKill = Command.make(
@@ -515,9 +565,22 @@ const makeCommand = (runtime: RuntimeInput) => {
 		Command.withDescription("Kill the live run holding a task after interrupting Pithos state."),
 	);
 
+	const taskShow = Command.make(
+		"show",
+		{
+			taskId: Args.text({ name: "task-id" }),
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+		},
+		({ dataDir, taskId }) =>
+			runCommand(runtime, { command: "task.show", dataDir: opt(dataDir), taskId }),
+	).pipe(Command.withDescription("Jump to the live tmux session holding a task, if any."));
+
 	const task = Command.make("task").pipe(
 		Command.withDescription("Operate on live supervision for Pithos tasks."),
-		Command.withSubcommands([taskKill]),
+		Command.withSubcommands([taskKill, taskShow]),
 	);
 
 	return Command.make("pdx").pipe(
@@ -550,8 +613,7 @@ const program = captureRuntimeInput.pipe(
 	Effect.catchAll((error) =>
 		Effect.sync(() => {
 			const message = error instanceof Error ? error.message : inspect(error);
-			process.stderr.write(`VALIDATION_ERROR: ${message}\n`);
-			process.exitCode = 2;
+			writePdxError("VALIDATION_ERROR", message);
 		}),
 	),
 	Effect.provide(Layer.mergeAll(NodeContext.layer, CliConfig.layer({ showBuiltIns: false }))),

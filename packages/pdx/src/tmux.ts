@@ -52,6 +52,14 @@ export const makeTmux = Effect.gen(function* () {
 						requireOk("tmux kill-session", result.exitCode, result.stderr),
 					),
 				),
+		switchClient: (target) =>
+			processService
+				.execFile("tmux", ["switch-client", "-t", target])
+				.pipe(
+					Effect.flatMap((result) =>
+						requireOk("tmux switch-client", result.exitCode, result.stderr),
+					),
+				),
 		sendLiteralLine: (target, text) =>
 			processService.execFile("tmux", ["send-keys", "-t", target, "-l", "--", text]).pipe(
 				Effect.flatMap((result) =>

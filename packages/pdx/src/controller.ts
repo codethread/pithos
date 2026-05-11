@@ -16,6 +16,7 @@ import {
 	type RegistryEntry,
 	type TmuxService,
 } from "./services.js";
+import { reportLifecycle } from "./lifecycle.js";
 
 export const DAEMON_TARGET = "pdx--daemon";
 export const PANDORA_TARGET = "pdx--pandora";
@@ -358,6 +359,70 @@ export const logsShowPdx = (
 		return output.length === 0 ? "" : `${output.join("\n")}\n`;
 	});
 
+const registryEntryForRun = (config: PdxConfig, runId: string) =>
+	Effect.gen(function* () {
+		const running = yield* Tmux.pipe(Effect.flatMap((tmux) => tmux.hasSession(DAEMON_TARGET)));
+		const entries = (yield* readDaemonStatus(config, running, 0)).entries;
+		return entries.find((entry) => entry.runId === runId) ?? null;
+	});
+
+const tmuxAttachedConfirmation = (input: {
+	readonly runId: string;
+	readonly target: string;
+	readonly taskId?: string;
+}) => ({
+	ok: true as const,
+	action: "tmux_attached" as const,
+	target: input.target,
+	run_id: input.runId,
+	...(input.taskId === undefined ? {} : { task_id: input.taskId }),
+});
+
+export const runShowPdx = (config: PdxConfig, input: { readonly runId: string }) =>
+	Effect.gen(function* () {
+		const entry = yield* registryEntryForRun(config, input.runId);
+		if (entry === null) {
+			return yield* Effect.fail(
+				new PdxError({
+					code: "NOT_FOUND",
+					message: `Run ${input.runId} is not supervised by pdx or has no live tmux session.`,
+				}),
+			);
+		}
+		const target = entry.tmuxTarget;
+		if (target === undefined) {
+			return yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: `Run ${input.runId} is ${entry.mode}; no tmux session to show.`,
+				}),
+			);
+		}
+		yield* Tmux.pipe(Effect.flatMap((tmux) => tmux.switchClient(target)));
+		return tmuxAttachedConfirmation({ runId: input.runId, target });
+	});
+
+export const taskShowPdx = (config: PdxConfig, input: { readonly taskId: string }) =>
+	Effect.gen(function* () {
+		const pithos = yield* PithosClient;
+		const owner = yield* pithos.activeRunForTask({ taskId: input.taskId });
+		if (owner === null) {
+			const task = yield* pithos.taskInspect({ taskId: input.taskId });
+			return yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: `Task ${input.taskId} is ${task.task.status}; no live run to show.`,
+				}),
+			);
+		}
+		const confirmation = yield* runShowPdx(config, { runId: owner.id });
+		return tmuxAttachedConfirmation({
+			runId: confirmation.run_id,
+			target: confirmation.target,
+			taskId: input.taskId,
+		});
+	});
+
 export const runTranscriptPdx = (input: {
 	readonly runId: string;
 	readonly limit: number | undefined;
@@ -501,14 +566,18 @@ const confirmEntryGone = (entry: RegistryEntry) =>
 				)
 			: confirmAfkGone(entry.pid);
 
-const settleNoClaimTimeout = (config: PdxConfig, entry: RegistryEntry) =>
+const removeSettledEntry = (
+	config: PdxConfig,
+	entry: RegistryEntry,
+	input: {
+		readonly span: "pdx.reconcile" | "pdx.kill";
+		readonly message: string;
+		readonly reason: "terminated" | "natural_death" | "no_claim_timeout";
+	},
+) =>
 	Effect.gen(function* () {
-		const pithos = yield* PithosClient;
 		const registry = yield* Registry;
 		const log = yield* SupervisorLog;
-		yield* killEntryResource(entry, "SIGTERM");
-		yield* confirmEntryGone(entry);
-		yield* pithos.runTimeout({ runId: entry.runId, reason: "no_claim_timeout" });
 		if (entry.mode === "afk") {
 			const fs = yield* FileSystem;
 			yield* fs.removeFile(pidfilePath(config, entry.runId));
@@ -516,9 +585,31 @@ const settleNoClaimTimeout = (config: PdxConfig, entry: RegistryEntry) =>
 		yield* registry.remove(entry.runId);
 		yield* log.write({
 			level: "info",
-			span: "pdx.reconcile",
-			msg: "removed no-claim timed out entry",
+			span: input.span,
+			msg: input.message,
 			data: { run_id: entry.runId },
+		});
+		yield* reportLifecycle({
+			kind: "removed",
+			agent: entry.agent,
+			runId: entry.runId,
+			scopeId: entry.scopeId,
+			reason: input.reason,
+			tmuxTarget: entry.tmuxTarget,
+			pid: entry.pid,
+		});
+	});
+
+const settleNoClaimTimeout = (config: PdxConfig, entry: RegistryEntry) =>
+	Effect.gen(function* () {
+		const pithos = yield* PithosClient;
+		yield* killEntryResource(entry, "SIGTERM");
+		yield* confirmEntryGone(entry);
+		yield* pithos.runTimeout({ runId: entry.runId, reason: "no_claim_timeout" });
+		yield* removeSettledEntry(config, entry, {
+			span: "pdx.reconcile",
+			message: "removed no-claim timed out entry",
+			reason: "no_claim_timeout",
 		});
 	});
 
@@ -557,6 +648,12 @@ const sendEscalateWakeupIfNeeded = () =>
 				span: "pdx.wakeup",
 				msg: "sent Pandora wakeup",
 				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
+			});
+			yield* reportLifecycle({
+				kind: "wakeup",
+				reason: "claimable_escalate",
+				target: PANDORA_TARGET,
+				claimableEscalateCount,
 			});
 		}
 		yield* registry.setLastEscalateClaimableCount(claimableEscalateCount);
@@ -716,6 +813,16 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 					stderr_path: policy.mode === "afk" ? afkStderrPath(config, runId) : null,
 				},
 			});
+			yield* reportLifecycle({
+				kind: "spawned",
+				agent,
+				mode: policy.mode,
+				runId,
+				scopeId: task.scope_id,
+				sessionId,
+				tmuxTarget: launched.hitl?.tmuxTarget,
+				pid: launched.afk?.pid,
+			});
 			return;
 		}
 	});
@@ -738,6 +845,15 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 						span: "pdx.kill",
 						msg: "removed terminated entry",
 						data: { run_id: entry.runId },
+					});
+					yield* reportLifecycle({
+						kind: "removed",
+						agent: entry.agent,
+						runId: entry.runId,
+						scopeId: entry.scopeId,
+						reason: "terminated",
+						tmuxTarget: entry.tmuxTarget,
+						pid: entry.pid,
 					});
 				} else {
 					const attempts = (entry.killAttempts ?? 0) + 1;
@@ -781,13 +897,36 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 						stderr_tail: stderr === null ? null : stderr.slice(-4000),
 					},
 				});
+				yield* reportLifecycle({
+					kind: "removed",
+					agent: entry.agent,
+					runId: entry.runId,
+					scopeId: entry.scopeId,
+					reason: "natural_death",
+					tmuxTarget: entry.tmuxTarget,
+					pid: entry.pid,
+				});
 			} else if (entry.state === "live") {
 				const run = yield* pithos.runInspect({ runId: entry.runId });
 				const observedEntry = run.task_id === null ? entry : { ...entry, everClaimed: true };
 				if (observedEntry !== entry) {
 					yield* registry.upsert(observedEntry);
 				}
-				if (run.task_id === null && (yield* noClaimTimedOut(observedEntry, nowIso))) {
+				if (
+					entry.agent !== "pandora" &&
+					entry.mode === "hitl" &&
+					observedEntry.everClaimed === true &&
+					run.task_id === null
+				) {
+					yield* killEntryResource(observedEntry, "SIGTERM");
+					yield* confirmEntryGone(observedEntry);
+					yield* cleanupRun(observedEntry.runId, "task_cleared");
+					yield* removeSettledEntry(config, observedEntry, {
+						span: "pdx.reconcile",
+						message: "removed completed HITL entry",
+						reason: "terminated",
+					});
+				} else if (run.task_id === null && (yield* noClaimTimedOut(observedEntry, nowIso))) {
 					yield* settleNoClaimTimeout(config, observedEntry);
 				} else if (entry.mode === "hitl") {
 					yield* pithos.taskHeartbeat({ runId: entry.runId });
@@ -870,6 +1009,15 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 					session_log_path: launched.sessionLogPath,
 					tmux_target: tmuxTarget ?? null,
 				},
+			});
+			yield* reportLifecycle({
+				kind: "spawned",
+				agent: "pandora",
+				mode: "hitl",
+				runId,
+				scopeId: "global",
+				sessionId,
+				tmuxTarget,
 			});
 		}
 		yield* sendEscalateWakeupIfNeeded();

@@ -199,6 +199,7 @@ const pithosClient = (dbPath: string): PithosClientService => {
 		runInspect: (input) => run("pithos run inspect", () => engine.runInspect(input).run),
 		activeRunForTask: (input) =>
 			run("pithos active run for task", () => engine.activeRunForTask(input).run),
+		taskInspect: (input) => run("pithos task inspect", () => engine.taskInspect(input)),
 		taskHeartbeat: (input) =>
 			run(
 				"pithos task heartbeat",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,6 +16,7 @@ import {
 	Clock,
 	FileSystem,
 	Ids,
+	LifecycleReporter,
 	makeRegistry,
 	PithosClient,
 	Process,
@@ -29,6 +30,7 @@ import {
 	type RegistryService,
 	type SpawnerService,
 } from "../src/services.js";
+import { formatLifecycleEvent } from "../src/lifecycle.js";
 import { FileSystemLive, makePithosClientLive, makeSpawnerLive } from "../src/live.js";
 import { makeTmux } from "../src/tmux.js";
 import { makeEngine, type Services as PithosServices } from "@pithos/pithos";
@@ -42,18 +44,60 @@ import {
 	isAfkAlive,
 	reconcileTick,
 	runDaemon,
+	runShowPdx,
 	statusPdx,
+	taskShowPdx,
 } from "../src/controller.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
 
-const runPdxCli = (args: readonly string[]) =>
+const runPdxCli = (args: readonly string[], env?: NodeJS.ProcessEnv) =>
 	execFileAsync(
 		process.execPath,
 		["packages/pdx/scripts/build.mjs", "--dev", "--run", "--", ...args],
-		{ cwd: repoRoot },
+		{ cwd: repoRoot, env },
 	);
+
+const makeFakeTmux = async () => {
+	const binDir = await mkdtemp(join(tmpdir(), "pdx-tmux-"));
+	const tmuxPath = join(binDir, "tmux");
+	await writeFile(
+		tmuxPath,
+		`#!/bin/sh
+cmd="$1"
+shift
+case "$cmd" in
+  has-session)
+    if [ "$1" = "-t" ] && [ "$2" = "pdx--daemon" ] && [ "$PDX_TEST_TMUX_MODE" = "daemon-up" ]; then
+      exit 0
+    fi
+    printf '%s\n' 'no server running on /tmp/tmux-test/default' >&2
+    exit 1
+    ;;
+  switch-client)
+    if [ "$1" = "-t" ]; then
+      printf '%s\n' "$2" >> "$PDX_TEST_TMUX_LOG"
+      exit 0
+    fi
+    ;;
+esac
+printf 'unexpected tmux args: %s\n' "$cmd $*" >&2
+exit 64
+`,
+		"utf8",
+	);
+	await chmod(tmuxPath, 0o755);
+	return {
+		binDir,
+		env: (overrides: NodeJS.ProcessEnv = {}) => ({
+			...process.env,
+			PATH: `${binDir}:${process.env.PATH ?? ""}`,
+			PDX_TEST_TMUX_LOG: join(binDir, "tmux.log"),
+			...overrides,
+		}),
+	};
+};
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
@@ -139,6 +183,7 @@ const makePithos = (
 					task_id: "task_held",
 				}),
 			),
+		taskInspect: (input) => Effect.succeed({ task: { id: input.taskId, status: "queued" } }),
 		taskHeartbeat: (input) => Effect.sync(() => calls.push(`taskHeartbeat:${input.runId}`)),
 		taskEnqueue: (input) =>
 			Effect.sync(() => calls.push(`taskEnqueue:${input.capability}:${input.title}`)),
@@ -159,6 +204,7 @@ const alwaysLiveTmux = Tmux.of({
 	lsSessions: () => Effect.succeed([]),
 	newSession: () => Effect.void,
 	killSession: () => Effect.void,
+	switchClient: () => Effect.void,
 	sendLiteralLine: () => Effect.void,
 	pasteBuffer: () => Effect.void,
 });
@@ -170,6 +216,12 @@ const alwaysLiveProcess = Process.of({
 });
 
 const testLog = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+const testLifecycle = LifecycleReporter.of({ report: () => Effect.void });
+const stripAnsi = (text: string): string =>
+	["\u001b[32m", "\u001b[33m", "\u001b[31m", "\u001b[2m", "\u001b[0m"].reduce(
+		(value, code) => value.split(code).join(""),
+		text,
+	);
 
 const testClock = Clock.of({ nowIso: Effect.succeed("2026-05-09T00:00:31.000Z") });
 
@@ -253,6 +305,7 @@ const runSpawnTick = async (input: {
 		reconcileTick(await parseConfig(input.dataDir), input.maxAfk).pipe(
 			Effect.provideService(Registry, input.registry),
 			Effect.provideService(PithosClient, PithosClient.of(input.pithos)),
+			Effect.provideService(LifecycleReporter, testLifecycle),
 			Effect.provideService(
 				Ids,
 				Ids.of({
@@ -283,6 +336,7 @@ const runSpawnTick = async (input: {
 			Effect.provideService(Tmux, alwaysLiveTmux),
 			Effect.provideService(Process, alwaysLiveProcess),
 			Effect.provideService(SupervisorLog, testLog),
+			Effect.provideService(LifecycleReporter, testLifecycle),
 			Effect.provideService(FileSystem, noopFs),
 			Effect.provideService(Clock, testClock),
 		),
@@ -320,7 +374,13 @@ describe("pdx substrate", () => {
 		expect(help.usage).toContain("pdx");
 		expect(help.description).toContain("Local supervisor");
 		expect(paths).toEqual(
-			expect.arrayContaining(["pdx daemon status", "pdx daemon logs", "pdx run transcript"]),
+			expect.arrayContaining([
+				"pdx daemon status",
+				"pdx daemon logs",
+				"pdx run transcript",
+				"pdx run show",
+				"pdx task show",
+			]),
 		);
 	});
 
@@ -402,6 +462,47 @@ describe("pdx substrate", () => {
 		});
 	});
 
+	it("formats lifecycle pulse lines for spawn, remove, and wakeup", () => {
+		const now = new Date("2026-05-09T00:31:00.000Z");
+		expect(
+			stripAnsi(
+				formatLifecycleEvent(now, {
+					kind: "spawned",
+					agent: "war",
+					mode: "afk",
+					runId: "run_war",
+					scopeId: "repo:/tmp/repo",
+					sessionId: "session_war",
+					pid: 321,
+				}),
+			),
+		).toBe("[May 9 00:31] spawn war afk run=run_war scope=repo:/tmp/repo session=session_war");
+		expect(
+			stripAnsi(
+				formatLifecycleEvent(now, {
+					kind: "removed",
+					agent: "greed",
+					runId: "run_greed",
+					scopeId: "global",
+					reason: "terminated",
+					tmuxTarget: PANDORA_TARGET,
+				}),
+			),
+		).toBe("[May 9 00:31] remove greed terminated run=run_greed scope=global");
+		expect(
+			stripAnsi(
+				formatLifecycleEvent(now, {
+					kind: "wakeup",
+					reason: "claimable_escalate",
+					target: PANDORA_TARGET,
+					claimableEscalateCount: 2,
+				}),
+			),
+		).toBe(
+			"[May 9 00:31] wakeup pandora claimable_escalate target=pdx--pandora claimable-escalate=2",
+		);
+	});
+
 	it("maps spawner boundary validation errors without flattening to process errors", async () => {
 		const spawner = makeSpawnerLive({ dataDir: "/tmp/pdx-data", pithosDbPath: "/tmp/pdx.sqlite" });
 		const error = await run(
@@ -435,6 +536,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -473,6 +575,7 @@ describe("pdx substrate", () => {
 					commandInput = input;
 				}),
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -569,6 +672,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -584,6 +688,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Clock, testClock),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(Registry, registry),
 				Effect.provideService(Ids, ids),
 				Effect.provideService(Spawner, spawner),
@@ -634,6 +739,7 @@ describe("pdx substrate", () => {
 					events.push(`killSession:${target}`);
 					killedSessions.push(target);
 				}),
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -654,6 +760,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Clock, testClock),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(Registry, registry),
 				Effect.provideService(
 					Ids,
@@ -728,6 +835,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: (target) => Effect.sync(() => killed.push(target)),
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -738,6 +846,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Clock, testClock),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(Registry, registry),
 				Effect.provideService(Ids, ids),
 				Effect.provideService(Spawner, spawner),
@@ -774,6 +883,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -811,6 +921,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -1015,6 +1126,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -1027,6 +1139,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Spawner, spawner),
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, noopFs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1034,6 +1147,224 @@ describe("pdx substrate", () => {
 		const entries = await run(registry.list);
 		expect(entries.map((entry) => entry.runId)).toEqual(["run_new"]);
 		expect(pithosCalls).toContain("runCleanup:run_old:natural_death");
+	});
+
+	it("run show switches tmux client to the supervised run target and returns confirmation", async () => {
+		const switches: string[] = [];
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-show-run-"));
+		const config = await parseConfig(dataDir);
+		const server = await run(
+			listenIpc(config.socketPath, () =>
+				Effect.succeed({
+					ok: true,
+					data: {
+						daemon: "running",
+						max_afk: 4,
+						registry_entries: [
+							{
+								runId: "run_hitl",
+								agent: "greed",
+								scopeId: "scope_repo",
+								mode: "hitl",
+								state: "live",
+								logicalName: "pdx--greed",
+								tmuxTarget: "pdx--greed",
+							},
+						],
+					},
+				}),
+			),
+		);
+		try {
+			const confirmation = await run(
+				runShowPdx(config, { runId: "run_hitl" }).pipe(
+					Effect.provideService(
+						Tmux,
+						Tmux.of({
+							hasSession: (target) => Effect.succeed(target === DAEMON_TARGET),
+							lsSessions: () => Effect.succeed([]),
+							newSession: () => Effect.void,
+							killSession: () => Effect.void,
+							switchClient: (target) => Effect.sync(() => switches.push(target)),
+							sendLiteralLine: () => Effect.void,
+							pasteBuffer: () => Effect.void,
+						}),
+					),
+				),
+			);
+			expect(confirmation).toEqual({
+				ok: true,
+				action: "tmux_attached",
+				target: "pdx--greed",
+				run_id: "run_hitl",
+			});
+		} finally {
+			await run(server.close);
+		}
+		expect(switches).toEqual(["pdx--greed"]);
+	});
+
+	it("task show returns confirmation for the holder run target", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-show-task-live-"));
+		const config = await parseConfig(dataDir);
+		const pithos = makePithos([], [], {
+			activeRunForTask: () =>
+				Effect.succeed(
+					runOutput({
+						id: "run_hitl",
+						agent: "greed",
+						mode: "hitl",
+						scope_id: "scope_repo",
+						task_id: "task_live",
+						session_id: "session_hitl",
+					}),
+				),
+		});
+		const server = await run(
+			listenIpc(config.socketPath, () =>
+				Effect.succeed({
+					ok: true,
+					data: {
+						daemon: "running",
+						max_afk: 4,
+						registry_entries: [
+							{
+								runId: "run_hitl",
+								agent: "greed",
+								scopeId: "scope_repo",
+								mode: "hitl",
+								state: "live",
+								logicalName: "pdx--greed",
+								tmuxTarget: "pdx--greed",
+							},
+						],
+					},
+				}),
+			),
+		);
+		try {
+			await expect(
+				run(
+					taskShowPdx(config, { taskId: "task_live" }).pipe(
+						Effect.provideService(PithosClient, pithos),
+						Effect.provideService(Tmux, alwaysLiveTmux),
+					),
+				),
+			).resolves.toEqual({
+				ok: true,
+				action: "tmux_attached",
+				target: "pdx--greed",
+				run_id: "run_hitl",
+				task_id: "task_live",
+			});
+		} finally {
+			await run(server.close);
+		}
+	});
+
+	it("task show reports queued tasks without a live run", async () => {
+		const config = await parseConfig("/tmp/pdx-show-task");
+		const pithos = makePithos([], [], {
+			activeRunForTask: () => Effect.succeed(null),
+			taskInspect: (input) => Effect.succeed({ task: { id: input.taskId, status: "queued" } }),
+		});
+		await expect(
+			run(
+				taskShowPdx(config, { taskId: "task_queued" }).pipe(
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(Tmux, alwaysLiveTmux),
+				),
+			),
+		).rejects.toThrow(/Task task_queued is queued; no live run to show/);
+	});
+
+	it("CLI task show prints JSON confirmation for a live holder session", async () => {
+		const fakeTmux = await makeFakeTmux();
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-task-show-cli-"));
+		const config = await parseConfig(dataDir);
+		const engine = makeEngine({
+			config: { dbPath: config.pithosDbPath, runId: undefined },
+			services: pithosTestServices(),
+		});
+		engine.init({ fresh: true });
+		const repo = engine.scopeUpsert({ kind: "repo", path: dataDir }).scope.id;
+		engine.runUpsert({
+			agent: "greed",
+			mode: "hitl",
+			scope: repo,
+			cwd: dataDir,
+			sessionId: "greed-session",
+			harnessKind: "pi",
+			sessionLogPath: join(dataDir, "greed.jsonl"),
+			runId: "run_hitl",
+		});
+		const enqueued = engine.enqueue({
+			scope: repo,
+			capability: "design",
+			title: "design",
+			body: "design the change",
+			bodyFile: undefined,
+			runId: "run_hitl",
+			dependsOn: [],
+		});
+		engine.claim({ runId: "run_hitl", scope: repo, capability: "design" });
+		const server = await run(
+			listenIpc(config.socketPath, () =>
+				Effect.succeed({
+					ok: true,
+					data: {
+						daemon: "running",
+						max_afk: 4,
+						registry_entries: [
+							{
+								runId: "run_hitl",
+								agent: "greed",
+								scopeId: repo,
+								mode: "hitl",
+								state: "live",
+								logicalName: "pdx--greed",
+								tmuxTarget: "pdx--greed",
+							},
+						],
+					},
+				}),
+			),
+		);
+		try {
+			const { stdout, stderr } = await runPdxCli(
+				["task", "show", enqueued.task.id, "--data-dir", dataDir],
+				fakeTmux.env({ PDX_TEST_TMUX_MODE: "daemon-up" }),
+			);
+			expect(stderr).toBe("");
+			expect(JSON.parse(stdout)).toEqual({
+				ok: true,
+				action: "tmux_attached",
+				target: "pdx--greed",
+				run_id: "run_hitl",
+				task_id: enqueued.task.id,
+			});
+			expect(await readFile(join(fakeTmux.binDir, "tmux.log"), "utf8")).toBe("pdx--greed\n");
+		} finally {
+			await run(server.close);
+		}
+	});
+
+	it("CLI run show prints tagged JSON errors when no live tmux session exists", async () => {
+		const fakeTmux = await makeFakeTmux();
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-run-show-cli-"));
+		await expect(
+			runPdxCli(["run", "show", "run_missing", "--data-dir", dataDir], fakeTmux.env()),
+		).rejects.toMatchObject({
+			code: 2,
+			stdout: "",
+			stderr: `${JSON.stringify({
+				ok: false,
+				error: {
+					code: "NOT_FOUND",
+					message: "Run run_missing is not supervised by pdx or has no live tmux session.",
+				},
+			})}\n`,
+		});
 	});
 
 	it("daemon kill uses interrupted run details for escalation and resource kill", async () => {
@@ -1110,6 +1441,7 @@ describe("pdx substrate", () => {
 						lsSessions: () => Effect.succeed([]),
 						newSession: () => Effect.void,
 						killSession: () => Effect.void,
+						switchClient: () => Effect.void,
 						sendLiteralLine: () => Effect.void,
 						pasteBuffer: () => Effect.void,
 					}),
@@ -1248,6 +1580,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -1260,6 +1593,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(Process, process),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, noopFs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1277,6 +1611,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(Process, process),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, noopFs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1329,6 +1664,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -1340,6 +1676,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Spawner, spawner),
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, noopFs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1550,6 +1887,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -1561,6 +1899,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Spawner, spawner),
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, noopFs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1613,6 +1952,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -1624,6 +1964,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Spawner, spawner),
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, noopFs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1687,6 +2028,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 		});
@@ -1700,6 +2042,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, tmux),
 				Effect.provideService(Process, process),
 				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1717,6 +2060,7 @@ describe("pdx substrate", () => {
 					Process.of({ ...process, isAlive: () => Effect.succeed(false) }),
 				),
 				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, fs),
 				Effect.provideService(Clock, testClock),
 			),
@@ -1773,6 +2117,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, alwaysLiveTmux),
 				Effect.provideService(Process, process),
 				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(
 					FileSystem,
 					FileSystem.of({
@@ -1871,6 +2216,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(Tmux, alwaysLiveTmux),
 					Effect.provideService(Process, process),
 					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
 					Effect.provideService(FileSystem, noopFs),
 					Effect.provideService(Clock, testClock),
 				),
@@ -1881,6 +2227,177 @@ describe("pdx substrate", () => {
 		]);
 		expect(await run(registry.list)).toEqual(
 			expect.arrayContaining([expect.objectContaining({ runId: "run_held", state: "live" })]),
+		);
+	});
+
+	it("reaps completed non-Pandora HITL runs after their task clears", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_greed",
+				agent: "greed",
+				scopeId: "scope_repo",
+				mode: "hitl",
+				state: "live",
+				logicalName: "pdx--greed",
+				tmuxTarget: "pdx--greed",
+				everClaimed: true,
+			}),
+		);
+		const calls: string[] = [];
+		const killed: string[] = [];
+		const tmux = Tmux.of({
+			hasSession: (target) => Effect.succeed(target === PANDORA_TARGET || !killed.includes(target)),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: (target) => Effect.sync(() => killed.push(target)),
+			switchClient: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		await run(
+			reconcileTick(await parseConfig(dataDir)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(
+					PithosClient,
+					makePithos(calls, [], {
+						runInspect: (input) =>
+							Effect.succeed(
+								runOutput({
+									id: input.runId,
+									agent: "greed",
+									mode: "hitl",
+									scope_id: "scope_repo",
+									task_id: null,
+								}),
+							),
+					}),
+				),
+				Effect.provideService(
+					Ids,
+					Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+				),
+				Effect.provideService(
+					Spawner,
+					makeSpawner({
+						launchAgent: () =>
+							Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+					}),
+				),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(Process, alwaysLiveProcess),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+			),
+		);
+		expect(killed).toEqual(["pdx--greed"]);
+		expect(calls.filter((call) => !call.startsWith("taskHeartbeat:"))).toContain(
+			"runCleanup:run_greed:task_cleared",
+		);
+		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
+	});
+
+	it("keeps Pandora HITL session alive after its task clears", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const calls: string[] = [];
+		await runSpawnTick({
+			dataDir,
+			registry,
+			pithos: makePithos(calls, [], {
+				runInspect: (input) =>
+					Effect.succeed(
+						runOutput({
+							id: input.runId,
+							agent: "pandora",
+							mode: "hitl",
+							scope_id: "global",
+							task_id: null,
+						}),
+					),
+			}),
+			launches: [],
+		});
+		expect(calls).toContain("taskHeartbeat:run_pandora");
+		expect(calls).not.toContain("runCleanup:run_pandora:task_cleared");
+		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
+	});
+
+	it("preserves completed non-Pandora HITL entry when cleanup fails", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_greed",
+				agent: "greed",
+				scopeId: "scope_repo",
+				mode: "hitl",
+				state: "live",
+				logicalName: "pdx--greed",
+				tmuxTarget: "pdx--greed",
+				everClaimed: true,
+			}),
+		);
+		const killed: string[] = [];
+		const tmux = Tmux.of({
+			hasSession: (target) => Effect.succeed(target === PANDORA_TARGET || !killed.includes(target)),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: (target) => Effect.sync(() => killed.push(target)),
+			switchClient: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		await expect(
+			run(
+				reconcileTick(await parseConfig(dataDir)).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(
+						PithosClient,
+						makePithos([], [], {
+							runInspect: (input) =>
+								Effect.succeed(
+									runOutput({
+										id: input.runId,
+										agent: "greed",
+										mode: "hitl",
+										scope_id: "scope_repo",
+										task_id: null,
+									}),
+								),
+							runCleanup: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "cleanup failed" })),
+						}),
+					),
+					Effect.provideService(
+						Ids,
+						Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+					),
+					Effect.provideService(
+						Spawner,
+						makeSpawner({
+							launchAgent: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+						}),
+					),
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(Process, alwaysLiveProcess),
+					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, testClock),
+				),
+			),
+		).rejects.toThrow("cleanup failed");
+		expect(killed).toEqual(["pdx--greed"]);
+		expect(await run(registry.list)).toEqual(
+			expect.arrayContaining([expect.objectContaining({ runId: "run_greed", state: "live" })]),
 		);
 	});
 
@@ -1921,6 +2438,7 @@ describe("pdx substrate", () => {
 				),
 				Effect.provideService(Tmux, alwaysLiveTmux),
 				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(
 					FileSystem,
 					FileSystem.of({
@@ -1982,6 +2500,7 @@ describe("pdx substrate", () => {
 						Process.of({ ...alwaysLiveProcess, isAlive: () => Effect.succeed(false) }),
 					),
 					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
 					Effect.provideService(
 						FileSystem,
 						FileSystem.of({
@@ -2056,6 +2575,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(Tmux, alwaysLiveTmux),
 					Effect.provideService(Process, process),
 					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(Clock, testClock),
 				),
@@ -2100,6 +2620,7 @@ describe("pdx substrate", () => {
 			lsSessions: () => Effect.succeed([]),
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
 			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
 			pasteBuffer: () => Effect.void,
 		});
@@ -2122,6 +2643,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(Process, alwaysLiveProcess),
 					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
 					Effect.provideService(FileSystem, noopFs),
 					Effect.provideService(Clock, testClock),
 				),
@@ -2231,6 +2753,7 @@ describe("pdx substrate", () => {
 				Effect.provideService(Tmux, alwaysLiveTmux),
 				Effect.provideService(Process, alwaysLiveProcess),
 				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
 				Effect.provideService(FileSystem, noopFs),
 				Effect.provideService(Clock, testClock),
 			),

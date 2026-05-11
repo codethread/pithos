@@ -13,8 +13,10 @@ pdx daemon logs [--data-dir <path>] [--limit <n> | --all] [--since <when>]
 
 pdx run kill <run-id> --reason <text> [--data-dir <path>]
 pdx run transcript <run-id> [--data-dir <path>] [--limit <n>]
+pdx run show <run-id> [--data-dir <path>]
 
 pdx task kill <task-id> --reason <text> [--data-dir <path>]
+pdx task show <task-id> [--data-dir <path>]
 
 pdx --help-json
 ```
@@ -26,6 +28,8 @@ pdx --help-json
 `pdx daemon logs` prints pdx supervisor JSONL logs. These are control-plane logs, not agent harness transcripts.
 
 `pdx run transcript` reads the harness transcript for a Pithos run using the run's durable `harness_kind` and `session_log_path` metadata. System runs are not harness transcripts; use `pdx daemon logs` for the `pdx` system run.
+
+`pdx run show` switches the current tmux client to the supervised session for a run. `pdx task show` resolves the active holder run for a task, then switches to that tmux session. If a task is unclaimed or queued/done/failed already, `pdx task show` reports that status and exits non-zero.
 
 `pdx run kill` and `pdx task kill` interrupt Pithos state first, then kill the live process/tmux resource. `pdx task kill <task-id>` means “kill the live run currently holding this task”; it is not task cancellation.
 

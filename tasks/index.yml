@@ -319,7 +319,7 @@ tasks:
   - id: task-026
     description: "Escalation source links"
     task_file: ./task-026.md
-    status: pending
+    status: complete
     blocked_by:
       - task-024
   - id: task-027

@@ -380,6 +380,92 @@ describe("task lifecycle", () => {
 		).toMatchObject({ applied: "depends_on_held", final_dependency_ids: [held] });
 	});
 
+	it("source-links escalations from held ordinary work without blocking claimability", () => {
+		const { dbPath, engine } = setup();
+		engine.runUpsert({
+			agent: "pandora",
+			mode: "hitl",
+			scope: "global",
+			cwd: "/tmp",
+			sessionId: "s_pandora",
+			harnessKind: "claude",
+			sessionLogPath: "/tmp/s_pandora.jsonl",
+			runId: "run_pandora",
+		});
+		const source = enqueueTask(engine, { title: "held source" }).task.id;
+		engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+
+		const escalation = enqueueTask(engine, {
+			title: "needs attention",
+			capability: "escalate",
+			runId: "run_toil",
+		});
+
+		expect(escalation.chain).toMatchObject({
+			applied: "source_from_held",
+			held_task_id: source,
+			source_task_id: source,
+			implicit_dependency_ids: [],
+			final_dependency_ids: [],
+		});
+		const inspect = engine.taskInspect({ taskId: escalation.task.id });
+		expect(inspect.source).toMatchObject({ id: source, scope_id: "global", status: "claimed" });
+		expect(inspect.dependencies).toEqual([]);
+		expect(inspect.lineage).toEqual([]);
+		expect(inspect.task.claimable).toBe(true);
+		expect(
+			engine.claim({ runId: "run_pandora", scope: "global", capability: "escalate" }).task.id,
+		).toBe(escalation.task.id);
+
+		const graph = engine.graphInspect({
+			taskId: escalation.task.id,
+			scope: undefined,
+			all: false,
+			flat: false,
+			dump: false,
+		}) as ReturnType<Engine["graphInspect"]> & {
+			graph: {
+				nodes: readonly { id: string; source_task_id: string | null }[];
+				edges: readonly { kind: string; from_task_id: string; to_task_id: string }[];
+			};
+		};
+		expect(graph.graph.nodes.map((node) => node.id).sort()).toEqual(
+			[escalation.task.id, source].sort(),
+		);
+		expect(graph.graph.nodes.find((node) => node.id === escalation.task.id)?.source_task_id).toBe(
+			source,
+		);
+		expect(graph.graph.edges).toContainEqual({
+			kind: "source",
+			from_task_id: escalation.task.id,
+			to_task_id: source,
+		});
+
+		const eventPayload = JSON.parse(
+			new Database(dbPath)
+				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
+				.pluck()
+				.get(escalation.task.id) as string,
+		) as unknown as { chain: { source_task_id: string | null } };
+		expect(eventPayload.chain.source_task_id).toBe(source);
+	});
+
+	it("fails loudly before source-linking a superseded held source", () => {
+		const { dbPath, engine } = setup();
+		const source = enqueueTask(engine, { title: "held source" }).task.id;
+		engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+		const replacement = enqueueTask(engine, { title: "replacement", runId: "run_toil" }).task.id;
+		const db = new Database(dbPath);
+		db.prepare(
+			"INSERT INTO task_supersessions(old_task_id,new_task_id,created_by_run_id,reason) VALUES (?,?,?,?)",
+		).run(source, replacement, "run_toil", "test supersession");
+		db.close();
+
+		expect(() =>
+			enqueueTask(engine, { title: "needs attention", capability: "escalate", runId: "run_toil" }),
+		).toThrow(`source task ${source} was superseded by ${replacement}`);
+	});
+
 	it("heartbeat and stale token updates fail without partial mutation", () => {
 		const { dbPath, engine, repo } = setup();
 		const task = engine.enqueue({

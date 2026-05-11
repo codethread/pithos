@@ -128,6 +128,15 @@ CREATE TABLE IF NOT EXISTS task_supersessions (
 	CHECK (old_task_id <> new_task_id)
 );
 
+CREATE TABLE IF NOT EXISTS task_sources (
+	task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+	source_task_id TEXT NOT NULL REFERENCES tasks(id),
+	source_run_id TEXT NOT NULL REFERENCES runs(id),
+	kind TEXT NOT NULL CHECK (kind IN ('chain_source')),
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	CHECK (task_id <> source_task_id)
+);
+
 CREATE TABLE IF NOT EXISTS events (
 	id TEXT PRIMARY KEY,
 	type TEXT NOT NULL,
@@ -160,6 +169,9 @@ CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker
 
 CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
 	ON task_supersessions(new_task_id);
+
+CREATE INDEX IF NOT EXISTS idx_task_sources_source
+	ON task_sources(source_task_id);
 `);
 	ensureScopesArchivedAtColumn(db);
 	seed(db);

@@ -206,6 +206,7 @@ export interface TaskInspectOutput {
 	readonly task: TaskInspectTaskOutput;
 	readonly dependencies: readonly TaskDetailOutput[];
 	readonly dependents: readonly TaskDetailOutput[];
+	readonly source: TaskSummaryOutput | null;
 	readonly lineage: readonly LineageEntryOutput[];
 	readonly supersedes: string | null;
 	readonly superseded_by: string | null;
@@ -230,6 +231,7 @@ export interface GraphNodeOutput extends TaskSummaryOutput {
 	readonly unresolved_dependency_ids: readonly string[];
 	readonly supersedes_task_id: string | null;
 	readonly superseded_by_task_id: string | null;
+	readonly source_task_id: string | null;
 }
 
 export type GraphEdgeOutput =
@@ -238,6 +240,11 @@ export type GraphEdgeOutput =
 			readonly from_task_id: string;
 			readonly to_task_id: string;
 			readonly satisfied: boolean;
+	  }
+	| {
+			readonly kind: "source";
+			readonly from_task_id: string;
+			readonly to_task_id: string;
 	  }
 	| {
 			readonly kind: "supersedes";
@@ -693,6 +700,16 @@ const ArtifactRowSchema = Schema.Struct({
 const parseArtifact = (value: unknown): ArtifactOutput =>
 	decodeRow(ArtifactRowSchema, value, "malformed artifact row");
 
+const TaskSourceEdgeRowSchema = Schema.Struct({
+	task_id: Schema.String,
+	source_task_id: Schema.String,
+});
+
+type TaskSourceEdgeRow = typeof TaskSourceEdgeRowSchema.Type;
+
+const parseTaskSourceEdge = (value: unknown): TaskSourceEdgeRow =>
+	decodeRow(TaskSourceEdgeRowSchema, value, "malformed task source edge row");
+
 const compareTaskCreatedAt = <T extends { readonly created_at: string; readonly id: string }>(
 	a: T,
 	b: T,
@@ -733,6 +750,57 @@ const taskSupersessionLinks = (
 			.pluck()
 			.get(taskId) as string | undefined) ?? null,
 });
+
+const taskSourceEdges = (db: Db): readonly TaskSourceEdgeRow[] =>
+	db
+		.prepare(sql`SELECT task_id, source_task_id FROM task_sources`)
+		.all()
+		.map(parseTaskSourceEdge);
+
+const taskSourceTaskId = (db: Db, taskId: string): string | null => {
+	const row = db
+		.prepare(sql`SELECT task_id, source_task_id FROM task_sources WHERE task_id=?`)
+		.get(taskId);
+	return row === undefined ? null : parseTaskSourceEdge(row).source_task_id;
+};
+
+const taskSourceSummary = (db: Db, taskId: string): TaskSummaryOutput | null => {
+	const sourceTaskId = taskSourceTaskId(db, taskId);
+	return sourceTaskId === null ? null : taskSummary(db, sourceTaskId);
+};
+
+const validateReferenceTaskCurrent = (db: Db, taskId: string, label: string): void => {
+	const exists = db.prepare(sql`SELECT 1 FROM tasks WHERE id = ?`).get(taskId);
+	if (exists === undefined) fail("NOT_FOUND", `${label} task not found: ${taskId}`);
+	const replacement = db
+		.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id = ?`)
+		.pluck()
+		.get(taskId) as string | undefined;
+	if (replacement !== undefined)
+		fail("VALIDATION_ERROR", `${label} task ${taskId} was superseded by ${replacement}`);
+};
+
+const insertTaskSource = (
+	db: Db,
+	taskId: string,
+	sourceTaskId: string,
+	sourceRunId: string,
+): void => {
+	const inserted = db
+		.prepare(sql`
+			INSERT INTO task_sources(task_id, source_task_id, source_run_id, kind)
+			SELECT ?, t.id, ?, 'chain_source'
+			FROM tasks t
+			WHERE t.id = ?
+			  AND NOT EXISTS (
+				SELECT 1 FROM task_supersessions ts WHERE ts.old_task_id = t.id
+			  )
+		`)
+		.run(taskId, sourceRunId, sourceTaskId);
+	if (inserted.changes === 1) return;
+	validateReferenceTaskCurrent(db, sourceTaskId, "source");
+	fail("STALE_TOKEN_RACE", "source task changed before source link write");
+};
 
 const sortTaskIdsDeterministically = (db: Db, taskIds: readonly string[]): readonly string[] =>
 	taskIds
@@ -912,6 +980,18 @@ const graphForIds = (
 				}
 			}
 		}
+		for (const row of taskSourceEdges(db)) {
+			if (ids.has(row.task_id) || ids.has(row.source_task_id)) {
+				if (!ids.has(row.task_id)) {
+					ids.add(row.task_id);
+					changed = true;
+				}
+				if (!ids.has(row.source_task_id)) {
+					ids.add(row.source_task_id);
+					changed = true;
+				}
+			}
+		}
 		for (const row of db
 			.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`)
 			.all() as { old_task_id: string; new_task_id: string }[]) {
@@ -951,6 +1031,7 @@ const graphForIds = (
 					.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
 					.pluck()
 					.get(task.id) as string | undefined) ?? null,
+			source_task_id: taskSourceTaskId(db, task.id),
 		}));
 	const edges = [
 		...(
@@ -969,6 +1050,13 @@ const graphForIds = (
 						.prepare(sql`SELECT status FROM tasks WHERE id=?`)
 						.pluck()
 						.get(e.depends_on_task_id) as string) === "done",
+			})),
+		...taskSourceEdges(db)
+			.filter((e) => ids.has(e.task_id) && ids.has(e.source_task_id))
+			.map((e) => ({
+				kind: "source" as const,
+				from_task_id: e.task_id,
+				to_task_id: e.source_task_id,
 			})),
 		...(
 			db.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`).all() as {
@@ -1450,11 +1538,13 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const chainOutput = db.transaction((): ChainOutput => {
 				const actorRun = liveRun(db, actorRunId);
 				const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
+				const heldSourceTaskId =
+					actorRun.task_id === null ? null : taskSourceTaskId(db, actorRun.task_id);
 				const decision = resolveChainPolicy({
 					policy: chain,
 					newTaskCapability: capability,
 					heldTask,
-					heldSourceTaskId: null,
+					heldSourceTaskId,
 				});
 				const dependencyIds = finalDependencyIds({
 					manualDependencyIds: dependsOn,
@@ -1469,14 +1559,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					final_dependency_ids: dependencyIds,
 				};
 				for (const depId of dependencyIds) {
-					const dep = db.prepare(sql`SELECT 1 FROM tasks WHERE id = ?`).get(depId);
-					if (dep === undefined) fail("NOT_FOUND", `dependency task not found: ${depId}`);
-					const replacement = db
-						.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id = ?`)
-						.pluck()
-						.get(depId) as string | undefined;
-					if (replacement !== undefined)
-						fail("VALIDATION_ERROR", `dependency task ${depId} was superseded by ${replacement}`);
+					validateReferenceTaskCurrent(db, depId, "dependency");
 				}
 				db.prepare(
 					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
@@ -1485,6 +1568,14 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					db.prepare(
 						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
 					).run(taskId, depId);
+				}
+				if (decision.applied === "source_from_held") {
+					insertTaskSource(
+						db,
+						taskId,
+						decision.sourceTaskId ?? fail("INTERNAL_ERROR", "source decision missing source task"),
+						actorRunId,
+					);
 				}
 				assertAcyclic(db);
 				event(ctx, db, "task.created", {
@@ -1723,6 +1814,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				task,
 				dependencies,
 				dependents,
+				source: taskSourceSummary(db, taskId),
 				lineage: taskLineage(db, taskId),
 				supersedes,
 				superseded_by,

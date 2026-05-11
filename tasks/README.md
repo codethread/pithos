@@ -72,6 +72,13 @@ No HITL slice is required: Adam confirmed the core language and prompt-surface d
 
 Append notes here. Do not rewrite earlier notes.
 
+### Task 026: Escalation source links — 2026-05-11
+
+- Added durable `task_sources` storage and wired default auto chaining so held ordinary work enqueueing an escalation records a non-blocking source link rather than a dependency.
+- `task inspect` now returns the direct source summary; dependency lineage remains dependency-only. `graph inspect` JSON now closes over source edges/nodes and includes `source_task_id` on nodes.
+- Added lifecycle coverage for source persistence, enqueue/event metadata, graph output, lineage exclusion, immediate Pandora claimability while the source is still claimed, and fail-loud superseded-source validation.
+- Validation run: `pnpm typecheck && pnpm lint && pnpm test && pnpm run build`.
+
 ### Task 025: Auto dependency chain continuation — 2026-05-11
 
 - Wired enqueue's DB path to resolve the actor run's held task after authorization and feed it through the pure chain-policy resolver, enabling default `--chain auto` and explicit `--chain held` to add blocking dependencies for ordinary follow-up work.

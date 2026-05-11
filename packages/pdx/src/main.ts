@@ -1,4 +1,4 @@
-import { Args, CliConfig, Command, Options } from "@effect/cli";
+import { Args, CliConfig, Command, CommandDescriptor, HelpDoc, Options, Usage } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, Option } from "effect";
 import process from "node:process";
@@ -219,6 +219,135 @@ const parseInternalDaemonRun = (
 		return { command: "daemon.run", dataDir, maxAfk, intervalSeconds } as const;
 	});
 
+interface JsonCommandHelp {
+	readonly tool: string;
+	readonly name: string;
+	readonly command: string;
+	readonly path: string;
+	readonly fullPath: string;
+	readonly pathSegments: readonly string[];
+	readonly usage: string;
+	readonly description: string;
+	readonly subcommands: readonly JsonCommandHelp[];
+}
+
+const descriptorName = (descriptor: CommandDescriptor.Command<unknown>): string => {
+	const node = descriptor as unknown as
+		| { readonly _tag: "Standard" | "GetUserInput"; readonly name: string }
+		| { readonly _tag: "Map"; readonly command: CommandDescriptor.Command<unknown> }
+		| { readonly _tag: "Subcommands"; readonly parent: CommandDescriptor.Command<unknown> };
+	switch (node._tag) {
+		case "Standard":
+		case "GetUserInput":
+			return node.name;
+		case "Map":
+			return descriptorName(node.command);
+		case "Subcommands":
+			return descriptorName(node.parent);
+	}
+};
+
+const descriptorDescription = (descriptor: CommandDescriptor.Command<unknown>): string => {
+	const node = descriptor as unknown as
+		| {
+				readonly _tag: "Standard" | "GetUserInput";
+				readonly description: HelpDoc.HelpDoc;
+		  }
+		| { readonly _tag: "Map"; readonly command: CommandDescriptor.Command<unknown> }
+		| { readonly _tag: "Subcommands"; readonly parent: CommandDescriptor.Command<unknown> };
+	switch (node._tag) {
+		case "Standard":
+		case "GetUserInput":
+			return HelpDoc.toAnsiText(node.description).trim();
+		case "Map":
+			return descriptorDescription(node.command);
+		case "Subcommands":
+			return descriptorDescription(node.parent);
+	}
+};
+
+const descriptorUsage = (
+	descriptor: CommandDescriptor.Command<unknown>,
+	path: readonly string[],
+): string => {
+	const ownUsage = HelpDoc.toAnsiText(Usage.getHelp(CommandDescriptor.getUsage(descriptor))).trim();
+	const command = path.at(-1);
+	const suffix =
+		command === undefined || ownUsage === "" || ownUsage === command
+			? ""
+			: ownUsage.startsWith(`${command} `)
+				? ownUsage.slice(command.length + 1)
+				: ownUsage;
+	return suffix === "" ? path.join(" ") : `${path.join(" ")} ${suffix}`;
+};
+
+const descriptorChildren = (
+	descriptor: CommandDescriptor.Command<unknown>,
+): readonly CommandDescriptor.Command<unknown>[] => {
+	const node = descriptor as unknown as
+		| { readonly _tag: "Standard" | "GetUserInput" }
+		| { readonly _tag: "Map"; readonly command: CommandDescriptor.Command<unknown> }
+		| {
+				readonly _tag: "Subcommands";
+				readonly children: readonly CommandDescriptor.Command<unknown>[];
+		  };
+	switch (node._tag) {
+		case "Standard":
+		case "GetUserInput":
+			return [];
+		case "Map":
+			return descriptorChildren(node.command);
+		case "Subcommands":
+			return node.children;
+	}
+};
+
+const commandHelpJson = (
+	descriptor: CommandDescriptor.Command<unknown>,
+	parentPath: readonly string[],
+): JsonCommandHelp => {
+	const command = descriptorName(descriptor);
+	const path = [...parentPath, command];
+	const subcommands = descriptorChildren(descriptor)
+		.map((child) => commandHelpJson(child, path))
+		.sort((left, right) => left.fullPath.localeCompare(right.fullPath));
+	const fullPath = path.join(" ");
+	return {
+		tool: "pdx",
+		name: command,
+		command,
+		path: fullPath,
+		fullPath,
+		pathSegments: path,
+		usage: descriptorUsage(descriptor, path),
+		description: descriptorDescription(descriptor),
+		subcommands,
+	};
+};
+
+const renderHelpJson = <Name extends string, R, E, A>(command: Command.Command<Name, R, E, A>) =>
+	`${JSON.stringify(commandHelpJson(command.descriptor, []), null, 2)}\n`;
+
+const handleHelpJson = <Name extends string, R, E, A>(
+	argv: readonly string[],
+	command: Command.Command<Name, R, E, A>,
+): Effect.Effect<boolean, PdxError> => {
+	const args = argv.slice(2);
+	if (!args.includes("--help-json")) return Effect.succeed(false);
+	if (args.length !== 1) {
+		return Effect.fail(
+			new PdxError({
+				code: "VALIDATION_ERROR",
+				message: "--help-json must be the only pdx argument",
+			}),
+		);
+	}
+	return Effect.sync(() => {
+		process.stdout.write(renderHelpJson(command));
+		return true;
+	});
+};
+
 const makeCommand = (runtime: RuntimeInput) => {
 	const open = Command.make(
 		"open",
@@ -407,7 +536,10 @@ const program = captureRuntimeInput.pipe(
 				yield* runCommand(runtime, internal);
 				return;
 			}
-			const cli = Command.run(makeCommand(runtime), {
+			const command = makeCommand(runtime);
+			const handledHelpJson = yield* handleHelpJson(process.argv, command);
+			if (handledHelpJson) return;
+			const cli = Command.run(command, {
 				name: "Pdx",
 				version: "0.1.0",
 				executable: "pdx",

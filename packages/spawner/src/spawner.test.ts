@@ -8,6 +8,7 @@ import { SpawnerError } from "./errors.js";
 import { launchRenderedAgent, renderAgent, renderSessionTranscript } from "./spawner.js";
 
 const templateDir = join(dirname(fileURLToPath(import.meta.url)), "../templates");
+const noopExec = () => ({ status: 0, stdout: "", stderr: "" });
 
 const base = {
 	runId: "run_test",
@@ -21,6 +22,180 @@ const claudeSessionPath = (cwd: string, sessionId: string): string =>
 	`${homedir()}/.claude/projects/${cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-")}/${sessionId}.jsonl`;
 const piSessionPath = (cwd: string, sessionId: string): string =>
 	`${homedir()}/.pi/agent/sessions/${piBucket(cwd)}/${sessionId}.jsonl`;
+
+const pithosHelpTree = {
+	tool: "pithos",
+	name: "pithos",
+	path: "pithos",
+	usage: "pithos <command>",
+	description:
+		"Durable state CLI for tasks, runs, claims, artifacts, events, and graph invariants.",
+	subcommands: [
+		{
+			tool: "pithos",
+			name: "init",
+			path: "pithos init",
+			usage: "init [--fresh]",
+			description: "Create the Pithos database schema and seed built-in agent kinds.",
+			subcommands: [],
+		},
+		{
+			tool: "pithos",
+			name: "run",
+			path: "pithos run",
+			usage: "run <command>",
+			description: "Manage durable Pithos run records for agent invocations.",
+			subcommands: [],
+		},
+		{
+			tool: "pithos",
+			name: "task",
+			path: "pithos task",
+			usage: "task <command>",
+			description: "Manage durable Pithos tasks, claims, fencing, and supersession.",
+			subcommands: [
+				{
+					tool: "pithos",
+					name: "claim",
+					path: "pithos task claim",
+					usage:
+						"claim [--run text] --scope text --capability triage | design | execute | escalate",
+					description: "Claim one claimable task for a run and return its fencing token.",
+					subcommands: [],
+				},
+				{
+					tool: "pithos",
+					name: "artifact",
+					path: "pithos task artifact",
+					usage: "artifact <command>",
+					description: "Attach evidence or output to a Pithos task.",
+					subcommands: [
+						{
+							tool: "pithos",
+							name: "add",
+							path: "pithos task artifact add",
+							usage: "add [--run text] --kind text --title text [--stdin] <task-id>",
+							description: "Attach an artifact to a task; body is read from stdin when requested.",
+							subcommands: [],
+						},
+					],
+				},
+				{
+					tool: "pithos",
+					name: "complete",
+					path: "pithos task complete",
+					usage: "complete [--run text] --token integer [--stdin] <task-id>",
+					description: "Complete a held task using its current fencing token.",
+					subcommands: [],
+				},
+				{
+					tool: "pithos",
+					name: "fail",
+					path: "pithos task fail",
+					usage: "fail [--run text] --token integer --reason text <task-id>",
+					description: "Fail a held task using its current fencing token.",
+					subcommands: [],
+				},
+			],
+		},
+		{
+			tool: "pithos",
+			name: "graph",
+			path: "pithos graph",
+			usage: "graph <command>",
+			description: "Inspect Pithos task dependency and supersession graphs.",
+			subcommands: [
+				{
+					tool: "pithos",
+					name: "inspect",
+					path: "pithos graph inspect",
+					usage: "inspect [--task text]",
+					description: "Render dependency DAGs and supersession history for tasks.",
+					subcommands: [],
+				},
+			],
+		},
+		{
+			tool: "pithos",
+			name: "events",
+			path: "pithos events",
+			usage: "events <command>",
+			description: "Inspect durable Pithos event history.",
+			subcommands: [
+				{
+					tool: "pithos",
+					name: "tail",
+					path: "pithos events tail",
+					usage: "tail [--limit integer]",
+					description: "Print newest durable Pithos events.",
+					subcommands: [],
+				},
+			],
+		},
+		{
+			tool: "pithos",
+			name: "briefing",
+			path: "pithos briefing",
+			usage: "briefing [--agent text]",
+			description: "Print an agent-facing briefing of current claimable work and state.",
+			subcommands: [],
+		},
+	],
+} as const;
+const pithosHelpJson = JSON.stringify(pithosHelpTree);
+
+const pdxHelpTree = {
+	tool: "pdx",
+	name: "pdx",
+	path: "pdx",
+	usage: "pdx",
+	description: "Local supervisor for Pithos agent runs, processes, tmux sessions, and Pandora.",
+	subcommands: [
+		{
+			tool: "pdx",
+			name: "daemon",
+			path: "pdx daemon",
+			usage: "pdx daemon",
+			description: "Daemon supervisor commands.",
+			subcommands: [
+				{
+					tool: "pdx",
+					name: "status",
+					path: "pdx daemon status",
+					usage: "pdx daemon status [--data-dir text]",
+					description: "Show daemon state, supervised agents, and queue counts.",
+					subcommands: [],
+				},
+				{
+					tool: "pdx",
+					name: "logs",
+					path: "pdx daemon logs",
+					usage: "pdx daemon logs [--data-dir text] [--limit integer] [--since text] [--all]",
+					description: "Show pdx daemon supervisor JSONL logs (not agent transcripts).",
+					subcommands: [],
+				},
+			],
+		},
+		{
+			tool: "pdx",
+			name: "run",
+			path: "pdx run",
+			usage: "pdx run",
+			description: "Inspect or stop supervised agent runs owned by pdx.",
+			subcommands: [
+				{
+					tool: "pdx",
+					name: "transcript",
+					path: "pdx run transcript",
+					usage: "pdx run transcript [--data-dir text] [--limit integer] <run-id>",
+					description: "Render an agent harness transcript for a run.",
+					subcommands: [],
+				},
+			],
+		},
+	],
+} as const;
+const pdxHelpJson = JSON.stringify(pdxHelpTree);
 
 const agentsFile = ({
 	agent,
@@ -60,17 +235,49 @@ const agentsFile = ({
 		],
 	});
 
-const fakeRenderServices = (agentsJson: string) =>
+const fakeRenderServices = (
+	agentsJson: string,
+	options: {
+		readonly pithosStatus?: number;
+		readonly pithosStdout?: string;
+		readonly pithosStderr?: string;
+		readonly pdxStatus?: number;
+		readonly pdxStdout?: string;
+		readonly pdxStderr?: string;
+	} = {},
+) =>
 	({
 		readText: (path: string) => {
 			if (path.endsWith("agents.json")) return agentsJson;
 			if (path.endsWith("_common.md")) return "COMMON";
 			if (path.endsWith("war.md.tmpl")) {
-				return "{{_common.md}} {{model}} {{tools_csv}} {{claims}} {{enqueues}} {{claim_command}}";
+				return "{{_common.md}} {{model}} {{tools_csv}} {{claims}} {{enqueues}} {{claim_command}}\n{{command_cards}}";
 			}
-			return "";
+			if (path.endsWith("pandora.md.tmpl")) return "{{claim_command}}\n{{command_cards}}";
+			return "{{claim_command}}\n{{command_cards}}";
 		},
 		env: (key: string) => (key === "PDX_DATA_DIR" ? "/tmp/pdx-data" : undefined),
+		execFile: (file: string, args: readonly string[]) => {
+			if (file === "pithos" && args.length === 1 && args[0] === "--help") {
+				return {
+					status: options.pithosStatus ?? 0,
+					stdout: options.pithosStdout ?? pithosHelpJson,
+					stderr: options.pithosStderr ?? "",
+				};
+			}
+			if (file === "pdx" && args.length === 1 && args[0] === "--help-json") {
+				return {
+					status: options.pdxStatus ?? 0,
+					stdout: options.pdxStdout ?? pdxHelpJson,
+					stderr: options.pdxStderr ?? "",
+				};
+			}
+			return {
+				status: 1,
+				stdout: "",
+				stderr: `unexpected execFile call: ${file} ${args.join(" ")}`,
+			};
+		},
 	}) as const;
 
 const makeLaunchServices = (
@@ -113,6 +320,8 @@ describe("bundled agent templates", () => {
 		expect(templateText).not.toContain("--result-file");
 		expect(templateText).toContain("For any Pithos command using `--stdin`");
 		expect(templateText).toContain("<<'EOF'");
+		expect(templateText).not.toContain("Use Pithos task commands for inspect");
+		expect(templateText).not.toContain("Complete with `pithos task complete");
 	});
 });
 
@@ -151,6 +360,108 @@ describe("renderAgent", () => {
 		expect(rendered.harness.argv).toContain("model_test");
 		expect(rendered.harness.argv).toContain("--tools");
 		expect(rendered.harness.argv).toContain("bash,read");
+	});
+
+	it("renders War prompt with generated Pithos command cards", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			fakeRenderServices(
+				agentsFile({
+					agent: "war",
+					mode: "afk",
+					harnessKind: "pi",
+					claims: ["execute"],
+					enqueues: ["escalate"],
+				}),
+			),
+		);
+		expect(rendered.prompt).toContain("pithos task claim");
+		expect(rendered.prompt).toContain("pithos task artifact add");
+		expect(rendered.prompt).toContain("pithos task complete");
+		expect(rendered.prompt).toContain("pithos task fail");
+		expect(rendered.prompt).toContain(
+			"pithos task claim --run run_test --scope scope_repo --capability execute",
+		);
+		expect(rendered.prompt).not.toContain("Use Pithos task commands for inspect");
+	});
+
+	it("renders Pandora prompt with generated Pithos and pdx command cards", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "pandora", mode: "hitl" },
+			fakeRenderServices(
+				agentsFile({
+					agent: "pandora",
+					mode: "hitl",
+					harnessKind: "pi",
+					claims: ["escalate"],
+					enqueues: ["triage", "design", "escalate"],
+				}),
+			),
+		);
+		expect(rendered.prompt).toContain("pithos briefing");
+		expect(rendered.prompt).toContain("pithos graph inspect");
+		expect(rendered.prompt).toContain("pithos events tail");
+		expect(rendered.prompt).toContain("pdx daemon status");
+		expect(rendered.prompt).toContain("pdx daemon logs");
+		expect(rendered.prompt).toContain("pdx run transcript");
+	});
+
+	it("fails loudly when configured pdx command cards are missing", () => {
+		const missingTranscriptHelp = JSON.stringify({
+			...pdxHelpTree,
+			subcommands: [pdxHelpTree.subcommands[0]],
+		});
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "pandora", mode: "hitl" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "pandora",
+						mode: "hitl",
+						harnessKind: "pi",
+						claims: ["escalate"],
+						enqueues: ["triage", "design", "escalate"],
+					}),
+					{ pdxStdout: missingTranscriptHelp },
+				),
+			),
+		).toThrow("configured command path missing from generated help tree: pdx run transcript");
+	});
+
+	it("fails loudly when Pithos help JSON is malformed", () => {
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "war",
+						mode: "afk",
+						harnessKind: "pi",
+						claims: ["execute"],
+						enqueues: ["escalate"],
+					}),
+					{ pithosStdout: "{" },
+				),
+			),
+		).toThrow("pithos help: command help JSON is malformed");
+	});
+
+	it("fails loudly when configured Pithos binary help fails", () => {
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "war",
+						mode: "afk",
+						harnessKind: "pi",
+						claims: ["execute"],
+						enqueues: ["escalate"],
+					}),
+					{ pithosStatus: 127, pithosStderr: "missing pithos" },
+				),
+			),
+		).toThrow("pithos --help failed: missing pithos");
 	});
 
 	it("validates mode mismatch", () => {
@@ -236,6 +547,7 @@ describe("renderAgent", () => {
 						}),
 					).readText,
 					env: () => undefined,
+					execFile: noopExec,
 				},
 			),
 		).toThrow("PITHOS_DB or PDX_DATA_DIR is required for spawner render/preview");
@@ -298,6 +610,7 @@ describe("renderSessionTranscript", () => {
 		const services = {
 			readText: () => `${entries.join("\n")}\n`,
 			env: () => undefined,
+			execFile: noopExec,
 		};
 		type Result = ReturnType<typeof renderSessionTranscript>;
 		const output: Result = renderSessionTranscript(
@@ -319,6 +632,7 @@ describe("renderSessionTranscript", () => {
 				{
 					readText: () => "not-json\n",
 					env: () => undefined,
+					execFile: noopExec,
 				},
 			),
 		).toThrow(SpawnerError);
@@ -332,6 +646,7 @@ describe("renderSessionTranscript", () => {
 					readText: () =>
 						`${JSON.stringify({ type: "other", message: "ignored" })}\n${JSON.stringify({ type: "message", timestamp: "2026-05-10T12:00:00Z", message: { role: "user" } })}\n`,
 					env: () => undefined,
+					execFile: noopExec,
 				},
 			),
 		).toThrow(/required message\.content must be an array/);

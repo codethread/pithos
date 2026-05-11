@@ -279,3 +279,22 @@ tasks:
       - task-016
       - task-017
       - task-018
+  - id: task-020
+    description: "Pithos JSON help surface"
+    task_file: ./task-020.md
+    status: complete
+    blocked_by:
+      - task-019
+  - id: task-021
+    description: "Pdx machine-readable help for Pandora"
+    task_file: ./task-021.md
+    status: complete
+    blocked_by:
+      - task-020
+  - id: task-022
+    description: "Inject role-filtered command help into agent prompts"
+    task_file: ./task-022.md
+    status: complete
+    blocked_by:
+      - task-020
+      - task-021

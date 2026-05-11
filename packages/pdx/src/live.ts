@@ -253,6 +253,7 @@ export const makeSpawnerLive = (config: {
 			if (key === "PITHOS_DB") return config.pithosDbPath;
 			return liveSpawnerServices.env(key);
 		},
+		execFile: liveSpawnerServices.execFile,
 	};
 	return Spawner.of({
 		renderAgent: (input) =>

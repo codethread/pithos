@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { parsePdxConfig } from "../src/config.js";
 import { PdxError } from "../src/errors.js";
@@ -41,6 +44,16 @@ import {
 	runDaemon,
 	statusPdx,
 } from "../src/controller.js";
+
+const execFileAsync = promisify(execFile);
+const repoRoot = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
+
+const runPdxCli = (args: readonly string[]) =>
+	execFileAsync(
+		process.execPath,
+		["packages/pdx/scripts/build.mjs", "--dev", "--run", "--", ...args],
+		{ cwd: repoRoot },
+	);
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
@@ -276,6 +289,49 @@ const runSpawnTick = async (input: {
 	);
 
 describe("pdx substrate", () => {
+	it("prints machine-readable JSON help with nested pdx command paths", async () => {
+		const { stdout } = await runPdxCli(["--help-json"]);
+		const help = JSON.parse(stdout) as {
+			readonly tool: string;
+			readonly fullPath: string;
+			readonly usage: string;
+			readonly description: string;
+			readonly subcommands: readonly {
+				readonly fullPath: string;
+				readonly subcommands: readonly {
+					readonly fullPath: string;
+					readonly subcommands: readonly unknown[];
+				}[];
+			}[];
+		};
+		const paths: string[] = [];
+		const collect = (command: {
+			readonly fullPath: string;
+			readonly subcommands: readonly unknown[];
+		}) => {
+			paths.push(command.fullPath);
+			for (const child of command.subcommands) {
+				collect(child as { readonly fullPath: string; readonly subcommands: readonly unknown[] });
+			}
+		};
+		collect(help);
+		expect(help.tool).toBe("pdx");
+		expect(help.fullPath).toBe("pdx");
+		expect(help.usage).toContain("pdx");
+		expect(help.description).toContain("Local supervisor");
+		expect(paths).toEqual(
+			expect.arrayContaining(["pdx daemon status", "pdx daemon logs", "pdx run transcript"]),
+		);
+	});
+
+	it("keeps default help human-readable", async () => {
+		const { stdout } = await runPdxCli(["--help"]);
+		expect(() => {
+			JSON.parse(stdout);
+		}).toThrow();
+		expect(stdout).toContain("Local supervisor for Pithos agent runs");
+	});
+
 	it("derives config paths from data dir", async () => {
 		const config = await parseConfig("/tmp/pdx-home");
 		expect(config).toMatchObject({

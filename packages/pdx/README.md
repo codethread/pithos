@@ -15,7 +15,11 @@ pdx run kill <run-id> --reason <text> [--data-dir <path>]
 pdx run transcript <run-id> [--data-dir <path>] [--limit <n>]
 
 pdx task kill <task-id> --reason <text> [--data-dir <path>]
+
+pdx --help-json
 ```
+
+`pdx --help-json` prints a machine-readable command tree used for Pandora prompt generation. Default `pdx --help` remains human-readable.
 
 `pdx daemon status` reports supervisor state: daemon liveness, registry entries, queue counts, and cap usage.
 

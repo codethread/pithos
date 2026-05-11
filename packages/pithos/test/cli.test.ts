@@ -1,12 +1,10 @@
-import { CliConfig, Command } from "@effect/cli";
-import { NodeContext } from "@effect/platform-node";
 import Database from "better-sqlite3";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { makePithosCommand, PithosError, type Services } from "../src/index.js";
+import { PithosError, runPithosCli, type PithosHelpCommand, type Services } from "../src/index.js";
 
 const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-cli-")), "pithos.db");
 
@@ -54,21 +52,16 @@ const runCli = async (
 	process.exitCode = undefined;
 	const svc = services(stdin);
 	let configRead = false;
-	const command = makePithosCommand({
-		config: () => {
-			configRead = true;
-			return { dbPath };
-		},
-		services: svc,
-	});
-	const cli = Command.run(command, {
-		name: "Pithos",
-		version: "0.1.0",
-		executable: "pithos",
-	});
 	await Effect.runPromise(
-		cli(["node", "pithos", ...args]).pipe(
-			Effect.provide(Layer.mergeAll(NodeContext.layer, CliConfig.layer({ showBuiltIns: false }))),
+		runPithosCli(
+			{
+				config: () => {
+					configRead = true;
+					return { dbPath };
+				},
+				services: svc,
+			},
+			["node", "pithos", ...args],
 		),
 	);
 	return { ...svc, configRead, exitCode: process.exitCode };
@@ -697,8 +690,46 @@ describe("pithos cli", () => {
 		});
 	});
 
-	it("renders help without loading config", async () => {
+	it("renders top-level help as stable JSON without loading config", async () => {
+		for (const flag of ["--help", "-h"] as const) {
+			const result = await runCli([flag], tempDb());
+			expect(result.configRead).toBe(false);
+			expect(result.stderr).toEqual([]);
+			const help = JSON.parse(result.stdout[0] ?? "") as PithosHelpCommand;
+			expect(help).toMatchObject({
+				tool: "pithos",
+				name: "pithos",
+				path: "pithos",
+				usage: "pithos <command>",
+				description:
+					"Durable state CLI for tasks, runs, claims, artifacts, events, and graph invariants.",
+			});
+			expect(help.subcommands.map((command) => command.path)).toEqual([
+				"pithos init",
+				"pithos scope",
+				"pithos run",
+				"pithos task",
+				"pithos graph",
+				"pithos events",
+				"pithos briefing",
+			]);
+		}
+	});
+
+	it("renders artifact add as a real nested command path", async () => {
 		const result = await runCli(["--help"], tempDb());
-		expect(result.configRead).toBe(false);
+		const help = JSON.parse(result.stdout[0] ?? "") as PithosHelpCommand;
+		const flatten = (command: PithosHelpCommand): readonly PithosHelpCommand[] => [
+			command,
+			...command.subcommands.flatMap(flatten),
+		];
+		const commands = flatten(help);
+		expect(commands.filter((command) => command.path === "pithos task artifact add")).toHaveLength(
+			1,
+		);
+		expect(commands.some((command) => command.path === "pithos task task artifact add")).toBe(
+			false,
+		);
+		expect(result.stdout.join("").match(/pithos task artifact add/g)).toHaveLength(1);
 	});
 });

@@ -132,7 +132,7 @@ makeFakeSpawnerServices(input)
 - `includes` is optional and entries must be unique template basenames.
 - Includes are inserted as raw template variables (for example `{{_common.md}}`), not recursively rendered.
 
-Template context contains: `agent`, `run_id`, `session_id`, `scope_id`, `cwd`, `claim_command`, `claims`, `enqueues`, `model`, `tools_csv`.
+Template context contains: `agent`, `run_id`, `session_id`, `scope_id`, `cwd`, `claim_command`, `command_cards`, `claims`, `enqueues`, `model`, `tools_csv`.
 
 ## Preview CLI
 
@@ -154,6 +154,8 @@ Preview requires DB context:
 - `PDX_DATA_DIR` (from which `/pithos.sqlite` is derived)
 
 `PITHOS_BIN` is optional and defaults to `pithos`.
+
+`PDX_BIN` is optional and defaults to `pdx`; Pandora prompt rendering uses `PDX_BIN --help-json` for generated pdx inspection command cards.
 
 ## Notes
 

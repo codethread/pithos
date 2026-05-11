@@ -1,7 +1,9 @@
 import process from "node:process";
 import { inspect } from "node:util";
-import { Args, Command, Options } from "@effect/cli";
-import { Effect, Option } from "effect";
+import { Args, CliConfig, Command, CommandDescriptor, Options, Usage } from "@effect/cli";
+import type { HelpDoc, Span } from "@effect/cli";
+import { Effect, Layer, Option } from "effect";
+import { NodeContext } from "@effect/platform-node";
 import type { Config } from "./config.js";
 import { makeEngine } from "./engine.js";
 import { exitCodeFor, PithosError } from "./errors.js";
@@ -113,6 +115,137 @@ type CommandInput =
 
 const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
 const json = (value: unknown): string => `${JSON.stringify(value)}\n`;
+
+export interface PithosHelpCommand {
+	readonly tool: "pithos";
+	readonly name: string;
+	readonly path: string;
+	readonly usage: string;
+	readonly description: string;
+	readonly subcommands: readonly PithosHelpCommand[];
+}
+
+type CommandDescriptorNode =
+	| {
+			readonly _tag: "Standard" | "GetUserInput";
+			readonly name: string;
+			readonly description: HelpDoc.HelpDoc;
+	  }
+	| { readonly _tag: "Map"; readonly command: CommandDescriptorNode }
+	| {
+			readonly _tag: "Subcommands";
+			readonly parent: CommandDescriptorNode;
+			readonly children: readonly CommandDescriptorNode[];
+	  };
+
+const HELP_CLI_CONFIG = CliConfig.make({ showBuiltIns: false });
+
+const spanToText = (span: Span.Span): string => {
+	switch (span._tag) {
+		case "Text":
+			return span.value;
+		case "URI":
+			return span.value;
+		case "Sequence":
+			return `${spanToText(span.left)}${spanToText(span.right)}`;
+		case "Highlight":
+		case "Strong":
+		case "Weak":
+			return spanToText(span.value);
+	}
+};
+
+const helpDocToText = (helpDoc: HelpDoc.HelpDoc): string => {
+	switch (helpDoc._tag) {
+		case "Empty":
+			return "";
+		case "Header":
+		case "Paragraph":
+			return spanToText(helpDoc.value);
+		case "DescriptionList":
+			return helpDoc.definitions
+				.map(([term, definition]) => `${spanToText(term)} ${helpDocToText(definition)}`.trim())
+				.join("\n");
+		case "Enumeration":
+			return helpDoc.elements.map(helpDocToText).join("\n");
+		case "Sequence": {
+			const left = helpDocToText(helpDoc.left);
+			const right = helpDocToText(helpDoc.right);
+			return [left, right].filter((part) => part.length > 0).join("\n");
+		}
+	}
+};
+
+const unwrapCommandDescriptorMap = (node: CommandDescriptorNode): CommandDescriptorNode =>
+	node._tag === "Map" ? unwrapCommandDescriptorMap(node.command) : node;
+
+const commandDescriptorName = (node: CommandDescriptorNode): string => {
+	const unwrapped = unwrapCommandDescriptorMap(node);
+	switch (unwrapped._tag) {
+		case "Standard":
+		case "GetUserInput":
+			return unwrapped.name;
+		case "Subcommands":
+			return commandDescriptorName(unwrapped.parent);
+		case "Map":
+			return commandDescriptorName(unwrapped.command);
+	}
+};
+
+const commandDescriptorDescription = (node: CommandDescriptorNode): string => {
+	const unwrapped = unwrapCommandDescriptorMap(node);
+	switch (unwrapped._tag) {
+		case "Standard":
+		case "GetUserInput":
+			return helpDocToText(unwrapped.description);
+		case "Subcommands":
+			return commandDescriptorDescription(unwrapped.parent);
+		case "Map":
+			return commandDescriptorDescription(unwrapped.command);
+	}
+};
+
+const commandDescriptorUsage = (node: CommandDescriptorNode): string => {
+	const unwrapped = unwrapCommandDescriptorMap(node);
+	const usageNode = unwrapped._tag === "Subcommands" ? unwrapped.parent : unwrapped;
+	const usage = Usage.enumerate(
+		CommandDescriptor.getUsage(usageNode as unknown as CommandDescriptor.Command<unknown>),
+		HELP_CLI_CONFIG,
+	)
+		.map(spanToText)
+		.join(" | ");
+	return unwrapped._tag === "Subcommands" ? `${usage} <command>` : usage;
+};
+
+const renderHelpCommand = (
+	node: CommandDescriptorNode,
+	parentPath: readonly string[],
+): PithosHelpCommand => {
+	const unwrapped = unwrapCommandDescriptorMap(node);
+	const name = commandDescriptorName(unwrapped);
+	const path = [...parentPath, name];
+	const children =
+		unwrapped._tag === "Subcommands"
+			? unwrapped.children.map((child) => renderHelpCommand(child, path))
+			: [];
+	return {
+		tool: "pithos",
+		name,
+		path: path.join(" "),
+		usage: commandDescriptorUsage(unwrapped),
+		description: commandDescriptorDescription(unwrapped),
+		subcommands: children,
+	};
+};
+
+export const renderPithosHelpJson = <Name extends string, R, E, A>(
+	command: Command.Command<Name, R, E, A>,
+): string => json(renderHelpCommand(command.descriptor as unknown as CommandDescriptorNode, []));
+
+const isTopLevelHelpInvocation = (args: readonly string[]): boolean => {
+	const cliArgs = args.slice(2);
+	return cliArgs.length === 1 && (cliArgs[0] === "--help" || cliArgs[0] === "-h");
+};
 
 const resolveConfig = (config: Config | (() => Config)): Config =>
 	typeof config === "function" ? config() : config;
@@ -661,5 +794,16 @@ export const makePithosCommand = (ctx: CliContext) => {
 			"Durable state CLI for tasks, runs, claims, artifacts, events, and graph invariants.",
 		),
 		Command.withSubcommands([init, scope, runParent, task, graph, events, briefing]),
+	);
+};
+
+export const runPithosCli = (ctx: CliContext, args: readonly string[]) => {
+	const command = makePithosCommand(ctx);
+	if (isTopLevelHelpInvocation(args)) {
+		return ctx.services.output.write(renderPithosHelpJson(command));
+	}
+	const cli = Command.run(command, { name: "Pithos", version: "0.1.0", executable: "pithos" });
+	return cli(args).pipe(
+		Effect.provide(Layer.mergeAll(NodeContext.layer, CliConfig.layer({ showBuiltIns: false }))),
 	);
 };

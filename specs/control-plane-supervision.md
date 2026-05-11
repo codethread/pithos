@@ -678,9 +678,9 @@ Spawner/template context contains self-claim context, not task content:
 - `scope_id`
 - `cwd`
 - generated `claim_command`
-- concise per-agent command recipes
+- generated, role-filtered command help JSON
 
-Templates do not receive full `pithos --help` by default. Agents get the commands they need for their role; Pandora gets broader investigation/operator recipes.
+Templates do not receive full `pithos --help` by default. Spawner filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`. Missing configured help paths or malformed help JSON fail rendering loudly.
 
 Spawner renders `claim_command` from manifest claim capability plus launch context, for example:
 

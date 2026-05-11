@@ -185,6 +185,8 @@ const renderTemplate = (template: string, ctx: Record<string, string>): string =
 const SpawnerConfigSchema = Schema.Struct({
 	pithosBin: Schema.NonEmptyString,
 	pithosDb: Schema.NonEmptyString,
+	pdxBin: Schema.NonEmptyString,
+	pdxDataDir: Schema.optional(Schema.NonEmptyString),
 });
 
 const INITIAL_TASK_MESSAGE = "Claim and process one task, then exit.";
@@ -207,9 +209,189 @@ const loadConfig = (services: RenderServices): SpawnerConfig => {
 		{
 			pithosBin: services.env("PITHOS_BIN") ?? "pithos",
 			pithosDb,
+			pdxBin: services.env("PDX_BIN") ?? "pdx",
+			pdxDataDir: services.env("PDX_DATA_DIR"),
 		},
 		"SpawnerConfig",
 	);
+};
+
+interface CommandHelpCard {
+	readonly tool: string;
+	readonly name: string;
+	readonly path: string;
+	readonly usage: string;
+	readonly description: string;
+	readonly subcommands: readonly CommandHelpCard[];
+}
+
+const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {
+	war: ["pithos task"],
+	toil: ["pithos task"],
+	greed: ["pithos task"],
+	pandora: ["pithos task", "pithos graph", "pithos events", "pithos briefing"],
+};
+
+const PANDORA_PDX_COMMAND_PATHS = [
+	"pdx daemon status",
+	"pdx daemon logs",
+	"pdx run transcript",
+] as const;
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const requiredStringField = (
+	record: Readonly<Record<string, unknown>>,
+	field: string,
+	path: string,
+): string => {
+	const value = record[field];
+	if (typeof value === "string" && value.length > 0) return value;
+	throw new SpawnerError({
+		code: "TEMPLATE_ERROR",
+		message: `${path}: required ${field} must be a non-empty string`,
+	});
+};
+
+const parseCommandHelpCard = (value: unknown, path: string): CommandHelpCard => {
+	if (!isRecord(value)) {
+		throw new SpawnerError({
+			code: "TEMPLATE_ERROR",
+			message: `${path}: command help entry must be an object`,
+		});
+	}
+	const subcommands = value.subcommands;
+	if (!Array.isArray(subcommands)) {
+		throw new SpawnerError({
+			code: "TEMPLATE_ERROR",
+			message: `${path}: required subcommands must be an array`,
+		});
+	}
+	return {
+		tool: requiredStringField(value, "tool", path),
+		name: requiredStringField(value, "name", path),
+		path: requiredStringField(value, "path", path),
+		usage: requiredStringField(value, "usage", path),
+		description: requiredStringField(value, "description", path),
+		subcommands: subcommands.map((child, index) =>
+			parseCommandHelpCard(child, `${path}.subcommands[${index.toString()}]`),
+		),
+	};
+};
+
+const parseCommandHelpTree = (raw: string, source: string): CommandHelpCard => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw) as unknown;
+	} catch (error) {
+		throw new SpawnerError({
+			code: "TEMPLATE_ERROR",
+			message: `${source}: command help JSON is malformed: ${String(error)}`,
+		});
+	}
+	return parseCommandHelpCard(parsed, source);
+};
+
+const pithosHelpTree = (config: SpawnerConfig, services: RenderServices): CommandHelpCard => {
+	const result = services.execFile(config.pithosBin, ["--help"]);
+	if (result.status !== 0) {
+		throw new SpawnerError({
+			code: "TEMPLATE_ERROR",
+			message: `${config.pithosBin} --help failed: ${result.stderr}`,
+		});
+	}
+	return parseCommandHelpTree(result.stdout, "pithos help");
+};
+
+const pdxHelpTree = (config: SpawnerConfig, services: RenderServices): CommandHelpCard => {
+	const result = services.execFile(config.pdxBin, ["--help-json"]);
+	if (result.status !== 0) {
+		throw new SpawnerError({
+			code: "TEMPLATE_ERROR",
+			message: `${config.pdxBin} --help-json failed: ${result.stderr}`,
+		});
+	}
+	return parseCommandHelpTree(result.stdout, "pdx help");
+};
+
+const flattenHelpTree = (tree: CommandHelpCard): ReadonlyMap<string, CommandHelpCard> => {
+	const entries: [string, CommandHelpCard][] = [];
+	const visit = (card: CommandHelpCard): void => {
+		entries.push([card.path, card]);
+		for (const child of card.subcommands) visit(child);
+	};
+	visit(tree);
+	return new Map(entries);
+};
+
+const filteredHelpTree = (
+	tree: CommandHelpCard,
+	paths: readonly string[],
+	source: string,
+): CommandHelpCard => {
+	const selected = new Set(paths);
+	const byPath = flattenHelpTree(tree);
+	for (const path of selected) {
+		if (!byPath.has(path)) {
+			throw new SpawnerError({
+				code: "TEMPLATE_ERROR",
+				message: `${source}: configured command path missing from generated help tree: ${path}`,
+			});
+		}
+	}
+	const prune = (card: CommandHelpCard): CommandHelpCard | undefined => {
+		if (selected.has(card.path)) return card;
+		const subcommands = card.subcommands.flatMap((child) => {
+			const pruned = prune(child);
+			return pruned === undefined ? [] : [pruned];
+		});
+		if (subcommands.length > 0) return { ...card, subcommands };
+		return undefined;
+	};
+	return {
+		...tree,
+		subcommands: tree.subcommands.flatMap((child) => {
+			const pruned = prune(child);
+			return pruned === undefined ? [] : [pruned];
+		}),
+	};
+};
+
+const renderCommandHelpJson = (value: unknown): string => JSON.stringify(value, null, 2);
+
+const renderCommandCards = (
+	agent: SpawnableAgentKind,
+	config: SpawnerConfig,
+	services: RenderServices,
+): string => {
+	const pithosHelp = filteredHelpTree(
+		pithosHelpTree(config, services),
+		PITHOS_TOP_LEVEL_PATHS[agent],
+		"pithos help",
+	);
+	const sections = [
+		[
+			"## Generated command help JSON",
+			"This JSON is generated from CLI help; use the rendered claim command above for the exact claim invocation for this run.",
+			"",
+			"### Pithos help JSON",
+			"```json",
+			renderCommandHelpJson(pithosHelp),
+			"```",
+		].join("\n"),
+	];
+	if (agent === "pandora") {
+		const pdxHelp = filteredHelpTree(
+			pdxHelpTree(config, services),
+			PANDORA_PDX_COMMAND_PATHS,
+			"pdx help",
+		);
+		sections.push(
+			["### pdx inspection help JSON", "```json", renderCommandHelpJson(pdxHelp), "```"].join("\n"),
+		);
+	}
+	return `${sections.join("\n\n")}\n`;
 };
 
 const logicalName = (input: RenderAgentInput): string =>
@@ -292,6 +474,7 @@ export const renderAgent = (
 		manifest.includes.map((include) => [include, readText(join(templatesDir, include), services)]),
 	);
 	const claimCommand = `${config.pithosBin} task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
+	const commandCards = renderCommandCards(input.agent, config, services);
 	const prompt = renderTemplate(readText(join(templatesDir, manifest.template), services), {
 		...includes,
 		agent: input.agent,
@@ -300,6 +483,7 @@ export const renderAgent = (
 		scope_id: input.scopeId,
 		cwd: input.cwd,
 		claim_command: claimCommand,
+		command_cards: commandCards,
 		claims: manifest.claims.join(", "),
 		enqueues: manifest.enqueues.join(", "),
 		model: manifest.harness.model,
@@ -311,6 +495,8 @@ export const renderAgent = (
 		PITHOS_SESSION_ID: input.sessionId,
 		PITHOS_SCOPE_ID: input.scopeId,
 		PITHOS_BIN: config.pithosBin,
+		PDX_BIN: config.pdxBin,
+		...(config.pdxDataDir === undefined ? {} : { PDX_DATA_DIR: config.pdxDataDir }),
 	};
 	const sessionLogPath = sessionLogPathFor(input, manifest.harness.kind);
 	return {
@@ -417,9 +603,6 @@ interface TranscriptMessage {
 	readonly role: string;
 	readonly text: string;
 }
-
-const isRecord = (value: unknown): value is JsonRecord =>
-	typeof value === "object" && value !== null && !Array.isArray(value);
 
 const parseJsonl = (path: string, raw: string): readonly JsonRecord[] =>
 	raw

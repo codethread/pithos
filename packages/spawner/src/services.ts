@@ -14,6 +14,7 @@ export interface CommandResult {
 export interface RenderServices {
 	readonly readText: (path: string) => string;
 	readonly env: (key: string) => string | undefined;
+	readonly execFile: (file: string, args: readonly string[]) => CommandResult;
 }
 
 export interface LaunchServices extends RenderServices {
@@ -22,7 +23,6 @@ export interface LaunchServices extends RenderServices {
 		args: readonly string[],
 		options: { readonly cwd: string; readonly env: Record<string, string> },
 	) => SpawnedProcess;
-	readonly execFile: (file: string, args: readonly string[]) => CommandResult;
 }
 
 export interface FakeSpawnerServicesInput {

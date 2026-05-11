@@ -99,6 +99,44 @@ const enqueueTask = (
 		chain: input.chain ?? "auto",
 	});
 
+const upsertPandoraRun = (engine: Engine): void => {
+	engine.runUpsert({
+		agent: "pandora",
+		mode: "hitl",
+		scope: "global",
+		cwd: "/tmp",
+		sessionId: "s_pandora",
+		harnessKind: "claude",
+		sessionLogPath: "/tmp/s_pandora.jsonl",
+		runId: "run_pandora",
+	});
+};
+
+const taskCreatedChain = (dbPath: string, taskId: string): unknown => {
+	const db = new Database(dbPath);
+	const payload = JSON.parse(
+		db
+			.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
+			.pluck()
+			.get(taskId) as string,
+	) as { chain: unknown };
+	db.close();
+	return payload.chain;
+};
+
+const claimSourcedEscalationWithPandora = (engine: Engine) => {
+	upsertPandoraRun(engine);
+	const source = enqueueTask(engine, { title: "held source" }).task.id;
+	engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+	const escalation = enqueueTask(engine, {
+		title: "needs attention",
+		capability: "escalate",
+		runId: "run_toil",
+	}).task.id;
+	engine.claim({ runId: "run_pandora", scope: "global", capability: "escalate" });
+	return { source, escalation };
+};
+
 describe("task lifecycle", () => {
 	it("round trips enqueue claim heartbeat complete with fencing", () => {
 		const { dbPath, engine, repo } = setup();
@@ -382,16 +420,7 @@ describe("task lifecycle", () => {
 
 	it("source-links escalations from held ordinary work without blocking claimability", () => {
 		const { dbPath, engine } = setup();
-		engine.runUpsert({
-			agent: "pandora",
-			mode: "hitl",
-			scope: "global",
-			cwd: "/tmp",
-			sessionId: "s_pandora",
-			harnessKind: "claude",
-			sessionLogPath: "/tmp/s_pandora.jsonl",
-			runId: "run_pandora",
-		});
+		upsertPandoraRun(engine);
 		const source = enqueueTask(engine, { title: "held source" }).task.id;
 		engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
 
@@ -448,6 +477,197 @@ describe("task lifecycle", () => {
 				.get(escalation.task.id) as string,
 		) as unknown as { chain: { source_task_id: string | null } };
 		expect(eventPayload.chain.source_task_id).toBe(source);
+	});
+
+	it("routes Pandora follow-up from held escalation to its source task", () => {
+		const { dbPath, engine } = setup();
+		const { source, escalation } = claimSourcedEscalationWithPandora(engine);
+
+		const followUp = enqueueTask(engine, {
+			title: "resolution follow-up",
+			capability: "design",
+			runId: "run_pandora",
+		});
+
+		expect(followUp.chain).toMatchObject({
+			applied: "depends_on_source",
+			held_task_id: escalation,
+			source_task_id: source,
+			implicit_dependency_ids: [source],
+			final_dependency_ids: [source],
+		});
+		const inspect = engine.taskInspect({ taskId: followUp.task.id });
+		expect(inspect.dependencies.map((task) => task.id)).toEqual([source]);
+		expect(inspect.task.unresolved_dependency_ids).toEqual([source]);
+		expect(taskCreatedChain(dbPath, followUp.task.id)).toMatchObject({
+			applied: "depends_on_source",
+			source_task_id: source,
+			implicit_dependency_ids: [source],
+			final_dependency_ids: [source],
+		});
+	});
+
+	it("makes held escalation without source a visible auto-chain no-op", () => {
+		const { dbPath, engine } = setup();
+		upsertPandoraRun(engine);
+		const escalation = enqueueTask(engine, {
+			title: "flat escalation",
+			capability: "escalate",
+			chain: "none",
+		}).task.id;
+		engine.claim({ runId: "run_pandora", scope: "global", capability: "escalate" });
+
+		const followUp = enqueueTask(engine, {
+			title: "unrelated design",
+			capability: "design",
+			runId: "run_pandora",
+		});
+
+		expect(followUp.chain).toMatchObject({
+			applied: "flat_held_escalation_without_source",
+			held_task_id: escalation,
+			source_task_id: null,
+			implicit_dependency_ids: [],
+			final_dependency_ids: [],
+		});
+		expect(engine.taskInspect({ taskId: followUp.task.id }).dependencies).toEqual([]);
+		expect(taskCreatedChain(dbPath, followUp.task.id)).toMatchObject({
+			applied: "flat_held_escalation_without_source",
+			held_task_id: escalation,
+			source_task_id: null,
+			implicit_dependency_ids: [],
+			final_dependency_ids: [],
+		});
+	});
+
+	it("supports explicit source chaining from a held sourced escalation", () => {
+		const { dbPath, engine } = setup();
+		const { source, escalation } = claimSourcedEscalationWithPandora(engine);
+
+		const followUp = enqueueTask(engine, {
+			title: "explicit source follow-up",
+			capability: "triage",
+			runId: "run_pandora",
+			chain: "source",
+		});
+
+		expect(followUp.chain).toMatchObject({
+			policy: "source",
+			applied: "depends_on_source",
+			held_task_id: escalation,
+			source_task_id: source,
+			implicit_dependency_ids: [source],
+			final_dependency_ids: [source],
+		});
+		expect(
+			engine.taskInspect({ taskId: followUp.task.id }).dependencies.map((task) => task.id),
+		).toEqual([source]);
+		expect(taskCreatedChain(dbPath, followUp.task.id)).toMatchObject({
+			policy: "source",
+			applied: "depends_on_source",
+			source_task_id: source,
+			implicit_dependency_ids: [source],
+			final_dependency_ids: [source],
+		});
+	});
+
+	it("keeps escalation from held escalation visibly flat", () => {
+		const { dbPath, engine } = setup();
+		const { escalation } = claimSourcedEscalationWithPandora(engine);
+
+		const nextEscalation = enqueueTask(engine, {
+			title: "separate attention",
+			capability: "escalate",
+			runId: "run_pandora",
+		});
+
+		expect(nextEscalation.chain).toMatchObject({
+			applied: "flat_escalation_from_escalation",
+			held_task_id: escalation,
+			source_task_id: null,
+			implicit_dependency_ids: [],
+			final_dependency_ids: [],
+		});
+		expect(engine.taskInspect({ taskId: nextEscalation.task.id })).toMatchObject({
+			source: null,
+			dependencies: [],
+		});
+		expect(taskCreatedChain(dbPath, nextEscalation.task.id)).toMatchObject({
+			applied: "flat_escalation_from_escalation",
+			held_task_id: escalation,
+			source_task_id: null,
+			implicit_dependency_ids: [],
+			final_dependency_ids: [],
+		});
+	});
+
+	it("fails loudly for invalid explicit source chaining", () => {
+		const { engine } = setup();
+		upsertPandoraRun(engine);
+		expect(() =>
+			enqueueTask(engine, { title: "no held source", capability: "design", chain: "source" }),
+		).toThrow(/--chain source requires a held task/);
+
+		const escalation = enqueueTask(engine, {
+			title: "flat escalation",
+			capability: "escalate",
+			chain: "none",
+		}).task.id;
+		engine.claim({ runId: "run_pandora", scope: "global", capability: "escalate" });
+		expect(() =>
+			enqueueTask(engine, {
+				title: "no source",
+				capability: "design",
+				runId: "run_pandora",
+				chain: "source",
+			}),
+		).toThrow(/--chain source requires the held task to have a source link/);
+		expect(() =>
+			enqueueTask(engine, {
+				title: "bad escalation",
+				capability: "escalate",
+				runId: "run_pandora",
+				chain: "source",
+			}),
+		).toThrow(/--chain source cannot be used when enqueueing escalation tasks/);
+		expect(engine.taskInspect({ taskId: escalation }).task.status).toBe("claimed");
+	});
+
+	it("keeps chain none manual-only while Pandora holds a sourced escalation", () => {
+		const { dbPath, engine } = setup();
+		const { escalation } = claimSourcedEscalationWithPandora(engine);
+		const manual = enqueueTask(engine, {
+			title: "manual dependency",
+			capability: "triage",
+			runId: "run_greed",
+			chain: "none",
+		}).task.id;
+
+		const followUp = enqueueTask(engine, {
+			title: "manual-only follow-up",
+			capability: "design",
+			runId: "run_pandora",
+			dependsOn: [manual],
+			chain: "none",
+		});
+
+		expect(followUp.chain).toMatchObject({
+			applied: "none_selected",
+			held_task_id: escalation,
+			source_task_id: null,
+			implicit_dependency_ids: [],
+			final_dependency_ids: [manual],
+		});
+		expect(
+			engine.taskInspect({ taskId: followUp.task.id }).dependencies.map((task) => task.id),
+		).toEqual([manual]);
+		expect(taskCreatedChain(dbPath, followUp.task.id)).toMatchObject({
+			applied: "none_selected",
+			held_task_id: escalation,
+			source_task_id: null,
+			implicit_dependency_ids: [],
+			final_dependency_ids: [manual],
+		});
 	});
 
 	it("fails loudly before source-linking a superseded held source", () => {

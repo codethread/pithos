@@ -137,6 +137,7 @@ describe("chain policy resolver", () => {
 			}),
 		).toMatchObject({
 			applied: "flat_escalation_from_escalation",
+			sourceTaskId: null,
 			implicitDependencyIds: [],
 		});
 	});

@@ -151,7 +151,12 @@ export const resolveChainPolicy = (input: {
 			implicitDependencyIds: [input.heldSourceTaskId],
 		};
 	}
-	return { ...base, applied: "flat_escalation_from_escalation", implicitDependencyIds: [] };
+	return {
+		...base,
+		sourceTaskId: null,
+		applied: "flat_escalation_from_escalation",
+		implicitDependencyIds: [],
+	};
 };
 
 export const finalDependencyIds = (input: {

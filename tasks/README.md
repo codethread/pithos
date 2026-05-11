@@ -72,6 +72,13 @@ No HITL slice is required: Adam confirmed the core language and prompt-surface d
 
 Append notes here. Do not rewrite earlier notes.
 
+### Task 027: Escalation source handoff — 2026-05-11
+
+- Confirmed the existing pure chain resolver and DB enqueue path already route Pandora-held sourced escalations through `depends_on_source`; added DB-backed lifecycle coverage for Pandora handoff metadata/events and dependency rows.
+- Added integration coverage for explicit `--chain source`, sourced-escalation `--chain none` manual-only behavior, escalation-without-source visible no-op metadata, escalation-from-escalation visible no-op metadata, and fail-loud `--chain source` preconditions.
+- Tightened escalation-from-escalation no-op metadata so it does not carry the held escalation source as a relationship-looking source id.
+- Validation run: `pnpm typecheck && pnpm lint && pnpm test && pnpm run build`.
+
 ### Task 026: Escalation source links — 2026-05-11
 
 - Added durable `task_sources` storage and wired default auto chaining so held ordinary work enqueueing an escalation records a non-blocking source link rather than a dependency.

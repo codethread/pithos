@@ -325,7 +325,7 @@ tasks:
   - id: task-027
     description: "Escalation source handoff"
     task_file: ./task-027.md
-    status: pending
+    status: complete
     blocked_by:
       - task-025
       - task-026

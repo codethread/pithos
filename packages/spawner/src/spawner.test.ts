@@ -111,8 +111,8 @@ describe("bundled agent templates", () => {
 		expect(templateText).not.toContain("--body");
 		expect(templateText).not.toContain("--body-file");
 		expect(templateText).not.toContain("--result-file");
-		expect(templateText).toContain("pithos task artifact add");
-		expect(templateText).toContain("--stdin");
+		expect(templateText).toContain("For any Pithos command using `--stdin`");
+		expect(templateText).toContain("<<'EOF'");
 	});
 });
 

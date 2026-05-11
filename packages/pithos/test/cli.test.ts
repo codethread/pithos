@@ -176,7 +176,6 @@ const artifactAddArgs = (taskId = "task_missing", extra: readonly string[] = [])
 	"task",
 	"artifact",
 	"add",
-	"--task",
 	taskId,
 	"--kind",
 	"note",
@@ -477,6 +476,27 @@ describe("pithos cli", () => {
 		await expect(
 			runCli(artifactAddArgs("task_missing", ["--body-file", "payload.txt"]), tempDb()),
 		).rejects.toThrow("--body-file");
+	});
+
+	it("returns parser errors for removed artifact add task flag", async () => {
+		await expect(
+			runCli(
+				[
+					"task",
+					"artifact",
+					"add",
+					"task_missing",
+					"--kind",
+					"note",
+					"--title",
+					"evidence",
+					"--stdin",
+					"--task",
+					"task_extra",
+				],
+				tempDb(),
+			),
+		).rejects.toThrow("--task");
 	});
 
 	it("completes with default result metadata without reading stdin", async () => {

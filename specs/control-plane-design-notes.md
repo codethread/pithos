@@ -184,7 +184,7 @@ pithos task cancel \
 pithos task inspect <task-id>
 
 pithos task artifact add \
-  --task <task-id> \
+  <task-id> \
   [--run <run-id>] \
   --kind <kind> \
   --title <text> \

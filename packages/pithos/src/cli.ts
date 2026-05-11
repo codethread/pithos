@@ -427,7 +427,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 	const artifactAdd = Command.make(
 		"add",
 		{
-			taskId: Options.text("task"),
+			taskId: Args.text({ name: "task-id" }),
 			runId: Options.text("run").pipe(Options.optional),
 			kind: Options.text("kind"),
 			title: Options.text("title"),

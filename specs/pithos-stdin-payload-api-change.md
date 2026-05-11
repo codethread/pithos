@@ -120,7 +120,7 @@ Shape:
 
 ```sh
 pithos task artifact add \
-  --task <task-id> \
+  <task-id> \
   [--run <run-id>] \
   --kind <kind> \
   --title <text> \
@@ -217,7 +217,7 @@ Artifact add:
 
 ```sh
 printf '%s\n' '# Execution notes\n\nPatched file X and verified test Y.' | \
-  pithos task artifact add --task task_123 --run run_war --kind war-completion --title 'implementation notes' --stdin
+  pithos task artifact add task_123 --run run_war --kind war-completion --title 'implementation notes' --stdin
 ```
 
 Complete without extra result payload:

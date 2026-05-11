@@ -418,7 +418,7 @@ pithos task cancel <task-id> --run <run-id> --reason <text>
 pithos task inspect <task-id>
 
 pithos task artifact add \
-  --task <task-id> \
+  <task-id> \
   [--run <run-id>] \
   --kind <kind> \
   --title <text> \
@@ -767,7 +767,7 @@ Every claiming agent follows:
 <claim_command>
 pithos task inspect <task-id>
 # do work
-printf '%s\n' '<artifact body>' | pithos task artifact add --task <task-id> --run <run-id> --kind <kind> --title <text> --stdin
+printf '%s\n' '<artifact body>' | pithos task artifact add <task-id> --run <run-id> --kind <kind> --title <text> --stdin
 pithos task complete <task-id> --run <run-id> --token <token>
 ```
 

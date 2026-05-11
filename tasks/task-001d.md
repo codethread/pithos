@@ -7,11 +7,11 @@ Complete the graph-aware task surfaces using the schema and write-path foundatio
 Commands in scope:
 
 ```text
-pithos-next task inspect <task-id>
-pithos-next task supersede <task-id> --run <run-id> --reason <text> [--title <text>] [(--body <text> | --body-file <path>)] [--scope <scope-id>] [--capability <triage|design|execute|escalate>]
-pithos-next task cancel <task-id> --run <run-id> --reason <text>
-pithos-next graph inspect (--task <task-id> | --scope <scope-id> | --all) [--flat] [--dump]
-pithos-next briefing [--agent pandora]
+pithos task inspect <task-id> [--json]
+pithos task supersede <task-id> --run <run-id> --reason <text> [--title <text>] [--scope <scope-id>] [--capability <triage|design|execute|escalate>] --stdin
+pithos task cancel <task-id> --run <run-id> --reason <text>
+pithos graph inspect (--task <task-id> | --scope <scope-id> | --all) [--json]
+pithos briefing [--agent pandora] [--json]
 ```
 
 Graph semantics:
@@ -42,10 +42,9 @@ Cancel contract:
 
 Read surfaces:
 
-- `task inspect` returns task details, artifacts, direct dependencies, direct dependents, unresolved blockers, and supersession links.
-- `graph inspect` returns closed graph JSON for `--task`, `--scope`, or `--all` selectors; selectors are mutually exclusive.
-- `graph inspect --flat` renders the spec text tree; `--dump` only affects flat output.
-- `briefing` splits queued work into ready and blocked work with blocker summaries.
+- `task inspect` renders an agent-readable task handoff by default; `--json` returns task details, artifacts, direct dependencies, direct dependents, unresolved blockers, and supersession links.
+- `graph inspect` renders a readable dependency tree by default; `--json` returns closed graph JSON for `--task`, `--scope`, or `--all` selectors; selectors are mutually exclusive.
+- `briefing` renders readable ready/blocked work by default; `--json` returns ready and blocked work with blocker summaries.
 
 ## Test focus
 

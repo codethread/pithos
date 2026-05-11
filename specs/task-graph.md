@@ -7,7 +7,7 @@
 
 ### Purpose
 
-Pithos tasks use a first-class dependency DAG plus a linear supersession history. This lets agents create cross-scope blocked work, claim only ready tasks, replace a wrong middle task with a new one without mutating task contents, and inspect the current graph in machine-readable form.
+Pithos tasks use a first-class dependency DAG plus a linear supersession history. This lets agents create cross-scope blocked work, claim only ready tasks, replace a wrong middle task with a new one without mutating task contents, and inspect the current chain/graph through readable context views or explicit machine-readable JSON.
 
 ### Goals
 
@@ -15,7 +15,7 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 - Allow dependency edges to span scopes freely.
 - Make `pithos task claim` return only queued tasks whose dependencies are all `done`.
 - Preserve history when one task replaces another.
-- Let agents inspect blockers, dependents, and the current connected graph without reconstructing it from prose.
+- Let agents inspect blockers, dependents, artifacts, recent lineage, and the current connected graph without reconstructing relationships from prose.
 - Surface ready versus blocked work in `pithos briefing`.
 - Preserve task-chain lineage automatically for ordinary follow-up enqueues from a run that already holds work.
 - Preserve escalation provenance without making escalation tasks block on the work they are meant to unblock.
@@ -81,6 +81,9 @@ A **dependency** is a blocking edge: downstream work waits for the upstream task
 - **Decision:** Pandora’s Adam-facing “Q” convention defaults to `--chain none`, while escalation-resolution handoffs rely on default `auto` when resolving a held escalation with a source.
   - **Rationale:** Pandora is long-lived and may hold an escalation while Adam asks for unrelated work. Those operator-created tasks must not all inherit the same graph origin. When Pandora is actually resolving the held escalation, `auto` already uses the source link to choose the correct dependency target. `--chain source` remains available when a caller wants a fail-loud assertion that a source exists, but it should not be the default prompt recipe.
 
+- **Decision:** Read-only context commands render agent-readable Markdown/text by default and require `--json` for full structured output.
+  - **Rationale:** `task inspect`, `graph inspect`, and `briefing` are context surfaces agents paste into their reasoning loop. The default should be compact and readable while preserving task IDs for drill-down. Full objects remain available for scripts and tests through a single explicit format flag. Lifecycle/protocol commands such as `claim`, `enqueue`, and `complete` remain JSON-default because agents need stable IDs, tokens, and transition results.
+
 ## 3. Architecture
 
 ### Component structure
@@ -126,7 +129,7 @@ claim
 inspect/briefing
   -> query current tasks + task_dependencies + task_supersessions
   -> compute claimability and unresolved blockers at read time
-  -> print structured JSON or markdown
+  -> print readable Markdown/text by default or structured JSON with --json
 ```
 
 ### Schema deployment
@@ -224,10 +227,10 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 | --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `pithos task enqueue`             | Modify           | Support repeatable manual `--depends-on <task-id>` plus `--chain auto\|none\|held\|source`. All referenced dependency/source tasks must exist. Duplicate dependency IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, and `agent_enqueues` authorization. |
 | `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task.                                                               |
-| `pithos task inspect <id>`        | Expand output    | Return full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                                                                                   |
-| `pithos graph inspect`            | New              | Return graph JSON for one selector: `--task <id>`, `--scope <scope-id>`, or `--all` (deprecated alias: `--current`).                                                                                                                                                                                   |
+| `pithos task inspect <id>`        | Expand output    | Render an agent-readable Markdown handoff by default; `--json` returns full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                   |
+| `pithos graph inspect`            | New              | Render a readable dependency/source/supersession overview by default for one selector: `--task <id>`, `--scope <scope-id>`, or `--all`; `--json` returns the full closed graph object.                                                                                                                 |
 | `pithos task supersede <task-id>` | New              | Create a replacement task with an explicit `--stdin` replacement body, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.                                                                      |
-| `pithos briefing`                 | Modify output    | Split queued work into ready and blocked, and list blocking task IDs/scopes/statuses for blocked items.                                                                                                                                                                                                |
+| `pithos briefing`                 | Modify output    | Render a readable ready/blocked briefing by default; `--json` returns ready and blocked arrays with blocker task IDs/scopes/statuses.                                                                                                                                                                  |
 | `pithos tail`                     | New event types  | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows.                                                                                                                                                                                                                 |
 
 ### `pithos task enqueue`
@@ -443,7 +446,57 @@ The command returns JSON:
 
 ### `pithos task inspect <id>`
 
-Success response shape:
+Default output is an agent-readable Markdown handoff. It expands the current task and at most two upstream dependency-lineage tasks, nesting each task's artifacts under the task that produced them. Older ancestors remain discoverable because every rendered task row includes its task id; agents can inspect any upstream or downstream task id to move the local context window along the chain.
+
+Example default shape:
+
+````markdown
+# task_c [execute] [claimed] Update FE client
+
+## Recent history
+
+### task_a [triage] [done] Approve API direction
+
+Body:
+
+```md
+approved API sketch
+```
+
+Artifact artifact_1 [design-brief] API brief:
+
+```md
+...
+```
+
+### task_d [design] [done] Fix API
+
+Body:
+
+```md
+Fix API
+```
+
+## Current task
+
+### task_c [execute] [claimed] Update FE client
+
+Body:
+
+```md
+update the FE client for task_d
+```
+
+Depends on:
+
+- task_d [design] [done] Fix API
+
+Unlocks:
+
+- task_e [execute] [blocked] Publish follow-up docs
+````
+
+`--json` success response shape:
 
 ```json
 {
@@ -533,28 +586,20 @@ Requirements:
 
 Selectors are mutually exclusive:
 
-| Selector             | Result                                                                                                                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--task <id>`        | Transitive closure around that task following dependency, source, and supersession edges both directions                                                                                   |
-| `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency, source, and supersession edges in both directions recursively until the response is closed                          |
-| `--all`              | All non-cancelled tasks and all current graph edges, plus any referenced dependency or source or supersession neighbors needed to keep the response closed (deprecated alias: `--current`) |
+| Selector             | Result                                                                                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--task <id>`        | Transitive closure around that task following dependency, source, and supersession edges both directions                                                          |
+| `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency, source, and supersession edges in both directions recursively until the response is closed |
+| `--all`              | All non-cancelled tasks and all current graph edges, plus any referenced dependency or source or supersession neighbors needed to keep the response closed        |
 
 Output flags:
 
-| Flag     | Effect                                                                                            |
-| -------- | ------------------------------------------------------------------------------------------------- |
-| `--flat` | Render a plain-text supersession-chain tree (opt-in text mode; hides completed chains by default) |
-| `--dump` | Show all chains including completed ones; only meaningful with `--flat`, no-op in JSON mode       |
+| Flag     | Effect                                                                           |
+| -------- | -------------------------------------------------------------------------------- |
+| `--json` | Return the full closed graph object instead of the readable overview             |
+| `--all`  | Selector: inspect every non-cancelled task and graph neighbor needed for closure |
 
-#### `--flat` filtering behavior
-
-When `--flat` is used without `--dump`, the output is filtered to show only active work:
-
-- **Fully-terminal chains** are hidden: a supersession chain where every node has status `done` or `cancelled` is removed from the flat output entirely.
-- **Standalone terminal nodes** are hidden: nodes with no supersession links and status `done` or `cancelled` are removed.
-- Chains with at least one active node (status other than `done`/`cancelled`) are shown in full — including their cancelled predecessors — so the user can see the full history of an active chain.
-- `--dump` overrides this and shows everything.
-- Filtering does not affect JSON output (only applies to `--flat` text-tree mode).
+Default readable graph output renders dependency edges as an indented tree, includes each task's capability and effective status, and labels queued tasks with unresolved dependencies as `[blocked]`. `--all` is selection, not output format; scripts use `--json`.
 
 Graph closure requirement:
 

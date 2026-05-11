@@ -51,3 +51,7 @@ pandora-spawn preview \
 | `packages/spawner/README.md`         | Spawner library and preview CLI               |
 | `packages/pdx/`                      | Local supervisor package                      |
 | `packages/pithos/`                   | Pithos durable state library and CLI          |
+
+## CLI output convention
+
+Pithos protocol commands return JSON by default for agents and supervisors. Pithos context commands (`task inspect`, `graph inspect`, `briefing`) render readable text/Markdown by default and expose full structured output with `--json`. `pithos --help` and `pdx --help` are human-readable; `pithos --help-json` and `pdx --help-json` expose machine-readable help for prompt generation.

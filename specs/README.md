@@ -4,9 +4,9 @@ Persistent domain specifications. Organized by system area, not feature chronolo
 
 ## Pithos task orchestration
 
-| Spec                             | Purpose                                                                             | Code                                                                         |
-| -------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [task-graph.md](./task-graph.md) | Define dependency DAGs, supersession history, and graph inspection for Pithos tasks | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md` |
+| Spec                             | Purpose                                                                                                       | Code                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [task-graph.md](./task-graph.md) | Define dependency DAGs, supersession history, task inspection handoffs, and graph inspection for Pithos tasks | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md` |
 
 ## Agent control plane
 

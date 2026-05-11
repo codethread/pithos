@@ -419,7 +419,7 @@ pithos task supersede \
 
 pithos task cancel <task-id> --run <run-id> --reason <text>
 
-pithos task inspect <task-id>
+pithos task inspect <task-id> [--json]
 
 pithos task artifact add \
   <task-id> \
@@ -428,11 +428,11 @@ pithos task artifact add \
   --title <text> \
   --stdin
 
-pithos graph inspect (--task <task-id> | --scope <scope-id> | --all) [--flat] [--dump]
+pithos graph inspect (--task <task-id> | --scope <scope-id> | --all) [--json]
 
 pithos events tail [--limit <n>]
 
-pithos briefing [--agent pandora]
+pithos briefing [--agent pandora] [--json]
 ```
 
 Removed/not exposed:
@@ -692,7 +692,7 @@ Spawner/template context contains self-claim context, not task content:
 - generated `claim_command`
 - generated, role-filtered command help JSON
 
-Templates do not receive full `pithos --help` by default. Spawner filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`. `pdx run show` and `pdx task show` remain public operator commands, but are not included in Pandora's default filtered command cards. Missing configured help paths or malformed help JSON fail rendering loudly.
+Templates do not receive full `pithos --help` by default. Spawner calls `pithos --help-json` and filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`. `pdx run show` and `pdx task show` remain public operator commands, but are not included in Pandora's default filtered command cards. Missing configured help paths or malformed help JSON fail rendering loudly.
 
 Spawner renders `claim_command` from manifest claim capability plus launch context, for example:
 

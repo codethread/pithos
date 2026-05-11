@@ -91,14 +91,14 @@ expect_fail_stdin VALIDATION_ERROR 'escalate requires global scope' bad \
 expect_fail_stdin VALIDATION_ERROR 'execute requires repo/worktree scope' bad \
   task enqueue --scope "$global_scope" --capability execute --title bad --stdin --run run_toil
 
-run_json briefing --agent war
+run_json briefing --agent war --json
 jq -e --arg t "$execute_task" '.blocked[] | select(.id == $t)' "$WORKDIR/last.json" >/dev/null
 run_json task claim --scope "$global_scope" --capability design --run run_greed
 claimed_design=$(id '.task.id')
 [[ "$claimed_design" == "$design_task" ]]
 run_json task heartbeat --run run_greed --task "$design_task" --token 1
 run_json task complete "$design_task" --run run_greed --token 1
-run_json briefing --agent war
+run_json briefing --agent war --json
 jq -e --arg t "$execute_task" '.ready[] | select(.id == $t)' "$WORKDIR/last.json" >/dev/null
 run_json task claim --scope "$repo_scope" --capability execute --run run_war
 run_json task heartbeat --run run_war --task "$execute_task" --token 1
@@ -108,7 +108,7 @@ run_stdin_json 'after repair' task enqueue --scope "$repo_scope" --capability ex
 downstream_task=$(id '.task.id')
 run_stdin_json 'fixed execution' task supersede "$execute_task" --run run_toil --reason repair --title 'execute repaired' --stdin
 replacement_task=$(id '.task.id')
-run_json task inspect "$downstream_task"
+run_json task inspect "$downstream_task" --json
 jq -e --arg t "$replacement_task" '.dependencies[] | select(.id == $t)' "$WORKDIR/last.json" >/dev/null
 
 run_stdin_json old task enqueue --scope "$repo_scope" --capability execute --title cross-old --stdin --run run_toil
@@ -129,7 +129,7 @@ run_json task claim --scope "$worktree_scope" --capability execute --run run_cle
 run_json run cleanup --run run_cleanup --reason 'natural death'
 run_json run inspect run_cleanup
 jq -e '.run.status == "failed" and .run.task_id == null' "$WORKDIR/last.json" >/dev/null
-run_json task inspect "$cleanup_task"
+run_json task inspect "$cleanup_task" --json
 jq -e '.task.status == "queued"' "$WORKDIR/last.json" >/dev/null
 
 run_stdin_json interrupt task enqueue --scope "$interrupt_scope" --capability execute --title interrupt --stdin --run run_toil
@@ -140,7 +140,7 @@ run_json task claim --scope "$interrupt_scope" --capability execute --run run_in
 run_json run interrupt --task "$interrupt_task" --reason 'operator stop'
 run_json run inspect run_interrupt
 jq -e '.run.status == "failed" and .run.task_id == null' "$WORKDIR/last.json" >/dev/null
-run_json task inspect "$interrupt_task"
+run_json task inspect "$interrupt_task" --json
 jq -e '.task.status == "failed"' "$WORKDIR/last.json" >/dev/null
 
 run_json run upsert --agent war --mode afk --scope "$worktree_scope" --cwd "$WORKDIR/worktree" --session-id s_timeout --harness-kind pi --session-log-path "$WORKDIR/s_timeout.jsonl" --run run_timeout
@@ -148,16 +148,16 @@ run_json run timeout --run run_timeout --reason 'no claim bootstrap timeout'
 run_json run inspect run_timeout
 jq -e '.run.status == "timed_out" and .run.task_id == null' "$WORKDIR/last.json" >/dev/null
 
-run_json graph inspect --all
+run_json graph inspect --all --json
 jq -e --arg old "$execute_task" --arg new "$replacement_task" \
   '.graph.edges[] | select(.kind == "supersedes" and .from_task_id == $new and .to_task_id == $old)' \
   "$WORKDIR/last.json" >/dev/null
-run_json graph inspect --task "$downstream_task" --flat --dump
-run_json task inspect "$replacement_task"
+"$PITHOS_BIN" graph inspect --task "$downstream_task"
+run_json task inspect "$replacement_task" --json
 jq -e --arg dep "$design_task" '.dependencies[] | select(.id == $dep and .status == "done")' "$WORKDIR/last.json" >/dev/null
 run_json events tail --limit 50
 jq -e '[.events[].type] | contains(["task.reclaimed", "task.interrupted", "run.timed_out", "task.cancelled", "task.superseded"])' "$WORKDIR/last.json" >/dev/null
-run_json briefing
+run_json briefing --json
 jq -e --arg t "$replacement_task" '.ready[] | select(.id == $t)' "$WORKDIR/last.json" >/dev/null
 
 echo "Pithos backbone demo complete. DB: $PITHOS_DB"

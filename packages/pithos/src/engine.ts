@@ -145,9 +145,7 @@ export interface Engine {
 		readonly taskId: string | undefined;
 		readonly scope: string | undefined;
 		readonly all: boolean;
-		readonly flat: boolean;
-		readonly dump: boolean;
-	}) => GraphInspectOutput | string;
+	}) => GraphInspectOutput;
 	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
 	readonly supersede: (input: {
 		readonly taskId: string;
@@ -212,6 +210,95 @@ export interface TaskInspectOutput {
 	readonly superseded_by: string | null;
 	readonly artifacts: readonly ArtifactOutput[];
 }
+
+const effectiveTaskStatus = (task: {
+	readonly status: TaskStatus;
+	readonly unresolved_dependency_ids?: readonly string[];
+}): string =>
+	task.status === "queued" && (task.unresolved_dependency_ids ?? []).length > 0
+		? "blocked"
+		: task.status;
+
+const taskTitleLine = (task: {
+	readonly id: string;
+	readonly capability: Capability;
+	readonly status: TaskStatus;
+	readonly title: string;
+	readonly unresolved_dependency_ids?: readonly string[];
+}): string => `${task.id} [${task.capability}] [${effectiveTaskStatus(task)}] ${task.title}`;
+
+const fencedMarkdown = (body: string): string => {
+	const longestBacktickRun = Math.max(
+		0,
+		...[...body.matchAll(/`+/g)].map((match) => match[0]?.length ?? 0),
+	);
+	const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
+	return `${fence}md\n${body}\n${fence}`;
+};
+
+const renderArtifactMarkdown = (artifact: ArtifactOutput): string =>
+	`Artifact ${artifact.id} [${artifact.kind}] ${artifact.title}:\n\n${fencedMarkdown(artifact.body)}`;
+
+const renderExpandedTaskMarkdown = (
+	task: TaskInspectTaskOutput,
+	artifacts: readonly ArtifactOutput[],
+): string => {
+	const parts = [`### ${taskTitleLine(task)}`, `Body:\n\n${fencedMarkdown(task.body)}`];
+	parts.push(...artifacts.map(renderArtifactMarkdown));
+	return parts.join("\n\n");
+};
+
+const renderTaskBullet = (
+	task: TaskDetailOutput,
+	unresolvedDependencyIds: readonly string[] = [],
+): string => `- ${taskTitleLine({ ...task, unresolved_dependency_ids: unresolvedDependencyIds })}`;
+
+export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string => {
+	const lineageTasks = new Map(inspect.lineage.map((entry) => [entry.task.id, entry.task]));
+	const recentHistory = [...inspect.lineage]
+		.sort(
+			(left, right) =>
+				left.depth - right.depth ||
+				left.task.created_at.localeCompare(right.task.created_at) ||
+				left.task.id.localeCompare(right.task.id),
+		)
+		.slice(0, 2)
+		.sort(
+			(left, right) =>
+				right.depth - left.depth ||
+				left.task.created_at.localeCompare(right.task.created_at) ||
+				left.task.id.localeCompare(right.task.id),
+		)
+		.map((entry) => renderExpandedTaskMarkdown(entry.task, entry.artifacts));
+	const currentParts = [
+		renderExpandedTaskMarkdown(inspect.task, inspect.artifacts),
+		"Depends on:",
+		inspect.dependencies.length === 0
+			? "- none"
+			: inspect.dependencies
+					.map((task) =>
+						renderTaskBullet(task, lineageTasks.get(task.id)?.unresolved_dependency_ids),
+					)
+					.join("\n"),
+		"Unlocks:",
+		inspect.dependents.length === 0
+			? "- none"
+			: inspect.dependents
+					.map((task) =>
+						renderTaskBullet(task, inspect.task.status === "done" ? [] : [inspect.task.id]),
+					)
+					.join("\n"),
+	];
+	return (
+		[
+			`# ${taskTitleLine(inspect.task)}`,
+			"## Recent history",
+			recentHistory.length === 0 ? "No upstream history." : recentHistory.join("\n\n"),
+			"## Current task",
+			currentParts.join("\n\n"),
+		].join("\n\n") + "\n"
+	);
+};
 
 export interface ArtifactOutput {
 	readonly id: string;
@@ -908,51 +995,72 @@ const assertAcyclic = (db: Db): void => {
 	for (const id of outgoing.keys()) visit(id);
 };
 
-const renderFlatGraph = (
-	graph: {
-		readonly nodes: readonly {
-			readonly id: string;
-			readonly title: string;
-			readonly status: string;
-			readonly supersedes_task_id: string | null;
-			readonly superseded_by_task_id: string | null;
-		}[];
-	},
-	dump: boolean,
-): string => {
+export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string => {
 	const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-	const replacementIds = new Set(
-		graph.nodes.map((node) => node.superseded_by_task_id).filter((id): id is string => id !== null),
-	);
-	const roots = graph.nodes.filter(
-		(node) => node.supersedes_task_id === null || !byId.has(node.supersedes_task_id),
-	);
-	const lines: string[] = [];
-	const writeChain = (node: (typeof graph.nodes)[number], depth: number): void => {
-		lines.push(`${"  ".repeat(depth)}- ${node.id} [${node.status}] ${node.title}`);
-		const replacement =
-			node.superseded_by_task_id === null ? undefined : byId.get(node.superseded_by_task_id);
-		if (replacement !== undefined) writeChain(replacement, depth + 1);
+	const childrenByParent = new Map<string, string[]>();
+	const childIds = new Set<string>();
+	for (const edge of graph.edges) {
+		if (edge.kind !== "depends_on") continue;
+		if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
+		childrenByParent.set(edge.to_task_id, [
+			...(childrenByParent.get(edge.to_task_id) ?? []),
+			edge.from_task_id,
+		]);
+		childIds.add(edge.from_task_id);
+	}
+	const isTerminal = (status: string): boolean => status === "done" || status === "cancelled";
+	const visible = (id: string): boolean => {
+		const node = byId.get(id);
+		if (node === undefined) return false;
+		if (!isTerminal(node.status)) return true;
+		return (childrenByParent.get(id) ?? []).some(visible);
 	};
-	for (const root of roots) {
-		const chain = graph.nodes.filter((node) => {
-			let current: typeof node | undefined = node;
-			while (current !== undefined) {
-				if (current.id === root.id) return true;
-				current =
-					current.supersedes_task_id === null ? undefined : byId.get(current.supersedes_task_id);
-			}
-			return false;
-		});
-		if (!dump && chain.every((node) => node.status === "done" || node.status === "cancelled"))
-			continue;
-		writeChain(root, 0);
+	for (const [parentId, childIds] of childrenByParent.entries()) {
+		childrenByParent.set(
+			parentId,
+			[...childIds].sort((left, right) => {
+				const leftNode = byId.get(left);
+				const rightNode = byId.get(right);
+				if (leftNode === undefined || rightNode === undefined) return left.localeCompare(right);
+				return leftNode.title.localeCompare(rightNode.title) || left.localeCompare(right);
+			}),
+		);
+	}
+	const lines: string[] = [];
+	const written = new Set<string>();
+	const writeNode = (id: string, depth: number): void => {
+		const node = byId.get(id);
+		if (node === undefined || !visible(id)) return;
+		lines.push(`${"  ".repeat(depth)}- ${taskTitleLine(node)}`);
+		written.add(id);
+		for (const childId of childrenByParent.get(id) ?? []) writeNode(childId, depth + 1);
+	};
+	for (const node of graph.nodes) {
+		if (!childIds.has(node.id)) writeNode(node.id, 0);
 	}
 	for (const node of graph.nodes) {
-		if (node.supersedes_task_id !== null || replacementIds.has(node.id) || roots.includes(node))
-			continue;
-		if (!dump && (node.status === "done" || node.status === "cancelled")) continue;
-		lines.push(`- ${node.id} [${node.status}] ${node.title}`);
+		if (!written.has(node.id)) writeNode(node.id, 0);
+	}
+	return `${lines.join("\n")}\n`;
+};
+
+const renderBriefingTaskBullet = (task: TaskSummaryOutput): string => `- ${taskTitleLine(task)}`;
+
+export const renderBriefingText = (briefing: BriefingOutput): string => {
+	const lines = ["# Briefing", "", "## Ready"];
+	lines.push(
+		...(briefing.ready.length === 0 ? ["- none"] : briefing.ready.map(renderBriefingTaskBullet)),
+	);
+	lines.push("", "## Blocked");
+	if (briefing.blocked.length === 0) {
+		lines.push("- none");
+	} else {
+		for (const task of briefing.blocked) {
+			lines.push(`- ${taskTitleLine(task)}`);
+			for (const blocker of task.blockers) {
+				lines.push(`  - blocked by ${blocker.id} [${blocker.status}] scope=${blocker.scope_id}`);
+			}
+		}
 	}
 	return `${lines.join("\n")}\n`;
 };
@@ -1821,22 +1929,19 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				artifacts: taskArtifacts(db, taskId),
 			};
 		}),
-	graphInspect: ({ taskId, scope, all, flat, dump }) =>
+	graphInspect: ({ taskId, scope, all }) =>
 		withDb(ctx, (db) => {
 			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
 				(v) => v !== undefined,
 			).length;
 			if (selectorCount !== 1) fail("VALIDATION_ERROR", "provide exactly one graph selector");
 			if (taskId !== undefined) {
-				const result = graphForIds(db, { kind: "task", value: taskId }, [
-					taskSummary(db, taskId).id,
-				]);
-				return flat ? renderFlatGraph(result.graph, dump) : result;
+				return graphForIds(db, { kind: "task", value: taskId }, [taskSummary(db, taskId).id]);
 			}
 			if (scope !== undefined) {
 				const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id=?`).get(scope);
 				if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
-				const result = graphForIds(
+				return graphForIds(
 					db,
 					{ kind: "scope", value: scope },
 					(
@@ -1845,9 +1950,8 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							.all(scope) as { id: string }[]
 					).map((r) => r.id),
 				);
-				return flat ? renderFlatGraph(result.graph, dump) : result;
 			}
-			const result = graphForIds(
+			return graphForIds(
 				db,
 				{ kind: "all" },
 				(
@@ -1856,7 +1960,6 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					}[]
 				).map((r) => r.id),
 			);
-			return flat ? renderFlatGraph(result.graph, dump) : result;
 		}),
 	briefing: ({ agent }) =>
 		withDb(ctx, (db) => {

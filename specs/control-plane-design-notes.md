@@ -192,12 +192,11 @@ pithos task artifact add \
 
 pithos graph inspect \
   (--task <task-id> | --scope <scope-id> | --all) \
-  [--flat] \
-  [--dump]
+  [--json]
 
 pithos events tail [--limit <n>]
 
-pithos briefing [--agent pandora]
+pithos briefing [--agent pandora] [--json]
 ```
 
 Payload-bearing task mutations use exactly one stdin document when `--stdin` is present. Enqueue, supersede, and artifact add require `--stdin` with a non-empty text payload. `task complete` uses no stdin for default `{}` metadata; `task complete --stdin` is only for JSON object metadata, and long-form work products belong in Artifacts.

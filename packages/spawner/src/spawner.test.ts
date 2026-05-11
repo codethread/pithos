@@ -103,14 +103,15 @@ const pithosHelpTree = {
 			name: "graph",
 			path: "pithos graph",
 			usage: "graph <command>",
-			description: "Inspect Pithos task dependency and supersession graphs.",
+			description: "Inspect Pithos task dependency, source-link, and supersession graphs.",
 			subcommands: [
 				{
 					tool: "pithos",
 					name: "inspect",
 					path: "pithos graph inspect",
-					usage: "inspect [--task text]",
-					description: "Render dependency DAGs and supersession history for tasks.",
+					usage: "inspect [--task text] [--scope text] [--all] [--json]",
+					description:
+						"Render a readable dependency graph; pass --json for structured graph metadata.",
 					subcommands: [],
 				},
 			],
@@ -136,8 +137,9 @@ const pithosHelpTree = {
 			tool: "pithos",
 			name: "briefing",
 			path: "pithos briefing",
-			usage: "briefing [--agent text]",
-			description: "Print an agent-facing briefing of current claimable work and state.",
+			usage: "briefing [--agent text] [--json]",
+			description:
+				"Print a readable ready/blocked briefing; pass --json for structured task arrays.",
 			subcommands: [],
 		},
 	],
@@ -258,7 +260,7 @@ const fakeRenderServices = (
 		},
 		env: (key: string) => (key === "PDX_DATA_DIR" ? "/tmp/pdx-data" : undefined),
 		execFile: (file: string, args: readonly string[]) => {
-			if (file === "pithos" && args.length === 1 && args[0] === "--help") {
+			if (file === "pithos" && args.length === 1 && args[0] === "--help-json") {
 				return {
 					status: options.pithosStatus ?? 0,
 					stdout: options.pithosStdout ?? pithosHelpJson,
@@ -470,7 +472,7 @@ describe("renderAgent", () => {
 					{ pithosStatus: 127, pithosStderr: "missing pithos" },
 				),
 			),
-		).toThrow("pithos --help failed: missing pithos");
+		).toThrow("pithos --help-json failed: missing pithos");
 	});
 
 	it("validates mode mismatch", () => {

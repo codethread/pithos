@@ -155,7 +155,7 @@ Preview requires DB context:
 
 `PITHOS_BIN` is optional and defaults to `pithos`.
 
-`PDX_BIN` is optional and defaults to `pdx`; Pandora prompt rendering uses `PDX_BIN --help-json` for generated pdx inspection command cards.
+`PDX_BIN` is optional and defaults to `pdx`; prompt rendering uses `PITHOS_BIN --help-json` and `PDX_BIN --help-json` for generated command cards.
 
 ## Notes
 

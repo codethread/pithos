@@ -34,7 +34,15 @@ export {
 	type SourceEdge,
 	type SupersessionEdge,
 } from "./chain-policy.js";
-export { makeEngine, type Engine, type EngineContext, type RunOutput } from "./engine.js";
+export {
+	makeEngine,
+	renderBriefingText,
+	renderGraphInspectText,
+	renderTaskInspectMarkdown,
+	type Engine,
+	type EngineContext,
+	type RunOutput,
+} from "./engine.js";
 export { loadConfig, ConfigSchema, type Config, type EnvReader } from "./config.js";
 export { migrate, openDb, type Db, type Mode, type ScopeKind, type TaskStatus } from "./db.js";
 export {

@@ -216,6 +216,9 @@ const completeArgs = (taskId: string, extra: readonly string[] = []) => [
 	...extra,
 ];
 
+const normalizeGeneratedIds = (text: string): string =>
+	text.replaceAll(/task_cli_\d+/g, "task_cli_N").replaceAll(/artifact_cli_\d+/g, "artifact_cli_N");
+
 afterEach(() => {
 	process.exitCode = undefined;
 });
@@ -467,7 +470,7 @@ describe("pithos cli", () => {
 			"line 1\nline 2\n",
 		);
 
-		const inspect = await runCli(["task", "inspect", taskId], dbPath);
+		const inspect = await runCli(["task", "inspect", taskId, "--json"], dbPath);
 		const inspected = JSON.parse(inspect.stdout[0] ?? "") as {
 			readonly ok: true;
 			readonly dependencies: readonly unknown[];
@@ -478,6 +481,472 @@ describe("pithos cli", () => {
 		expect(inspected.task.title).toBe("stdin task");
 		expect(inspected.task.body).toBe("line 1\nline 2\n");
 		expect(taskBody(dbPath, taskId)).toBe("line 1\nline 2\n");
+	});
+
+	it("renders task inspect as a markdown handoff with nested history and artifacts by default", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		const origin = await enqueueGlobalTriage(dbPath, "run_toil", "Original request", "origin body");
+		const ancestor = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Ancestor decision",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				origin,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "ancestor body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(artifactAddArgs(ancestor, ["--stdin", "--run", "run_toil"]), dbPath, {
+			_tag: "RedirectedText",
+			text: "ancestor artifact",
+		});
+		const parent = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Parent plan",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				ancestor,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "parent body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(artifactAddArgs(parent, ["--stdin", "--run", "run_toil"]), dbPath, {
+			_tag: "RedirectedText",
+			text: "parent artifact",
+		});
+		const current = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Current handoff",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				parent,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "current body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(artifactAddArgs(current, ["--stdin", "--run", "run_toil"]), dbPath, {
+			_tag: "RedirectedText",
+			text: "current artifact",
+		});
+		await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Dependent follow-up",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				current,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "dependent body" },
+		);
+
+		const inspect = await runCli(["task", "inspect", current], dbPath);
+		const output = inspect.stdout[0] ?? "";
+
+		expect(output.startsWith(`# ${current} [triage] [blocked] Current handoff\n`)).toBe(true);
+		expect(() => {
+			JSON.parse(output) as unknown;
+		}).toThrow();
+		expect(output).not.toContain(`### ${origin} [triage] [queued] Original request`);
+		expect(normalizeGeneratedIds(output)).toMatchInlineSnapshot(`
+			"# task_cli_N [triage] [blocked] Current handoff
+
+			## Recent history
+
+			### task_cli_N [triage] [blocked] Ancestor decision
+
+			Body:
+
+			\`\`\`md
+			ancestor body
+			\`\`\`
+
+			Artifact artifact_cli_N [note] evidence:
+
+			\`\`\`md
+			ancestor artifact
+			\`\`\`
+
+			### task_cli_N [triage] [blocked] Parent plan
+
+			Body:
+
+			\`\`\`md
+			parent body
+			\`\`\`
+
+			Artifact artifact_cli_N [note] evidence:
+
+			\`\`\`md
+			parent artifact
+			\`\`\`
+
+			## Current task
+
+			### task_cli_N [triage] [blocked] Current handoff
+
+			Body:
+
+			\`\`\`md
+			current body
+			\`\`\`
+
+			Artifact artifact_cli_N [note] evidence:
+
+			\`\`\`md
+			current artifact
+			\`\`\`
+
+			Depends on:
+
+			- task_cli_N [triage] [blocked] Parent plan
+
+			Unlocks:
+
+			- task_cli_N [triage] [blocked] Dependent follow-up
+			"
+		`);
+	});
+
+	it("snapshots task inspect markdown for a deep chain window", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		const origin = await enqueueGlobalTriage(dbPath, "run_toil", "Original request", "origin body");
+		const triage = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Triage plan",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				origin,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "triage body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		const design = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Design output mode",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				triage,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "design body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(artifactAddArgs(design, ["--stdin", "--run", "run_toil"]), dbPath, {
+			_tag: "RedirectedText",
+			text: "## Design artifact\n\nUse Markdown defaults and --json for machines.",
+		});
+		const execute = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Execute renderer",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				design,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "execute body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+		await runCli(artifactAddArgs(execute, ["--stdin", "--run", "run_toil"]), dbPath, {
+			_tag: "RedirectedText",
+			text: "execution evidence",
+		});
+		const followUp = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Follow-up verification",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				execute,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "follow-up body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+
+		const inspect = await runCli(["task", "inspect", followUp], dbPath);
+		expect(inspect.stdout[0]).not.toContain("Original request");
+		expect(inspect.stdout[0]).not.toContain("Triage plan");
+		expect(normalizeGeneratedIds(inspect.stdout[0] ?? "")).toMatchInlineSnapshot(`
+			"# task_cli_N [triage] [blocked] Follow-up verification
+
+			## Recent history
+
+			### task_cli_N [triage] [blocked] Design output mode
+
+			Body:
+
+			\`\`\`md
+			design body
+			\`\`\`
+
+			Artifact artifact_cli_N [note] evidence:
+
+			\`\`\`md
+			## Design artifact
+
+			Use Markdown defaults and --json for machines.
+			\`\`\`
+
+			### task_cli_N [triage] [blocked] Execute renderer
+
+			Body:
+
+			\`\`\`md
+			execute body
+			\`\`\`
+
+			Artifact artifact_cli_N [note] evidence:
+
+			\`\`\`md
+			execution evidence
+			\`\`\`
+
+			## Current task
+
+			### task_cli_N [triage] [blocked] Follow-up verification
+
+			Body:
+
+			\`\`\`md
+			follow-up body
+			\`\`\`
+
+			Depends on:
+
+			- task_cli_N [triage] [blocked] Execute renderer
+
+			Unlocks:
+
+			- none
+			"
+		`);
+	});
+
+	it("snapshots readable graph inspect for a nested forked chain", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await runCli(["scope", "upsert", "--kind", "repo", "--path", "/tmp/pithos-cli"], dbPath);
+		await runCli(
+			[
+				"run",
+				"upsert",
+				"--agent",
+				"toil",
+				"--mode",
+				"afk",
+				"--scope",
+				"repo:/tmp/pithos-cli",
+				"--cwd",
+				"/tmp/pithos-cli",
+				"--session-id",
+				"session_run_toil_repo",
+				"--harness-kind",
+				"pi",
+				"--session-log-path",
+				"/tmp/session_run_toil_repo.jsonl",
+				"--run",
+				"run_toil_repo",
+			],
+			dbPath,
+		);
+		const enqueue = async (
+			title: string,
+			capability: "triage" | "design" | "execute",
+			dependsOn: readonly string[] = [],
+		): Promise<string> =>
+			runCli(
+				[
+					"task",
+					"enqueue",
+					"--scope",
+					"repo:/tmp/pithos-cli",
+					"--capability",
+					capability,
+					"--title",
+					title,
+					"--stdin",
+					"--run",
+					"run_toil_repo",
+					"--chain",
+					"none",
+					...dependsOn.flatMap((id) => ["--depends-on", id]),
+				],
+				dbPath,
+				{ _tag: "RedirectedText", text: `${title} body` },
+			).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+
+		const triage = await enqueue("Triage readable inspect API", "triage");
+		const design = await enqueue("Design output mode contract", "design", [triage]);
+		const executeA = await enqueue("Execute A task inspect renderer", "execute", [design]);
+		const executeB = await enqueue("Execute B graph briefing help", "execute", [design]);
+		await enqueue("Follow-up A docs for inspect", "execute", [executeA]);
+		await enqueue("Follow-up B prompt verification", "execute", [executeB]);
+
+		const graphText = await runCli(["graph", "inspect", "--scope", "repo:/tmp/pithos-cli"], dbPath);
+		expect(normalizeGeneratedIds(graphText.stdout[0] ?? "")).toMatchInlineSnapshot(`
+			"- task_cli_N [triage] [queued] Triage readable inspect API
+			  - task_cli_N [design] [blocked] Design output mode contract
+			    - task_cli_N [execute] [blocked] Execute A task inspect renderer
+			      - task_cli_N [execute] [blocked] Follow-up A docs for inspect
+			    - task_cli_N [execute] [blocked] Execute B graph briefing help
+			      - task_cli_N [execute] [blocked] Follow-up B prompt verification
+			"
+		`);
+	});
+
+	it("renders graph inspect and briefing as readable text by default with --json escape hatch", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		await upsertRun(dbPath, "run_toil");
+		const ready = await enqueueGlobalTriage(dbPath, "run_toil", "Ready triage", "ready body");
+		const blocked = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"Blocked triage",
+				"--stdin",
+				"--run",
+				"run_toil",
+				"--chain",
+				"none",
+				"--depends-on",
+				ready,
+			],
+			dbPath,
+			{ _tag: "RedirectedText", text: "blocked body" },
+		).then((result) => (JSON.parse(result.stdout[0] ?? "") as { task: { id: string } }).task.id);
+
+		const graphText = await runCli(["graph", "inspect", "--all"], dbPath);
+		expect(() => {
+			JSON.parse(graphText.stdout[0] ?? "") as unknown;
+		}).toThrow();
+		expect(normalizeGeneratedIds(graphText.stdout[0] ?? "")).toMatchInlineSnapshot(`
+			"- task_cli_N [triage] [queued] Ready triage
+			  - task_cli_N [triage] [blocked] Blocked triage
+			"
+		`);
+
+		const graphJson = await runCli(["graph", "inspect", "--all", "--json"], dbPath);
+		expect(JSON.parse(graphJson.stdout[0] ?? "")).toMatchObject({
+			ok: true,
+			graph: {
+				selector: { kind: "all" },
+				nodes: [expect.objectContaining({ id: ready }), expect.objectContaining({ id: blocked })],
+			},
+		});
+
+		const briefingText = await runCli(["briefing", "--agent", "toil"], dbPath);
+		expect(normalizeGeneratedIds(briefingText.stdout[0] ?? "")).toMatchInlineSnapshot(`
+			"# Briefing
+
+			## Ready
+			- task_cli_N [triage] [queued] Ready triage
+
+			## Blocked
+			- task_cli_N [triage] [blocked] Blocked triage
+			  - blocked by task_cli_N [queued] scope=global
+			"
+		`);
+
+		const briefingJson = await runCli(["briefing", "--agent", "toil", "--json"], dbPath);
+		expect(JSON.parse(briefingJson.stdout[0] ?? "")).toMatchObject({
+			ok: true,
+			ready: [expect.objectContaining({ id: ready })],
+			blocked: [expect.objectContaining({ id: blocked, unresolved_dependency_ids: [ready] })],
+		});
 	});
 
 	it("supersedes with explicit stdin replacement body", async () => {
@@ -965,44 +1434,65 @@ describe("pithos cli", () => {
 		});
 	});
 
-	it("renders top-level help as stable JSON without loading config", async () => {
+	it("renders top-level --help as human help without loading config", async () => {
 		for (const flag of ["--help", "-h"] as const) {
 			const result = await runCli([flag], tempDb());
 			expect(result.configRead).toBe(false);
 			expect(result.stderr).toEqual([]);
-			const help = JSON.parse(result.stdout[0] ?? "") as PithosHelpCommand;
-			expect(help).toMatchObject({
-				tool: "pithos",
-				name: "pithos",
-				path: "pithos",
-				usage: "pithos <command>",
-				description:
-					"Durable state CLI for tasks, runs, claims, artifacts, events, and graph invariants.",
-			});
-			expect(help.subcommands.map((command) => command.path)).toEqual([
-				"pithos init",
-				"pithos scope",
-				"pithos run",
-				"pithos task",
-				"pithos graph",
-				"pithos events",
-				"pithos briefing",
-			]);
-			expect(
-				help.subcommands.find((command) => command.path === "pithos scope")?.subcommands,
-			).toMatchObject([
-				{ path: "pithos scope upsert" },
-				{ path: "pithos scope list" },
-				{ path: "pithos scope archive" },
-			]);
-			expect(
-				help.subcommands.find((command) => command.path === "pithos run")?.subcommands?.length,
-			).toBeGreaterThan(0);
+			expect(result.stdout).toEqual([]);
 		}
 	});
 
-	it("renders artifact add as a real nested command path", async () => {
-		const result = await runCli(["--help"], tempDb());
+	it("renders top-level --help-json as stable JSON without loading config", async () => {
+		const result = await runCli(["--help-json"], tempDb());
+		expect(result.configRead).toBe(false);
+		expect(result.stderr).toEqual([]);
+		const help = JSON.parse(result.stdout[0] ?? "") as PithosHelpCommand;
+		expect(help).toMatchObject({
+			tool: "pithos",
+			name: "pithos",
+			path: "pithos",
+			usage: "pithos <command>",
+			description:
+				"Durable state CLI for tasks, runs, claims, artifacts, events, and graph invariants.",
+		});
+		expect(help.subcommands.map((command) => command.path)).toEqual([
+			"pithos init",
+			"pithos scope",
+			"pithos run",
+			"pithos task",
+			"pithos graph",
+			"pithos events",
+			"pithos briefing",
+		]);
+		expect(
+			help.subcommands.find((command) => command.path === "pithos scope")?.subcommands,
+		).toMatchObject([
+			{ path: "pithos scope upsert" },
+			{ path: "pithos scope list" },
+			{ path: "pithos scope archive" },
+		]);
+		expect(
+			help.subcommands.find((command) => command.path === "pithos run")?.subcommands?.length,
+		).toBeGreaterThan(0);
+	});
+
+	it("rejects --help-json when combined with other arguments", async () => {
+		const result = await runCli(["--help-json", "task"], tempDb());
+		expect(result.configRead).toBe(false);
+		expect(result.stdout).toEqual([]);
+		expect(JSON.parse(result.stderr[0] ?? "")).toEqual({
+			ok: false,
+			error: {
+				code: "VALIDATION_ERROR",
+				message: "--help-json must be the only pithos argument",
+			},
+		});
+		expect(result.exitCode).toBe(2);
+	});
+
+	it("renders artifact add and context format flags in help JSON", async () => {
+		const result = await runCli(["--help-json"], tempDb());
 		const help = JSON.parse(result.stdout[0] ?? "") as PithosHelpCommand;
 		const flatten = (command: PithosHelpCommand): readonly PithosHelpCommand[] => [
 			command,
@@ -1016,5 +1506,14 @@ describe("pithos cli", () => {
 			false,
 		);
 		expect(result.stdout.join("").match(/pithos task artifact add/g)).toHaveLength(1);
+		expect(commands.find((command) => command.path === "pithos task inspect")?.usage).toContain(
+			"--json",
+		);
+		expect(commands.find((command) => command.path === "pithos graph inspect")?.usage).toContain(
+			"--json",
+		);
+		expect(commands.find((command) => command.path === "pithos briefing")?.usage).toContain(
+			"--json",
+		);
 	});
 });

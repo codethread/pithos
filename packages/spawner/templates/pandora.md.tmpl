@@ -68,7 +68,7 @@ Claim command:
 When Adam asks for “sitrep”, “where are we”, or similar, inspect Pithos graph/state first. Default command order:
 
 1. `$PITHOS_BIN briefing --agent pandora` for claimable/blocked work and Adam-facing next actions.
-2. `$PITHOS_BIN graph inspect --all --flat` for task/run inventory, dependency shape, ownership, and the task/run ids you need for deeper inspection.
+2. `$PITHOS_BIN graph inspect --all` for task inventory, dependency shape, and the task ids you need for deeper inspection.
 3. `$PDX_BIN run transcript <run-id>${PDX_DATA_DIR:+ --data-dir "$PDX_DATA_DIR"}` when graph/briefing show a specific run whose agent conversation explains current state.
 4. `$PITHOS_BIN events tail --limit 20` only as an emergency/debugging move when graph, briefing, and transcripts contradict each other or cannot explain corruption, stale tokens, missing artifacts, or lifecycle anomalies.
 

@@ -5,7 +5,12 @@ import type { HelpDoc, Span } from "@effect/cli";
 import { Effect, Layer, Option } from "effect";
 import { NodeContext } from "@effect/platform-node";
 import type { Config } from "./config.js";
-import { makeEngine } from "./engine.js";
+import {
+	makeEngine,
+	renderBriefingText,
+	renderGraphInspectText,
+	renderTaskInspectMarkdown,
+} from "./engine.js";
 import { exitCodeFor, PithosError } from "./errors.js";
 import type { ChainPolicy } from "./chain-policy.js";
 import type { Capability, HarnessKind, Mode, ScopeKind } from "./db.js";
@@ -90,7 +95,7 @@ type CommandInput =
 			readonly title: string;
 			readonly stdin: boolean;
 	  }
-	| { readonly command: "task.inspect"; readonly taskId: string }
+	| { readonly command: "task.inspect"; readonly taskId: string; readonly json: boolean }
 	| {
 			readonly command: "task.cancel";
 			readonly taskId: string;
@@ -112,10 +117,9 @@ type CommandInput =
 			readonly taskId: string | undefined;
 			readonly scope: string | undefined;
 			readonly all: boolean;
-			readonly flat: boolean;
-			readonly dump: boolean;
+			readonly json: boolean;
 	  }
-	| { readonly command: "briefing"; readonly agent: string | undefined };
+	| { readonly command: "briefing"; readonly agent: string | undefined; readonly json: boolean };
 
 const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
 const json = (value: unknown): string => `${JSON.stringify(value)}\n`;
@@ -246,9 +250,32 @@ export const renderPithosHelpJson = <Name extends string, R, E, A>(
 	command: Command.Command<Name, R, E, A>,
 ): string => json(renderHelpCommand(command.descriptor as unknown as CommandDescriptorNode, []));
 
-const isTopLevelHelpInvocation = (args: readonly string[]): boolean => {
+const handleHelpJson = <Name extends string, R, E, A>(
+	ctx: CliContext,
+	args: readonly string[],
+	command: Command.Command<Name, R, E, A>,
+): Effect.Effect<boolean> => {
 	const cliArgs = args.slice(2);
-	return cliArgs.length === 1 && (cliArgs[0] === "--help" || cliArgs[0] === "-h");
+	if (!cliArgs.includes("--help-json")) return Effect.succeed(false);
+	if (cliArgs.length !== 1) {
+		return ctx.services.output
+			.writeError(
+				json({
+					ok: false,
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "--help-json must be the only pithos argument",
+					},
+				}),
+			)
+			.pipe(
+				Effect.zipRight(
+					Effect.sync(() => void (process.exitCode = exitCodeFor("VALIDATION_ERROR"))),
+				),
+				Effect.as(true),
+			);
+	}
+	return ctx.services.output.write(renderPithosHelpJson(command)).pipe(Effect.as(true));
 };
 
 const resolveConfig = (config: Config | (() => Config)): Config =>
@@ -388,16 +415,22 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 					return engine.failTask(input);
 				case "task.artifact.add":
 					return engine.artifactAdd({ ...input, body: artifactBody! });
-				case "task.inspect":
-					return engine.taskInspect({ taskId: input.taskId });
+				case "task.inspect": {
+					const inspectOutput = engine.taskInspect({ taskId: input.taskId });
+					return input.json ? inspectOutput : renderTaskInspectMarkdown(inspectOutput);
+				}
 				case "task.cancel":
 					return engine.cancel(input);
 				case "task.supersede":
 					return engine.supersede({ ...input, body: supersedeBody, bodyFile: undefined });
-				case "graph.inspect":
-					return engine.graphInspect(input);
-				case "briefing":
-					return engine.briefing({ agent: input.agent });
+				case "graph.inspect": {
+					const graphOutput = engine.graphInspect(input);
+					return input.json ? graphOutput : renderGraphInspectText(graphOutput);
+				}
+				case "briefing": {
+					const briefingOutput = engine.briefing({ agent: input.agent });
+					return input.json ? briefingOutput : renderBriefingText(briefingOutput);
+				}
 			}
 		});
 		yield* typeof result === "string" ? ctx.services.output.write(result) : writeJson(result);
@@ -733,10 +766,19 @@ export const makePithosCommand = (ctx: CliContext) => {
 		Command.withDescription("Attach evidence or output to a Pithos task."),
 		Command.withSubcommands([artifactAdd]),
 	);
-	const taskInspect = Command.make("inspect", { taskId: Args.text({ name: "task-id" }) }, (o) =>
-		runCommand(ctx, { command: "task.inspect", taskId: o.taskId }),
+	const taskInspect = Command.make(
+		"inspect",
+		{
+			taskId: Args.text({ name: "task-id" }),
+			json: Options.boolean("json").pipe(
+				Options.withDescription("Return the full structured inspect object as JSON."),
+			),
+		},
+		(o) => runCommand(ctx, { command: "task.inspect", taskId: o.taskId, json: o.json }),
 	).pipe(
-		Command.withDescription("Show one durable Pithos task record and related graph metadata."),
+		Command.withDescription(
+			"Show an agent-readable task handoff; pass --json for structured metadata.",
+		),
 	);
 	const taskCancel = Command.make(
 		"cancel",
@@ -811,11 +853,8 @@ export const makePithosCommand = (ctx: CliContext) => {
 			all: Options.boolean("all").pipe(
 				Options.withDescription("Include all tasks instead of only active graph roots."),
 			),
-			flat: Options.boolean("flat").pipe(
-				Options.withDescription("Print a flat task list instead of a dependency tree."),
-			),
-			dump: Options.boolean("dump").pipe(
-				Options.withDescription("Print raw graph data for agents instead of the human tree."),
+			json: Options.boolean("json").pipe(
+				Options.withDescription("Return the full structured graph object as JSON."),
 			),
 		},
 		(o) =>
@@ -824,12 +863,11 @@ export const makePithosCommand = (ctx: CliContext) => {
 				taskId: opt(o.taskId),
 				scope: opt(o.scope),
 				all: o.all,
-				flat: o.flat,
-				dump: o.dump,
+				json: o.json,
 			}),
 	).pipe(
 		Command.withDescription(
-			"Render dependency, source-link, and supersession relationships for tasks.",
+			"Render a readable dependency graph; pass --json for structured graph metadata.",
 		),
 	);
 	const graph = Command.make("graph").pipe(
@@ -845,10 +883,15 @@ export const makePithosCommand = (ctx: CliContext) => {
 				Options.withDescription("Agent kind to tailor the briefing for."),
 				Options.optional,
 			),
+			json: Options.boolean("json").pipe(
+				Options.withDescription("Return ready and blocked task arrays as JSON."),
+			),
 		},
-		(o) => runCommand(ctx, { command: "briefing", agent: opt(o.agent) }),
+		(o) => runCommand(ctx, { command: "briefing", agent: opt(o.agent), json: o.json }),
 	).pipe(
-		Command.withDescription("Print an agent-facing briefing of current claimable work and state."),
+		Command.withDescription(
+			"Print a readable ready/blocked briefing; pass --json for structured task arrays.",
+		),
 	);
 	return Command.make("pithos").pipe(
 		Command.withDescription(
@@ -860,11 +903,12 @@ export const makePithosCommand = (ctx: CliContext) => {
 
 export const runPithosCli = (ctx: CliContext, args: readonly string[]) => {
 	const command = makePithosCommand(ctx);
-	if (isTopLevelHelpInvocation(args)) {
-		return ctx.services.output.write(renderPithosHelpJson(command));
-	}
-	const cli = Command.run(command, { name: "Pithos", version: "0.1.0", executable: "pithos" });
-	return cli(args).pipe(
+	return Effect.gen(function* () {
+		const handledHelpJson = yield* handleHelpJson(ctx, args, command);
+		if (handledHelpJson) return;
+		const cli = Command.run(command, { name: "Pithos", version: "0.1.0", executable: "pithos" });
+		yield* cli(args);
+	}).pipe(
 		Effect.provide(Layer.mergeAll(NodeContext.layer, CliConfig.layer({ showBuiltIns: false }))),
 	);
 };

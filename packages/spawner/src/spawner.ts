@@ -290,11 +290,11 @@ const parseCommandHelpTree = (raw: string, source: string): CommandHelpCard => {
 };
 
 const pithosHelpTree = (config: SpawnerConfig, services: RenderServices): CommandHelpCard => {
-	const result = services.execFile(config.pithosBin, ["--help"]);
+	const result = services.execFile(config.pithosBin, ["--help-json"]);
 	if (result.status !== 0) {
 		throw new SpawnerError({
 			code: "TEMPLATE_ERROR",
-			message: `${config.pithosBin} --help failed: ${result.stderr}`,
+			message: `${config.pithosBin} --help-json failed: ${result.stderr}`,
 		});
 	}
 	return parseCommandHelpTree(result.stdout, "pithos help");
@@ -440,7 +440,7 @@ const piHitlShellCommand = (
 	const script = [
 		`prompt=$(cat ${shellQuote(promptPath)}) || exit $?`,
 		`rm -f ${shellQuote(promptPath)}`,
-		`exec ${beforePrompt} \"$prompt\"${afterPrompt === "" ? "" : ` ${afterPrompt}`}`,
+		`exec ${beforePrompt} "$prompt"${afterPrompt === "" ? "" : ` ${afterPrompt}`}`,
 	].join("; ");
 	return ["sh", "-c", script];
 };

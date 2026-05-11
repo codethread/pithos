@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
 	PithosError,
 	makeEngine,
+	renderGraphInspectText,
 	type Capability,
 	type ChainPolicy,
 	type Engine,
@@ -335,6 +336,58 @@ describe("task lifecycle", () => {
 		);
 	});
 
+	it("renders dependency forks in readable graph view", () => {
+		const { engine, repo } = setup();
+		const triage = enqueueTask(engine, {
+			title: "triage root",
+			capability: "triage",
+			scope: repo,
+		}).task.id;
+		const design = enqueueTask(engine, {
+			title: "design middle",
+			capability: "design",
+			scope: repo,
+			dependsOn: [triage],
+		}).task.id;
+		const executeA = enqueueTask(engine, {
+			title: "execute fork A",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [design],
+		}).task.id;
+		const executeB = enqueueTask(engine, {
+			title: "execute fork B",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [design],
+		}).task.id;
+		const followUp = enqueueTask(engine, {
+			title: "execute follow-up",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [executeA],
+		}).task.id;
+
+		const graphText = renderGraphInspectText(
+			engine.graphInspect({
+				taskId: undefined,
+				scope: repo,
+				all: false,
+			}),
+		);
+
+		expect(graphText).toBe(
+			[
+				`- ${triage} [triage] [queued] triage root`,
+				`  - ${design} [design] [blocked] design middle`,
+				`    - ${executeA} [execute] [blocked] execute fork A`,
+				`      - ${followUp} [execute] [blocked] execute follow-up`,
+				`    - ${executeB} [execute] [blocked] execute fork B`,
+				"",
+			].join("\n"),
+		);
+	});
+
 	it("auto-chains ordinary follow-up to the actor run's held task", () => {
 		const { dbPath, engine } = setup();
 		const upstream = enqueueTask(engine, { title: "triage upstream" }).task.id;
@@ -450,8 +503,6 @@ describe("task lifecycle", () => {
 			taskId: escalation.task.id,
 			scope: undefined,
 			all: false,
-			flat: false,
-			dump: false,
 		}) as ReturnType<Engine["graphInspect"]> & {
 			graph: {
 				nodes: readonly { id: string; source_task_id: string | null }[];
@@ -1115,8 +1166,6 @@ describe("task lifecycle", () => {
 			taskId: downstream,
 			scope: undefined,
 			all: false,
-			flat: false,
-			dump: false,
 		}) as {
 			ok: true;
 			graph: {

@@ -332,6 +332,6 @@ tasks:
   - id: task-028
     description: "Auto-chain docs and prompts"
     task_file: ./task-028.md
-    status: pending
+    status: complete
     blocked_by:
       - task-027

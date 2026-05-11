@@ -320,6 +320,11 @@ describe("bundled agent templates", () => {
 		expect(templateText).not.toContain("--result-file");
 		expect(templateText).toContain("For any Pithos command using `--stdin`");
 		expect(templateText).toContain("<<'EOF'");
+		expect(templateText).toContain("Ordinary follow-up work should omit `--chain`");
+		expect(templateText).toContain("Use `--chain none` for unrelated work");
+		expect(templateText).toContain("Resolving the held escalation's source: omit `--chain`");
+		expect(templateText).toContain("pass `--chain none --depends-on task_X`");
+		expect(templateText).not.toContain("--depends-on <held-task-id>");
 		expect(templateText).not.toContain("Use Pithos task commands for inspect");
 		expect(templateText).not.toContain("Complete with `pithos task complete");
 	});

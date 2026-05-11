@@ -1,6 +1,6 @@
 # Task Graph
 
-**Status:** Partial
+**Status:** Implemented
 **Last Updated:** 2026-05-11
 
 ## 1. Overview
@@ -698,16 +698,15 @@ New/changed event contracts:
 - [x] Update `packages/pithos/README.md` help surface and exit-code references
 - [x] Run `pnpm verify`
 
-### Phase 5: Automatic enqueue chaining (planned, 0.5-1 day)
+### Phase 5: Automatic enqueue chaining
 
-- [ ] Add `--chain auto|none|held|source` to `pithos task enqueue`.
-- [ ] Add source-link storage for non-blocking escalation origins.
-- [ ] Resolve chain policy inside `engine.enqueue` after actor-run authorization and before dependency validation.
-- [ ] Include chain/source metadata in enqueue output and `task.created` events.
-
-- [ ] Extend `task inspect` and `graph inspect` to show source links without treating them as lineage dependencies.
-- [ ] Update agent templates so normal agents rely on auto chaining, Pandora Qs use `--chain none`, and escalation-resolution handoffs rely on default auto; keep `held`/`source` out of routine prompt recipes except as advanced/fail-loud CLI modes.
-- [ ] Add CLI/engine tests for the chain-policy matrix and prompt help snapshots.
+- [x] Add `--chain auto|none|held|source` to `pithos task enqueue`.
+- [x] Add source-link storage for non-blocking escalation origins.
+- [x] Resolve chain policy inside `engine.enqueue` after actor-run authorization and before dependency validation.
+- [x] Include chain/source metadata in enqueue output and `task.created` events.
+- [x] Extend `task inspect` and `graph inspect` to show source links without treating them as lineage dependencies.
+- [x] Update agent templates so normal agents rely on auto chaining, Pandora Qs use `--chain none`, and escalation-resolution handoffs rely on default auto; keep `held`/`source` out of routine prompt recipes except as advanced/fail-loud CLI modes.
+- [x] Add CLI/engine tests for the chain-policy matrix and prompt help snapshots.
 
 ## 7. Code Locations
 

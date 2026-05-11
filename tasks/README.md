@@ -72,6 +72,14 @@ No HITL slice is required: Adam confirmed the core language and prompt-surface d
 
 Append notes here. Do not rewrite earlier notes.
 
+### Task 028: Auto-chain docs and prompts — 2026-05-11
+
+- Prompt contract now teaches default auto chaining for routine follow-up, `--chain none` for unrelated work, manual `--depends-on` only for extra fan-in, and `--chain none --depends-on <task-id>` for manual-only handoffs.
+- Pandora Q convention is explicit: unrelated Qs while holding an escalation use `--chain none`; source-resolution handoffs use default auto; “Q this for task_X” uses manual-only dependency form.
+- Pithos README documents source links as non-blocking provenance, dependencies as claimability gates, and enqueue chain output metadata.
+- Validation run: `pnpm typecheck && pnpm lint && pnpm test && pnpm run build`.
+- Deep-review follow-up clarified Pithos task id wording in Pandora Qs, marked the task-graph spec implemented, and updated graph/chain help text to name source links and fail-loud held/source modes.
+
 ### Task 027: Escalation source handoff — 2026-05-11
 
 - Confirmed the existing pure chain resolver and DB enqueue path already route Pandora-held sourced escalations through `depends_on_source`; added DB-backed lifecycle coverage for Pandora handoff metadata/events and dependency rows.

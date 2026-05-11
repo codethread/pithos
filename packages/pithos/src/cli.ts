@@ -425,7 +425,9 @@ const stdinFlag = Options.boolean("stdin").pipe(
 	Options.withDescription("Read the task or artifact body from stdin."),
 );
 const chainOption = Options.text("chain").pipe(
-	Options.withDescription("Task chaining policy: auto, none, held, or source."),
+	Options.withDescription(
+		"Task chaining policy: auto (default), none (manual-only), or advanced fail-loud held/source.",
+	),
 	Options.withDefault("auto"),
 );
 
@@ -623,7 +625,9 @@ export const makePithosCommand = (ctx: CliContext) => {
 				chain: o.chain,
 			}),
 	).pipe(
-		Command.withDescription("Queue a new durable task; body is read from stdin when requested."),
+		Command.withDescription(
+			"Queue a durable task; --chain auto preserves held-task chains, while source links remain non-blocking provenance.",
+		),
 	);
 	const taskClaim = Command.make(
 		"claim",
@@ -823,9 +827,15 @@ export const makePithosCommand = (ctx: CliContext) => {
 				flat: o.flat,
 				dump: o.dump,
 			}),
-	).pipe(Command.withDescription("Render dependency DAGs and supersession history for tasks."));
+	).pipe(
+		Command.withDescription(
+			"Render dependency, source-link, and supersession relationships for tasks.",
+		),
+	);
 	const graph = Command.make("graph").pipe(
-		Command.withDescription("Inspect Pithos task dependency and supersession graphs."),
+		Command.withDescription(
+			"Inspect Pithos task dependency, source-link, and supersession graphs.",
+		),
 		Command.withSubcommands([graphInspect]),
 	);
 	const briefing = Command.make(

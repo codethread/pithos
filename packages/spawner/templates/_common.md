@@ -8,7 +8,11 @@
 - If claim returns `NO_CLAIMABLE_WORK`, do not invent work or poll in a loop. AFK agents should exit cleanly; HITL agents should wait for Adam or a control-plane wakeup.
 - Use fencing token returned by claim/inspect when completing or failing held work.
 - Use your launch `scope_id` for normal follow-up work. Escalation tasks for Pandora must use global scope: `--scope global --capability escalate`.
-- For normal downstream work that should wait for the held task to finish, enqueue with `--depends-on <held-task-id>`. Do not put `--depends-on <held-task-id>` on an escalation that must be claimable while you still hold the current task.
+- Pithos stores the full task graph; agents usually work the task chain reconstructed from it.
+- Dependencies gate claimability; source links are non-blocking provenance.
+- Ordinary follow-up work should omit `--chain`: default auto keeps the held work chain connected.
+- Add manual `--depends-on <task-id>` only for extra prerequisites/fan-in; it combines with default auto.
+- Use `--chain none` for unrelated work, or `--chain none --depends-on <task-id>` for manual-only dependencies.
 - Attach useful artifacts before completing substantial work. Artifact `--kind` is a short category; use conventions such as `triage`, `design-brief`, `war-completion`, `decision`, or `evidence`.
 - For any Pithos command using `--stdin`, send exactly one stdin document; prefer quoted heredocs (`<<'EOF'`) and do not stage temp files solely for payload upload.
 - Queue capabilities are `triage`, `design`, `execute`, and `escalate`; only enqueue capabilities listed in your launch context.
@@ -45,10 +49,18 @@ Fail with a reason:
 $PITHOS_BIN task fail --run $PITHOS_RUN_ID --token <token> --reason '<reason>' <task-id>
 ```
 
-Enqueue follow-up work with a body:
+Enqueue ordinary follow-up work with default auto chaining:
 
 ```sh
-$PITHOS_BIN task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute> --title '<title>' --stdin --depends-on <held-task-id> <<'EOF'
+$PITHOS_BIN task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute> --title '<title>' --stdin <<'EOF'
+<task body>
+EOF
+```
+
+Enqueue unrelated or manual-only work:
+
+```sh
+$PITHOS_BIN task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute> --title '<title>' --stdin --chain none [--depends-on <task-id>] <<'EOF'
 <task body>
 EOF
 ```

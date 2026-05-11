@@ -21,6 +21,18 @@ pithos init --fresh
 
 This package owns Pithos DB schema, seeded built-ins, task/run transitions, graph invariants, and the agent/operator CLI surface. `pdx` supervises live processes and reuses this package through its typed library boundary; Spawner only renders and launches harness sessions.
 
+## Task graph, chains, and source links
+
+`pithos task enqueue` accepts `--chain auto|none|held|source` and defaults to `auto`.
+
+- Dependencies (`--depends-on <task-id>`) block claimability until upstream tasks are `done`.
+- Source links are non-blocking provenance; they connect related work without affecting claimability.
+- `--chain auto` preserves the current chain from the actor run. Ordinary held work becomes an implicit dependency; held escalations with a source route follow-up back to that source.
+- `--chain none` disables implicit chaining. Use it alone for unrelated work, or with `--depends-on <task-id>` for manual-only dependencies.
+- `--chain held` and `--chain source` are advanced fail-loud modes for callers that require a held task or held escalation source.
+
+Enqueue JSON includes `chain` metadata with the selected policy, applied decision, held/source task ids, implicit dependencies, and final dependency ids.
+
 ## Scope lifecycle
 
 - `pithos scope list` shows active scopes; pass `--all` to include archived history.

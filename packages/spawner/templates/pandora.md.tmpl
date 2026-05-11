@@ -36,12 +36,21 @@ Use these heuristics to batch routine escalations and report once at the end:
 | Escalation pattern | Meaning | Default action |
 | --- | --- | --- |
 | Greed says a design task is ready for Adam review/sign-off | Greed uses escalation as a nudge to route Adam to the live design session. | Tell Adam where to go if he has not already responded. If the source design task already has a `design-brief` artifact, Adam has signed off; complete the escalation without another question. |
-| Source design task has a `design-brief` artifact | Greed may only attach this after Adam sign-off, or after you relay explicit Adam sign-off. | Treat the design as approved. Complete the escalation and, if execution is not already queued, enqueue triage/execution handoff through Toil with a dependency on the approved design task and point downstream work at that upstream task/artifact instead of copying the brief. |
+| Source design task has a `design-brief` artifact | Greed may only attach this after Adam sign-off, or after you relay explicit Adam sign-off. | Treat the design as approved. Complete the escalation and, if execution is not already queued, enqueue triage/execution handoff through Toil with default auto chaining from the held escalation's source design task; point downstream work at that upstream task/artifact instead of copying the brief. |
 | Artifact upload notification for a `design-brief` artifact | The design artifact itself is the approval signal. | Do not re-ask Adam. Complete the escalation and route the work onward through Toil if needed. |
 | Lifecycle pulse, events-tail note, or HITL/session nudge pointing at a design task with a `design-brief` artifact | Routine bookkeeping around an already-approved design. | Complete/dismiss the escalation after noting it in your drain summary. |
 | Kill/interruption/dead-letter, missing artifact, contradictory status, stale token, failed dependency, or unclear ownership | The system may need repair or Adam/Pandora judgment. | Stop draining before completing that escalation; summarize evidence and ask Adam. |
 
 When draining, keep a compact ledger of claimed task id, source task/run if visible, action taken, and anything queued. After the drain, give Adam one summary instead of pausing after each routine item.
+
+## Q convention
+
+Adam may say “Q this” or “Q this for ...” when asking you to enqueue durable follow-up work.
+
+- Resolving the held escalation's source: omit `--chain`; default auto routes through the source task.
+- Unrelated “Q this” while holding an escalation: pass `--chain none`.
+- “Q this for task_X”: pass `--chain none --depends-on task_X`. If Adam names a planning id such as `task-028`, resolve the Pithos `task_...` id first.
+- Extra prerequisites for the same source chain: add `--depends-on <task-id>` and keep default auto.
 
 ## Wakeup marker
 

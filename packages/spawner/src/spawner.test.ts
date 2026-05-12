@@ -426,9 +426,29 @@ describe("renderAgent", () => {
 		);
 		expect(rendered.harness.argv).toContain("--model");
 		expect(rendered.harness.argv).toContain("model_test");
+		expect(rendered.harness.argv.includes("--dangerously-skip-permissions")).toBe(
+			harnessKind === "claude",
+		);
 		expect(rendered.harness.argv).toContain("--tools");
 		expect(rendered.harness.argv).toContain("bash,read");
 	});
+
+	it.each(["pi", "claude"] as const)(
+		"renders a begin nudge for %s HITL sessions",
+		(harnessKind) => {
+			const rendered = renderAgent(
+				{ ...base, agent: "pandora", mode: "hitl" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "pandora",
+						mode: "hitl",
+						harnessKind,
+					}),
+				),
+			);
+			expect(rendered.harness.argv.at(-1)).toBe("begin");
+		},
+	);
 
 	it("loads manifest and templates from $PDX_DATA_DIR/templates when set", () => {
 		const dataDir = "/tmp/pdx-custom";
@@ -680,36 +700,39 @@ describe("launchRenderedAgent", () => {
 		expect("harnessEnvKeys" in launched).toBe(false);
 	});
 
-	it("launches Pi hitl through tmux using a temp prompt file", () => {
-		const rendered = renderAgent(
-			{ ...base, agent: "war", mode: "hitl" },
-			fakeRenderServices(
-				agentsFile({
-					agent: "war",
-					mode: "hitl",
-					harnessKind: "pi",
-					harnessMode: "append",
+	it.each(["pi", "claude"] as const)(
+		"launches %s hitl through tmux using a temp prompt file",
+		(harnessKind) => {
+			const rendered = renderAgent(
+				{ ...base, agent: "war", mode: "hitl" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "war",
+						mode: "hitl",
+						harnessKind,
+						harnessMode: "append",
+					}),
+				),
+			);
+			let tmuxNewSessionArgs: readonly string[] = [];
+			const hitl = launchRenderedAgent(
+				rendered,
+				makeLaunchServices("", {
+					exitCode: 0,
+					panePid: 5678,
+					tmuxStatus: "ignored",
+					onTmuxNewSession: (args) => {
+						tmuxNewSessionArgs = args;
+					},
 				}),
-			),
-		);
-		let tmuxNewSessionArgs: readonly string[] = [];
-		const hitl = launchRenderedAgent(
-			rendered,
-			makeLaunchServices("", {
-				exitCode: 0,
-				panePid: 5678,
-				tmuxStatus: "ignored",
-				onTmuxNewSession: (args) => {
-					tmuxNewSessionArgs = args;
-				},
-			}),
-		);
-		expect(hitl.hitl).toEqual({ tmuxTarget: "pdx--war__scope-repo--123e4567", panePid: 5678 });
-		expect(tmuxNewSessionArgs).toContain("sh");
-		expect(tmuxNewSessionArgs).toContain("-c");
-		expect(tmuxNewSessionArgs.join("\0")).not.toContain(rendered.prompt);
-		expect(tmuxNewSessionArgs.join("\0")).toContain("$(cat '/tmp/pithos-spawner-prompt-");
-	});
+			);
+			expect(hitl.hitl).toEqual({ tmuxTarget: "pdx--war__scope-repo--123e4567", panePid: 5678 });
+			expect(tmuxNewSessionArgs).toContain("sh");
+			expect(tmuxNewSessionArgs).toContain("-c");
+			expect(tmuxNewSessionArgs.join("\0")).not.toContain(rendered.prompt);
+			expect(tmuxNewSessionArgs.join("\0")).toContain("$(cat '/tmp/pithos-spawner-prompt-");
+		},
+	);
 });
 
 describe("renderSessionTranscript", () => {

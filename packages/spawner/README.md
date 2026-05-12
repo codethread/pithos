@@ -98,7 +98,7 @@ Read `src/spawner.ts` for exact argv construction. Stable behavior worth knowing
 
 - AFK mode uses Harness print mode with the message `Claim and process one task, then exit.`
 - HITL mode launches under tmux.
-- Pi HITL prompt delivery uses a temp-file shell wrapper to avoid prompt quoting/argv issues.
+- HITL prompt delivery uses a temp-file shell wrapper for every Harness to keep rendered prompts out of the `tmux new-session` argv.
 - Session log paths are computed before launch and stored by `pdx` on the Pithos Run.
 
 ## Development

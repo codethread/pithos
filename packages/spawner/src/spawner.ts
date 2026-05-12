@@ -409,24 +409,21 @@ const sessionLogPathFor = (
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
 
-const piPromptArgIndex = (argv: readonly string[]): number => {
-	const index = argv.findIndex(
+const promptArgIndex = (rendered: RenderedAgent): number => {
+	const index = rendered.harness.argv.findIndex(
 		(arg) => arg === "--system-prompt" || arg === "--append-system-prompt",
 	);
-	if (index === -1 || argv[index + 1] === undefined) {
+	if (index === -1 || rendered.harness.argv[index + 1] === undefined) {
 		throw new SpawnerError({
 			code: "LAUNCH_ERROR",
-			message: "pi harness argv is missing a system prompt argument",
+			message: `${rendered.harness.kind} harness argv is missing a system prompt argument`,
 		});
 	}
 	return index + 1;
 };
 
-const piHitlShellCommand = (
-	rendered: RenderedAgent,
-	services: LaunchServices,
-): readonly string[] => {
-	const promptIndex = piPromptArgIndex(rendered.harness.argv);
+const hitlShellCommand = (rendered: RenderedAgent, services: LaunchServices): readonly string[] => {
+	const promptIndex = promptArgIndex(rendered);
 	const promptPath = services.writeTempText(
 		"pithos-spawner-prompt",
 		rendered.harness.argv[promptIndex]!,
@@ -457,6 +454,7 @@ const harnessArgv = (
 	if (manifest.harness.kind === "claude") {
 		const base = [
 			"claude",
+			"--dangerously-skip-permissions",
 			"--session-id",
 			input.sessionId,
 			"--model",
@@ -465,7 +463,9 @@ const harnessArgv = (
 			promptFlag,
 			prompt,
 		];
-		return input.mode === "afk" ? [...base, "--print", INITIAL_TASK_MESSAGE] : base;
+		return input.mode === "afk"
+			? [...base, "--print", INITIAL_TASK_MESSAGE]
+			: [...base, HITL_STARTUP_MESSAGE];
 	}
 	const base = [
 		"pi",
@@ -585,8 +585,7 @@ export const launchRenderedAgent = (
 			message: `${rendered.agent}: rendered harness argv is empty`,
 		});
 	}
-	const launchArgv =
-		rendered.harness.kind === "pi" ? piHitlShellCommand(rendered, services) : rendered.harness.argv;
+	const launchArgv = hitlShellCommand(rendered, services);
 	const envCommand = [
 		"env",
 		...Object.entries(rendered.harness.env).map(([key, value]) => `${key}=${value}`),

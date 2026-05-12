@@ -494,7 +494,7 @@ describe("pdx substrate", () => {
 		});
 	});
 
-	it("formats lifecycle pulse lines for spawn, remove, and wakeup", () => {
+	it("formats lifecycle pulse lines for spawn, remove, wakeup, and errors", () => {
 		const now = new Date("2026-05-09T00:31:00.000Z");
 		expect(
 			stripAnsi(
@@ -533,6 +533,17 @@ describe("pdx substrate", () => {
 		).toBe(
 			"[May 9 00:31] wakeup pandora claimable_escalate target=pdx--pandora claimable-escalate=2",
 		);
+		expect(
+			stripAnsi(
+				formatLifecycleEvent(now, {
+					kind: "error",
+					span: "pdx.reconcile",
+					message: "tmux exploded",
+					attempt: 2,
+					maxAttempts: 3,
+				}),
+			),
+		).toBe("[May 9 00:31] error pdx.reconcile attempt=2/3 tmux exploded");
 	});
 
 	it("init creates data dir, pithos DB, runs dir, and editable templates without tmux", async () => {
@@ -893,6 +904,71 @@ describe("pdx substrate", () => {
 			runId: PDX_SYSTEM_RUN_ID,
 		});
 		expect((await run(registry.list)).map((entry) => entry.agent)).not.toContain("pdx");
+	});
+
+	it("daemon reports Pandora launch failures in lifecycle output before later ticks retry", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const records: { readonly level: string; readonly msg: string; readonly data?: unknown }[] = [];
+		const lifecycleEvents: unknown[] = [];
+		const log = SupervisorLog.of({
+			write: (record) =>
+				Effect.sync(() => {
+					records.push(record);
+					return { ts: "now", ...record };
+				}),
+		});
+		const lifecycle = LifecycleReporter.of({
+			report: (event) => Effect.sync(() => lifecycleEvents.push(event)),
+		});
+		const registry = await run(makeRegistry);
+		const spawner = makeSpawner({
+			launchAgent: () =>
+				Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "tmux exploded" })),
+		});
+		const config = await parseConfig(dataDir);
+		const handle = await run(
+			runDaemon(config, 4, 5).pipe(
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+				Effect.provideService(PithosClient, makePithos()),
+				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, lifecycle),
+				Effect.provideService(Registry, registry),
+				Effect.provideService(
+					Ids,
+					Ids.of({
+						nextRunId: Effect.succeed("run_pandora_fail"),
+						nextSessionId: Effect.succeed("session_pandora_fail"),
+					}),
+				),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+				Effect.provideService(Process, alwaysLiveProcess),
+			),
+		);
+		await run(handle.close);
+		expect(records).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					level: "error",
+					msg: "reconcile tick failed",
+					data: { error: "tmux exploded", attempt: 1, max_attempts: 3 },
+				}),
+				expect.objectContaining({ level: "info", msg: "daemon ready" }),
+			]),
+		);
+		expect(lifecycleEvents).toEqual(
+			expect.arrayContaining([
+				{
+					kind: "error",
+					span: "pdx.reconcile",
+					message: "tmux exploded",
+					attempt: 1,
+					maxAttempts: 3,
+				},
+			]),
+		);
+		expect(await run(registry.list)).toEqual([]);
 	});
 
 	it("daemon startup settles HITL and AFK orphans before creating system run", async () => {

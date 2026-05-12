@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Schedule } from "effect";
+import { Deferred, Effect, Fiber, Ref, Schedule } from "effect";
 import { requestIpc, listenIpc } from "./ipc-socket.js";
 import type { IpcResponse } from "./ipc.js";
 import { PdxError } from "./errors.js";
@@ -22,6 +22,7 @@ export const DAEMON_TARGET = "pdx--daemon";
 export const PANDORA_TARGET = "pdx--pandora";
 export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
 const NO_CLAIM_TIMEOUT_MILLIS = 30_000;
+const MAX_CONSECUTIVE_RECONCILE_FAILURES = 3;
 
 const pidfilePath = (config: PdxConfig, runId: string): string => `${config.runsDir}/${runId}.pid`;
 const afkStdoutPath = (config: PdxConfig, runId: string): string =>
@@ -1167,6 +1168,50 @@ export const handleKillRequest = (input: {
 		} as const;
 	});
 
+const loggedReconcileTick = (
+	config: PdxConfig,
+	maxAfk: number,
+	consecutiveFailures: Ref.Ref<number>,
+) =>
+	reconcileTick(config, maxAfk).pipe(
+		Effect.tap(() => Ref.set(consecutiveFailures, 0)),
+		Effect.catchAll((error) =>
+			Effect.gen(function* () {
+				const attempt = yield* Ref.updateAndGet(consecutiveFailures, (count) => count + 1);
+				const log = yield* SupervisorLog;
+				const reachedMax = attempt >= MAX_CONSECUTIVE_RECONCILE_FAILURES;
+				yield* log.write({
+					level: "error",
+					span: "pdx.reconcile",
+					msg: "reconcile tick failed",
+					data: {
+						error: error.message,
+						attempt,
+						max_attempts: MAX_CONSECUTIVE_RECONCILE_FAILURES,
+					},
+				});
+				yield* reportLifecycle({
+					kind: "error",
+					span: "pdx.reconcile",
+					message: reachedMax
+						? `reconcile loop stopped after ${MAX_CONSECUTIVE_RECONCILE_FAILURES} consecutive failures: ${error.message}`
+						: error.message,
+					attempt,
+					maxAttempts: MAX_CONSECUTIVE_RECONCILE_FAILURES,
+				});
+				if (reachedMax) {
+					yield* log.write({
+						level: "error",
+						span: "pdx.reconcile",
+						msg: "reconcile loop stopped after consecutive failures",
+						data: { max_attempts: MAX_CONSECUTIVE_RECONCILE_FAILURES },
+					});
+					return yield* Effect.fail(error);
+				}
+			}),
+		),
+	);
+
 export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: number) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem;
@@ -1190,8 +1235,9 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 		const registry = yield* Registry;
 		const tmux = yield* Tmux;
 		const processService = yield* Process;
-		yield* reconcileTick(config, maxAfk);
-		const loop = yield* reconcileTick(config, maxAfk).pipe(
+		const consecutiveReconcileFailures = yield* Ref.make(0);
+		yield* loggedReconcileTick(config, maxAfk, consecutiveReconcileFailures);
+		const loop = yield* loggedReconcileTick(config, maxAfk, consecutiveReconcileFailures).pipe(
 			Effect.repeat(Schedule.spaced(`${intervalSeconds} seconds`)),
 			Effect.fork,
 		);

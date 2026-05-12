@@ -55,6 +55,8 @@ export const formatLifecycleEvent = (now: Date, event: LifecycleEvent): string =
 			return `${timestamp} ${red}remove${reset} ${event.agent} ${dim}${event.reason}${reset} run=${event.runId} scope=${event.scopeId}`;
 		case "wakeup":
 			return `${timestamp} ${yellow}wakeup${reset} pandora ${dim}${event.reason}${reset} target=${event.target} claimable-escalate=${event.claimableEscalateCount}`;
+		case "error":
+			return `${timestamp} ${red}error${reset} ${event.span} ${dim}attempt=${event.attempt}/${event.maxAttempts}${reset} ${event.message}`;
 	}
 };
 

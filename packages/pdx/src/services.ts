@@ -265,6 +265,13 @@ export type LifecycleEvent =
 			readonly reason: "claimable_escalate";
 			readonly target: string;
 			readonly claimableEscalateCount: number;
+	  }
+	| {
+			readonly kind: "error";
+			readonly span: string;
+			readonly message: string;
+			readonly attempt: number;
+			readonly maxAttempts: number;
 	  };
 
 export interface LifecycleReporterService {

@@ -30,12 +30,13 @@ pnpm --filter @pdx/spawner start -- --help
 
 ## Smoke-test environment
 
-Use an isolated temp data dir for manual smoke tests; never point smoke runs at a real `~/.pdx` or project DB.
+Use an isolated temp data dir for manual smoke tests; never point smoke runs at a real `~/.pdx` or project DB. Also isolate tmux for smoke runs, because `pdx--daemon` / `pdx--pandora` naming is global to the tmux server and can collide with an already-open box.
 
 ```sh
 export PDX_DATA_DIR="$(mktemp -d)/pdx"
 export PITHOS_DB="$PDX_DATA_DIR/pithos.sqlite"
-mkdir -p "$PDX_DATA_DIR"
+export TMUX_TMPDIR="$PDX_DATA_DIR/tmux"
+mkdir -p "$PDX_DATA_DIR" "$TMUX_TMPDIR"
 pnpm run build
 pithos init --fresh
 pdx open --data-dir "$PDX_DATA_DIR"
@@ -47,6 +48,7 @@ Notes:
 
 - `PITHOS_DB` is required by the `pithos` CLI.
 - `PDX_DATA_DIR` is consumed by Spawner/templates and should be passed to `pdx` as `--data-dir "$PDX_DATA_DIR"`.
+- `TMUX_TMPDIR` isolates the tmux server for smoke runs; otherwise `pdx open` can fail with `pdx--daemon already exists` even when `PDX_DATA_DIR` is isolated.
 - `PITHOS_BIN` and `PDX_BIN` are optional Spawner/template overrides; they default to `pithos` and `pdx`.
 - Spawner sets `PITHOS_RUN_ID`, `PITHOS_SESSION_ID`, and `PITHOS_SCOPE_ID` for launched Agent runs; do not invent them in supervisor code.
 - `pdx open` touches real tmux and real configured Harness CLIs; keep it isolated and always close it.

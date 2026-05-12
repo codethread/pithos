@@ -39,6 +39,7 @@ export TMUX_TMPDIR="$PDX_DATA_DIR/tmux"
 mkdir -p "$PDX_DATA_DIR" "$TMUX_TMPDIR"
 pnpm run build
 pithos init --fresh
+pdx init --data-dir "$PDX_DATA_DIR"
 pdx open --data-dir "$PDX_DATA_DIR"
 pdx daemon status --data-dir "$PDX_DATA_DIR"
 pdx close --data-dir "$PDX_DATA_DIR"
@@ -48,7 +49,8 @@ Notes:
 
 - `PITHOS_DB` is required by the `pithos` CLI.
 - `PDX_DATA_DIR` should be passed to `pdx` as `--data-dir "$PDX_DATA_DIR"`; Spawner loads user-owned templates from `$PDX_DATA_DIR/templates`.
-- `pdx open` seeds `$PDX_DATA_DIR/templates` from the repo-root defaults when missing; use `pdx open --update --data-dir "$PDX_DATA_DIR"` to replace only the templates copy.
+- `pdx init` seeds `$PDX_DATA_DIR/templates` from the repo-root defaults without starting tmux/Harness sessions; use `pdx init --update --data-dir "$PDX_DATA_DIR"` to replace only the templates copy.
+- `pdx open` also seeds missing templates before starting the daemon/Pandora.
 - `TMUX_TMPDIR` isolates the tmux server for smoke runs; otherwise `pdx open` can fail with `pdx--daemon already exists` even when `PDX_DATA_DIR` is isolated.
 - `PITHOS_BIN` and `PDX_BIN` are optional Spawner/template overrides; they default to `pithos` and `pdx`.
 - Spawner sets `PITHOS_RUN_ID`, `PITHOS_SESSION_ID`, and `PITHOS_SCOPE_ID` for launched Agent runs; do not invent them in supervisor code.

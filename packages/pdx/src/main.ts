@@ -5,6 +5,7 @@ import process from "node:process";
 import { inspect } from "node:util";
 import {
 	closePdx,
+	initPdx,
 	killPdx,
 	logsShowPdx,
 	openPdx,
@@ -52,6 +53,12 @@ type CommandInput =
 			readonly dataDir: string | undefined;
 			readonly maxAfk: number;
 			readonly intervalSeconds: number;
+			readonly update: boolean;
+			readonly clean: boolean;
+	  }
+	| {
+			readonly command: "init";
+			readonly dataDir: string | undefined;
 			readonly update: boolean;
 			readonly clean: boolean;
 	  }
@@ -156,6 +163,12 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 		);
 
 		switch (input.command) {
+			case "init":
+				yield* initPdx(config, { update: input.update, clean: input.clean }).pipe(
+					Effect.provide(provided),
+				);
+				yield* Effect.sync(() => process.stdout.write(`${config.dataDir}\n`));
+				return;
 			case "open":
 				yield* openPdx(config, input.maxAfk, input.intervalSeconds, {
 					update: input.update,
@@ -391,6 +404,41 @@ const handleHelpJson = <Name extends string, R, E, A>(
 };
 
 const makeCommand = (runtime: RuntimeInput) => {
+	const init = Command.make(
+		"init",
+		{
+			dataDir: Options.text("data-dir").pipe(
+				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
+				Options.optional,
+			),
+			update: Options.boolean("update").pipe(
+				Options.withDescription("Replace <data-dir>/templates from the repo bundled defaults."),
+			),
+			clean: Options.boolean("clean").pipe(
+				Options.withDescription(
+					"Wipe the entire pdx data dir before init, including DB, logs, and templates.",
+				),
+			),
+		},
+		({ dataDir, update, clean }) =>
+			Effect.gen(function* () {
+				if (update && clean) {
+					yield* Effect.fail(
+						new PdxError({
+							code: "VALIDATION_ERROR",
+							message: "--update and --clean are mutually exclusive",
+						}),
+					);
+				}
+				yield* runCommand(runtime, {
+					command: "init",
+					dataDir: opt(dataDir),
+					update,
+					clean,
+				});
+			}),
+	).pipe(Command.withDescription("Initialize the pdx data dir and editable templates only."));
+
 	const open = Command.make(
 		"open",
 		{
@@ -612,7 +660,7 @@ const makeCommand = (runtime: RuntimeInput) => {
 		Command.withDescription(
 			"Local supervisor for Pandora's Box agent runs, processes, tmux sessions, and Pandora.",
 		),
-		Command.withSubcommands([open, close, daemon, run, task]),
+		Command.withSubcommands([init, open, close, daemon, run, task]),
 	);
 };
 

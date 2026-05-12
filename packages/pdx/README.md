@@ -7,6 +7,7 @@ Developer documentation for the `pdx` package: the local supervisor component of
 `@pdx/pdx` exposes the `pdx` binary. In the user flow this is mostly opening and closing the box:
 
 ```sh
+pdx init
 pdx open
 pdx close
 ```
@@ -101,14 +102,16 @@ Binds services to real implementations:
 - Node `fs`, `child_process`, `crypto`, and `process` are confined here for pdx runtime IO.
 - `PithosClient` wraps `@pdx/pithos` `makeEngine(...)`; this is the library boundary to durable state.
 - `Spawner` wraps `@pdx/spawner` render/launch/Harness session transcript APIs; pdx persists render metadata before launch.
-- Before first render, pdx materializes the repo-root bundled manifest/templates from `../../templates/` into `<data-dir>/templates/` without overwriting an existing user-owned copy.
-- `pdx open --update` replaces only `<data-dir>/templates/`; `pdx open --clean` wipes the full data dir before startup.
+- `pdx init` materializes the repo-root bundled manifest/templates from `../../templates/` into `<data-dir>/templates/` without starting tmux, the daemon, or Pandora.
+- `pdx open` also materializes missing templates before startup without overwriting an existing user-owned copy.
+- `pdx init --update` / `pdx open --update` replace only `<data-dir>/templates/`; `--clean` wipes the full data dir before init/startup.
 - AFK stdout/stderr files are created under `<data-dir>/runs` before Spawner launches detached work.
 
 ### `src/controller.ts` — supervision policy
 
 Owns pdx behavior:
 
+- `initPdx` creates the data dir, initializes Pithos, creates `runs`, and materializes editable templates without touching tmux or Harness CLIs.
 - `openPdx` supports normal reuse, `--update` template refresh, and `--clean` full data-dir reset before starting the pdx daemon tmux session and waiting for IPC readiness.
 - `runDaemon` settles startup orphans, upserts the `pdx` system Run, starts reconcile, and serves IPC.
 - `reconcileTick` performs Cleanup/settlement first, maintains Pandora, sends Wakeups for new Escalation tasks, and spawns at most one ready non-Pandora Agent run per tick.

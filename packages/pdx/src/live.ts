@@ -6,8 +6,10 @@ import {
 	open,
 	readdir,
 	readFile,
+	readlink,
 	rename,
 	rm,
+	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
@@ -262,12 +264,15 @@ const materializeSpawnerTemplates = async (dataDir: string): Promise<void> => {
 	}
 	const entries = await readdir(bundledTemplatesDir, { withFileTypes: true });
 	for (const entry of entries) {
-		if (!entry.isFile()) continue;
 		const sourcePath = join(bundledTemplatesDir, entry.name);
 		const targetPath = join(targetDir, entry.name);
-		const content = await readFile(sourcePath, "utf8");
 		try {
-			await writeFile(targetPath, content, { encoding: "utf8", flag: "wx" });
+			if (entry.isFile()) {
+				const content = await readFile(sourcePath, "utf8");
+				await writeFile(targetPath, content, { encoding: "utf8", flag: "wx" });
+			} else if (entry.isSymbolicLink()) {
+				await symlink(await readlink(sourcePath), targetPath);
+			}
 		} catch (error) {
 			if (!isNodeErrorCode(error, "EEXIST")) throw error;
 		}
@@ -289,6 +294,11 @@ export const makeSpawnerLive = (config: {
 		writeTempText: liveSpawnerServices.writeTempText,
 	};
 	return Spawner.of({
+		materializeTemplates: () =>
+			Effect.tryPromise({
+				try: () => materializeSpawnerTemplates(config.dataDir),
+				catch: (error) => spawnerError("spawner template materialize", error),
+			}),
 		renderAgent: (input) =>
 			Effect.tryPromise({
 				try: async () => {

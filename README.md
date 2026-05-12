@@ -67,17 +67,20 @@ Requires `~/.local/bin` to be on your `PATH`.
 Repo defaults live in [`./templates/`](./templates/) and are documented in
 [`./templates/README.md`](./templates/README.md).
 
-`pdx open` reuses the existing data dir and seeds `<data-dir>/templates/` only
-when the user copy is missing. Edit `<data-dir>/templates/agents.json` to
-change which harness/model/tools each agent runs with.
+Run `pdx init` to create the data dir and seed `<data-dir>/templates/`
+before Pandora starts. Edit `<data-dir>/templates/agents.json` to change which
+harness/model/tools each agent runs with.
+
+`pdx open` also reuses the existing data dir and seeds templates only when the
+user copy is missing.
 
 If you also want to change prompts, edit the copied `*.md.tmpl` files in the
 same directory.
 
 Useful reset modes:
 
-- `pdx open --update` — keep DB/logs, replace `<data-dir>/templates/` from repo defaults
-- `pdx open --clean` — wipe the full pdx data dir and start from a blank slate
+- `pdx init --update` or `pdx open --update` — keep DB/logs, replace `<data-dir>/templates/` from repo defaults
+- `pdx init --clean` or `pdx open --clean` — wipe the full pdx data dir and start from a blank slate
 
 ### Uninstall
 
@@ -97,6 +100,7 @@ rm ~/.local/bin/{pithos,pdx,pandora-spawn}
 Two commands:
 
 ```sh
+pdx init    # create editable config without starting Pandora
 pdx open    # release the Evils
 pdx close   # back in the jar
 ```

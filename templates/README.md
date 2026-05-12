@@ -5,9 +5,10 @@ Repo-root default manifest and prompt templates for Pandora's Box.
 `pdx` treats this directory as the bundled source of truth for seeding
 `<data-dir>/templates/`:
 
+- `pdx init` creates the data dir and seeds templates without starting Pandora or the daemon
 - `pdx open` reuses the existing data dir and only seeds templates when the user copy is missing
-- `pdx open --update` keeps the existing DB/logs and replaces `<data-dir>/templates/` from these repo defaults
-- `pdx open --clean` wipes the full data dir first, including DB, logs, and templates
+- `pdx init --update` / `pdx open --update` keep the existing DB/logs and replace `<data-dir>/templates/` from these repo defaults
+- `pdx init --clean` / `pdx open --clean` wipe the full data dir first, including DB, logs, and templates
 
 Normal user editing happens in `<data-dir>/templates/`, not here.
 
@@ -16,6 +17,8 @@ Normal user editing happens in `<data-dir>/templates/`, not here.
 - `agents.json` — agent manifest: mode, harness kind/model/tools, include list, template file
 - `*.md.tmpl` — prompt templates per agent kind
 - `_common.md` — shared include
+- `AGENTS.md` — config-editing guide for direct agent sessions in this directory
+- `CLAUDE.md` — symlink to `AGENTS.md` for Claude Code
 
 ## `agents.json` contract
 

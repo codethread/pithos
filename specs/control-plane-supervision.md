@@ -82,12 +82,17 @@ This is a destructive pre-v1 rewrite.
 ## 4. Architecture
 
 ```text
-pdx open
-  -> fail loudly if a pdx daemon session already exists
-  -> normal open: reuse existing `<data-dir>` state
+pdx init
+  -> normal init: reuse existing `<data-dir>` state
   -> `--update`: remove `<data-dir>/templates/` only, then continue
   -> `--clean`: remove the full `<data-dir>` first, then continue
   -> pithos init (non-destructive)
+  -> materialize editable templates from bundled defaults when missing
+  -> exit without touching tmux or Harness CLIs
+
+pdx open
+  -> fail loudly if a pdx daemon session already exists
+  -> run the same data-dir/template initialization as `pdx init`
   -> start pdx daemon in tmux target `pdx--daemon`
   -> daemon startup settlement:
        kill deterministic old HITL tmux sessions matching `^pdx--`
@@ -515,6 +520,7 @@ Intentional abandon.
 Minimal operator/Pandora-facing API:
 
 ```text
+pdx init [--data-dir <path>] [--update | --clean]
 pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>] [--update | --clean]
 pdx close [--data-dir <path>]
 

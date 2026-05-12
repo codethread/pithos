@@ -162,6 +162,7 @@ export interface LaunchAgentResult {
 }
 
 export interface SpawnerService {
+	readonly materializeTemplates: () => Effect.Effect<void, PdxError>;
 	readonly renderAgent: (input: LaunchAgentInput) => Effect.Effect<RenderedAgent, PdxError>;
 	readonly launchRenderedAgent: (
 		rendered: RenderedAgent,

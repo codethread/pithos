@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -38,6 +38,7 @@ import {
 	DAEMON_TARGET,
 	PANDORA_TARGET,
 	logsShowPdx,
+	initPdx,
 	openPdx,
 	PDX_SYSTEM_RUN_ID,
 	handleKillRequest,
@@ -261,6 +262,7 @@ const makeSpawner = (input: {
 	readonly renderSessionTranscript?: SpawnerService["renderSessionTranscript"];
 }) =>
 	Spawner.of({
+		materializeTemplates: () => Effect.void,
 		renderAgent: (launch) =>
 			Effect.succeed({
 				...launch,
@@ -392,6 +394,20 @@ describe("pdx substrate", () => {
 		expect(stdout).toContain("Local supervisor for Pandora's Box agent runs");
 	});
 
+	it("CLI init materializes templates without tmux", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-cli-init-"));
+		const tmux = await makeFakeTmux();
+		const { stdout } = await runPdxCli(["init", "--data-dir", dataDir], tmux.env());
+		expect(stdout).toBe(`${dataDir}\n`);
+		expect(existsSync(join(dataDir, "pithos.sqlite"))).toBe(true);
+		expect(await readFile(join(dataDir, "templates", "agents.json"), "utf8")).toContain(
+			'"agent": "pandora"',
+		);
+		expect(await readlink(join(dataDir, "templates", "CLAUDE.md"))).toBe("AGENTS.md");
+		expect(existsSync(join(dataDir, "runs"))).toBe(true);
+		expect(existsSync(join(tmux.binDir, "tmux.log"))).toBe(false);
+	});
+
 	it("CLI open rejects --update with --clean", async () => {
 		await expect(
 			runPdxCli(["open", "--update", "--clean", "--data-dir", "/tmp/pdx-home"]),
@@ -519,6 +535,39 @@ describe("pdx substrate", () => {
 		);
 	});
 
+	it("init creates data dir, pithos DB, runs dir, and editable templates without tmux", async () => {
+		const config = await parseConfig("/tmp/pdx-init");
+		const calls: string[] = [];
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
+			mkdir: (path) => Effect.sync(() => calls.push(`mkdir:${path}`)),
+			writeFileAtomic: () => Effect.void,
+			removeFile: (path) => Effect.sync(() => calls.push(`remove:${path}`)),
+		});
+		const pithos = makePithos(calls);
+		const spawner = Spawner.of({
+			materializeTemplates: () => Effect.sync(() => calls.push("materializeTemplates")),
+			renderAgent: () => Effect.die("unexpected render"),
+			launchRenderedAgent: () => Effect.die("unexpected launch"),
+			renderSessionTranscript: () => Effect.die("unexpected transcript"),
+		});
+		await run(
+			initPdx(config, { update: false, clean: false }).pipe(
+				Effect.provideService(FileSystem, fs),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Spawner, spawner),
+			),
+		);
+		expect(calls).toEqual([
+			"mkdir:/tmp/pdx-init",
+			"init",
+			"mkdir:/tmp/pdx-init/runs",
+			"materializeTemplates",
+		]);
+	});
+
 	it("materializes bundled spawner templates into the data dir before render", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
 		const spawner = makeSpawnerLive({
@@ -542,6 +591,7 @@ describe("pdx substrate", () => {
 			'"agent": "pandora"',
 		);
 		expect(await readFile(join(dataDir, "templates", "war.md.tmpl"), "utf8")).not.toHaveLength(0);
+		expect(await readlink(join(dataDir, "templates", "CLAUDE.md"))).toBe("AGENTS.md");
 	});
 
 	it("maps spawner boundary validation errors without flattening to process errors", async () => {
@@ -629,6 +679,7 @@ describe("pdx substrate", () => {
 			removeFile: () => Effect.void,
 		});
 		const pithos = makePithos();
+		const spawner = makeSpawner({ launchAgent: () => Effect.die("unexpected launch") });
 		const server = await run(
 			listenIpc(config.socketPath, () => Effect.succeed({ ok: true, data: { ready: true } })),
 		);
@@ -639,6 +690,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(Clock, testClock),
 					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(Spawner, spawner),
 				),
 			);
 		} finally {
@@ -683,6 +735,7 @@ describe("pdx substrate", () => {
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
 		});
 		const pithos = makePithos();
+		const spawner = makeSpawner({ launchAgent: () => Effect.die("unexpected launch") });
 		const server = await run(
 			listenIpc(config.socketPath, () => Effect.succeed({ ok: true, data: { ready: true } })),
 		);
@@ -693,6 +746,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(Clock, testClock),
 					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(Spawner, spawner),
 				),
 			);
 		} finally {
@@ -725,6 +779,7 @@ describe("pdx substrate", () => {
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
 		});
 		const pithos = makePithos();
+		const spawner = makeSpawner({ launchAgent: () => Effect.die("unexpected launch") });
 		const server = await run(
 			listenIpc(config.socketPath, () => Effect.succeed({ ok: true, data: { ready: true } })),
 		);
@@ -735,6 +790,7 @@ describe("pdx substrate", () => {
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(Clock, testClock),
 					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(Spawner, spawner),
 				),
 			);
 		} finally {

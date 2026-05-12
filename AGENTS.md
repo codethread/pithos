@@ -120,9 +120,8 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 - `README.md`: project intro, agent model, delegation chain, and current architecture
 - `CONTRIBUTING.md`: build, verify, commit baseline, and doc map
 - `AGENTS.md`: non-negotiable rules beyond what can be enforced statically, injected transparently into agents
-- `packages/spawner/README.md`, `packages/spawner/CONTRIBUTING.md`: spawner surface, hook contract, session-log introspection, package constraints
+- `packages/<package>/README.md`: package surface, internals, and package-level constraints (spawner harness/template guidance, pdx supervisor internals, pithos schema/CLI)
 - Non-Pandora HITL sessions are single-task: after they have claimed work and that task clears, `pdx` reaps the idle session instead of leaving it resident
-- Each `packages/<package>/` repeats this pattern, providing more granular details as scope narrows
 
 ## Testing
 

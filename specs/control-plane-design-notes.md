@@ -23,7 +23,7 @@ Three layers:
 3. **pdx** — local supervisor/control plane.
    - Owns reconcile loop, registry, caps, lifecycle policy, process/tmux ownership.
    - Uses spawner as a launcher library/module, not as an operator API.
-   - Reuses `@pithos/pithos` directly for queue inspection and durable state changes; the `pithos` CLI is for agents/operators, not pdx's internal boundary.
+   - Reuses `@pdx/pithos` directly for queue inspection and durable state changes; the `pithos` CLI is for agents/operators, not pdx's internal boundary.
    - Exposes Pandora/operator introspection and immediate kill.
 
 ## Agent roster and capabilities
@@ -101,7 +101,7 @@ Queued direct dependents are rewired to the replacement. Cancelled direct depend
 
 ## Minimal CLI surface
 
-This is the external CLI contract. `pdx` should call the corresponding `@pithos/pithos` library surface directly rather than shelling out.
+This is the external CLI contract. `pdx` should call the corresponding `@pdx/pithos` library surface directly rather than shelling out.
 
 Clean-break nested command shape.
 

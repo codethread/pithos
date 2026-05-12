@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BUILTIN_AGENT_ENQUEUES } from "@pithos/pithos/builtins";
+import { BUILTIN_AGENT_ENQUEUES } from "@pdx/pithos/builtins";
 import { SpawnerError } from "./errors.js";
 import { launchRenderedAgent, renderAgent, renderSessionTranscript } from "./spawner.js";
 
@@ -176,7 +176,8 @@ const pdxHelpTree = {
 	name: "pdx",
 	path: "pdx",
 	usage: "pdx",
-	description: "Local supervisor for Pithos agent runs, processes, tmux sessions, and Pandora.",
+	description:
+		"Local supervisor for Pandora's Box agent runs, processes, tmux sessions, and Pandora.",
 	subcommands: [
 		{
 			tool: "pdx",

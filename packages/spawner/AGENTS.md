@@ -1,6 +1,6 @@
-# @pithos/spawner agent notes
+# @pdx/spawner agent notes
 
-Launcher-only package for rendering and launching built-in Pithos agent harness sessions.
+Launcher-only package for rendering and launching Pandora's Box agent harness sessions.
 
 ## Shape
 
@@ -12,7 +12,7 @@ Launcher-only package for rendering and launching built-in Pithos agent harness 
 ## Manual test
 
 ```sh
-pnpm --filter @pithos/spawner start -- preview --agent war --mode afk --scope scope_repo --run run_demo --session-id 123e4567-e89b-12d3-a456-426614174000 --cwd "$PWD" | jq .
+pnpm --filter @pdx/spawner start -- preview --agent war --mode afk --scope scope_repo --run run_demo --session-id 123e4567-e89b-12d3-a456-426614174000 --cwd "$PWD" | jq .
 ```
 
 With built/link bin:

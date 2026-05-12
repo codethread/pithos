@@ -585,7 +585,7 @@ const makeCommand = (runtime: RuntimeInput) => {
 
 	return Command.make("pdx").pipe(
 		Command.withDescription(
-			"Local supervisor for Pithos agent runs, processes, tmux sessions, and Pandora.",
+			"Local supervisor for Pandora's Box agent runs, processes, tmux sessions, and Pandora.",
 		),
 		Command.withSubcommands([open, close, daemon, run, task]),
 	);

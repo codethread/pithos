@@ -1,10 +1,10 @@
-# @pithos/pdx
+# @pdx/pdx
 
-Developer documentation for the `pdx` package: the local supervisor component of Pandora's Box's control plane.
+Developer documentation for the `pdx` package: the local supervisor component of the Pandora's Box control plane.
 
 ## Package role
 
-`@pithos/pdx` exposes the `pdx` binary. In the user flow this is mostly opening and closing the box:
+`@pdx/pdx` exposes the `pdx` binary. In the user flow this is mostly opening and closing the box:
 
 ```sh
 pdx open
@@ -46,8 +46,8 @@ pdx --help-json
 
 | Package                       | pdx integration                                                 | Boundary                                                                           |
 | ----------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `@pithos/pithos`              | imported as a library through `makeEngine` in `src/live.ts`     | typed in-process state transitions; pdx does **not** shell out to the `pithos` CLI |
-| `@pithos/spawner`             | imported as a library in `src/live.ts`                          | render Agent run plans, launch rendered plans, render Harness session transcripts  |
+| `@pdx/pithos`                 | imported as a library through `makeEngine` in `src/live.ts`     | typed in-process state transitions; pdx does **not** shell out to the `pithos` CLI |
+| `@pdx/spawner`                | imported as a library in `src/live.ts`                          | render Agent run plans, launch rendered plans, render Harness session transcripts  |
 | `tmux`                        | invoked through the injected `Process` service by `src/tmux.ts` | current Control-plane backend for HITL mode                                        |
 | Harness CLIs (`claude`, `pi`) | launched by Spawner live services                               | pdx only receives launch metadata and Harness session log paths                    |
 
@@ -99,8 +99,8 @@ Central service boundary for domain code. Controller logic depends on these inte
 Binds services to real implementations:
 
 - Node `fs`, `child_process`, `crypto`, and `process` are confined here for pdx runtime IO.
-- `PithosClient` wraps `@pithos/pithos` `makeEngine(...)`; this is the library boundary to durable state.
-- `Spawner` wraps `@pithos/spawner` render/launch/Harness session transcript APIs; pdx persists render metadata before launch.
+- `PithosClient` wraps `@pdx/pithos` `makeEngine(...)`; this is the library boundary to durable state.
+- `Spawner` wraps `@pdx/spawner` render/launch/Harness session transcript APIs; pdx persists render metadata before launch.
 - AFK stdout/stderr files are created under `<data-dir>/runs` before Spawner launches detached work.
 
 ### `src/controller.ts` — supervision policy
@@ -157,19 +157,19 @@ HITL mode runtime state lives in tmux targets. Harness session transcripts live 
 ## Development
 
 ```sh
-pnpm --filter @pithos/pdx typecheck
-pnpm --filter @pithos/pdx test
-pnpm --filter @pithos/pdx start --help
+pnpm --filter @pdx/pdx typecheck
+pnpm --filter @pdx/pdx test
+pnpm --filter @pdx/pdx start --help
 ```
 
 Useful package-local help checks:
 
 ```sh
-pnpm --filter @pithos/pdx start -- --help
-pnpm --filter @pithos/pdx start -- daemon --help
-pnpm --filter @pithos/pdx start -- run --help
-pnpm --filter @pithos/pdx start -- task --help
-pnpm --filter @pithos/pdx start -- --help-json
+pnpm --filter @pdx/pdx start -- --help
+pnpm --filter @pdx/pdx start -- daemon --help
+pnpm --filter @pdx/pdx start -- run --help
+pnpm --filter @pdx/pdx start -- task --help
+pnpm --filter @pdx/pdx start -- --help-json
 ```
 
 Use injected Pithos/Spawner/Process/Tmux services in tests. Do not require real model credentials, live harness binaries, or broad mocks when a deterministic service implementation covers the behavior.

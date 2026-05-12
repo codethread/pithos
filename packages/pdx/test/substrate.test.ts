@@ -33,7 +33,7 @@ import {
 import { formatLifecycleEvent } from "../src/lifecycle.js";
 import { FileSystemLive, makePithosClientLive, makeSpawnerLive } from "../src/live.js";
 import { makeTmux } from "../src/tmux.js";
-import { makeEngine, type Services as PithosServices } from "@pithos/pithos";
+import { makeEngine, type Services as PithosServices } from "@pdx/pithos";
 import {
 	DAEMON_TARGET,
 	PANDORA_TARGET,
@@ -389,7 +389,7 @@ describe("pdx substrate", () => {
 		expect(() => {
 			JSON.parse(stdout);
 		}).toThrow();
-		expect(stdout).toContain("Local supervisor for Pithos agent runs");
+		expect(stdout).toContain("Local supervisor for Pandora's Box agent runs");
 	});
 
 	it("derives config paths from data dir", async () => {

@@ -70,7 +70,7 @@ This is a destructive pre-v1 rewrite.
 - **Decision:** Only pdx finalizes runs.
   - **Rationale:** Agent/harness code can complete or fail held tasks, but run terminalization depends on observed process/tmux lifecycle. Keeping run finalization in pdx prevents races between harness hooks and supervisor observations.
 
-- **Decision:** `pdx` integrates with Pithos through the `@pithos/pithos` library, not by spawning the `pithos` CLI.
+- **Decision:** `pdx` integrates with Pithos through the `@pdx/pithos` library, not by spawning the `pithos` CLI.
   - **Rationale:** CLI argv/stdout handling is the agent/operator contract. The supervisor needs typed in-process reuse of the same Pithos semantics so queue inspection and durable state transitions stay fast, testable, and schema-shaped without subprocess parsing or env plumbing.
 
 - **Decision:** Pithos seeds and enforces built-in agents/capabilities.
@@ -140,7 +140,7 @@ Layer responsibilities:
 | Spawner | templates, prompt rendering, harness argv/env, AFK launch, HITL tmux creation, launch metadata      | registration, cleanup, status, kill, nudge, reclaim |
 | pdx     | reconcile, in-memory registry, caps, process/tmux ownership, status, kill, wakeups, supervisor logs | DB invariants, prompt/task content injection        |
 
-`@pithos/pithos` is the supervisor-facing integration boundary. `pdx` calls typed library operations directly for queue inspection and run/task mutations. The `pithos` CLI is the agent/operator boundary only; when this spec says `pithos run cleanup`, `pithos briefing`, or similar in pdx flows, it names the corresponding Pithos operation and semantics, not a required subprocess invocation.
+`@pdx/pithos` is the supervisor-facing integration boundary. `pdx` calls typed library operations directly for queue inspection and run/task mutations. The `pithos` CLI is the agent/operator boundary only; when this spec says `pithos run cleanup`, `pithos briefing`, or similar in pdx flows, it names the corresponding Pithos operation and semantics, not a required subprocess invocation.
 
 `pdx` has no persisted registry in MVP. On startup it does not adopt old sessions. It kills and confirms deterministic old tmux/process leftovers, cleans active built-in Pithos runs, and begins with a fresh in-memory registry. HITL leftovers are discovered with `tmux ls -F '#S'` filtered by `^pdx--`. AFK leftovers are discovered from pdx-owned pidfiles under `<data-dir>/runs/<run-id>.pid`; pdx writes pidfiles at AFK launch and removes them during cleanup.
 
@@ -350,7 +350,7 @@ Rules:
 
 ## 7. CLI Interfaces
 
-These commands are the public CLI contract for agents and operators. `pdx` does not shell out to this surface; it uses the corresponding `@pithos/pithos` library operations directly.
+These commands are the public CLI contract for agents and operators. `pdx` does not shell out to this surface; it uses the corresponding `@pdx/pithos` library operations directly.
 
 Clean-break nested command surface:
 
@@ -602,7 +602,7 @@ The internal daemon tmux pane may also print concise human-readable lifecycle pu
 
 Spawner is primarily a library/module used by `pdx`.
 
-Layered library API exported from `@pithos/spawner` package root:
+Layered library API exported from `@pdx/spawner` package root:
 
 ```ts
 renderAgent(input): RenderedAgent
@@ -611,7 +611,7 @@ launchAgent(input): LaunchResult
 renderSessionTranscript(input): string
 ```
 
-The package root also exports the public service interfaces and intended live implementation used by consumers. Consumers must import `@pithos/spawner`, not sibling package `src/*` internals.
+The package root also exports the public service interfaces and intended live implementation used by consumers. Consumers must import `@pdx/spawner`, not sibling package `src/*` internals.
 
 `renderAgent` is pure render/preview: no Pithos mutation, no process launch, no tmux creation. It loads and validates manifest/templates, validates supplied mode against manifest mode, renders the prompt, builds harness argv/env, and generates `claim_command`.
 

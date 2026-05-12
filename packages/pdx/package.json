@@ -1,5 +1,5 @@
 {
-	"name": "@pithos/pdx",
+	"name": "@pdx/pdx",
 	"version": "0.1.0",
 	"private": true,
 	"bin": {
@@ -17,8 +17,8 @@
 	"dependencies": {
 		"@effect/cli": "catalog:",
 		"@effect/platform-node": "catalog:",
-		"@pithos/pithos": "workspace:*",
-		"@pithos/spawner": "workspace:*",
+		"@pdx/pithos": "workspace:*",
+		"@pdx/spawner": "workspace:*",
 		"better-sqlite3": "^12.9.0",
 		"effect": "catalog:"
 	}

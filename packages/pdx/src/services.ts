@@ -1,5 +1,5 @@
 import { Context, Effect, SynchronizedRef } from "effect";
-import type { RunOutput as PithosRunOutput } from "@pithos/pithos";
+import type { RunOutput as PithosRunOutput } from "@pdx/pithos";
 import type { PdxError } from "./errors.js";
 
 export interface ProcessResult {

@@ -29,9 +29,9 @@ All four must be green. No "leftover issues", no "next commit". Never
 To narrow to a single package while iterating:
 
 ```sh
-pnpm --filter @pithos/pithos test
-pnpm --filter @pithos/pdx start --help
-pnpm --filter @pithos/spawner start -- preview \
+pnpm --filter @pdx/pithos test
+pnpm --filter @pdx/pdx start --help
+pnpm --filter @pdx/spawner start -- preview \
   --agent war --mode afk --scope scope_repo --run run_demo \
   --session-id 123e4567-e89b-12d3-a456-426614174000 --cwd "$PWD"
 ```

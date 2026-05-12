@@ -1,5 +1,5 @@
 {
-	"name": "@pithos/spawner",
+	"name": "@pdx/spawner",
 	"version": "0.1.0",
 	"private": true,
 	"keywords": [
@@ -27,7 +27,7 @@
 		"@effect/cli": "catalog:",
 		"@effect/platform": "catalog:",
 		"@effect/platform-node": "catalog:",
-		"@pithos/pithos": "workspace:*",
+		"@pdx/pithos": "workspace:*",
 		"effect": "catalog:"
 	}
 }

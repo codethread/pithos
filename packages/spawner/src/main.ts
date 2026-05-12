@@ -81,13 +81,13 @@ const previewCommand = Command.make(
 
 const command = Command.make("pandora-spawn").pipe(
 	Command.withDescription(
-		"Harness prompt renderer for Pithos agent runs. Launch, kill, and supervision are owned by pdx.",
+		"Harness prompt renderer for Pandora's Box agent runs. Launch, kill, and supervision are owned by pdx.",
 	),
 	Command.withSubcommands([previewCommand]),
 );
 
 const cli = Command.run(command, {
-	name: "Pithos Spawner",
+	name: "Pandora's Box Spawner",
 	version: "0.1.0",
 	executable: "pandora-spawn",
 });

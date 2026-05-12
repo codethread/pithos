@@ -17,9 +17,9 @@ import {
 	renderAgent,
 	renderSessionTranscript,
 	SpawnerError,
-} from "@pithos/spawner";
-import { liveServices, makeEngine, PithosError } from "@pithos/pithos";
-import type { Config as PithosConfig } from "@pithos/pithos";
+} from "@pdx/spawner";
+import { liveServices, makeEngine, PithosError } from "@pdx/pithos";
+import type { Config as PithosConfig } from "@pdx/pithos";
 import { PdxError } from "./errors.js";
 import {
 	FileSystem,

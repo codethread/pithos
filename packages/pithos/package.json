@@ -1,5 +1,5 @@
 {
-	"name": "@pithos/pithos",
+	"name": "@pdx/pithos",
 	"version": "0.1.0",
 	"private": true,
 	"bin": {

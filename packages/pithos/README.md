@@ -1,10 +1,10 @@
-# @pithos/pithos
+# @pdx/pithos
 
 Developer documentation for the Pithos package: the durable state system for Pandora's Box.
 
 ## Package role
 
-`@pithos/pithos` exposes the `pithos` binary and the typed library boundary used by `pdx`.
+`@pdx/pithos` exposes the `pithos` binary and the typed library boundary used by `pdx`.
 
 For the generated CLI surface, use help instead of copying command lists here:
 
@@ -45,15 +45,15 @@ Pithos is the durable source of truth for:
 
 | Package                       | Pithos integration                                               | Boundary                                                            |
 | ----------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `@pithos/pdx`                 | imports `makeEngine` and `liveServices` through the package root | typed in-process durable state transitions; no subprocess parsing   |
-| `@pithos/spawner`             | imports `@pithos/pithos/builtins` and calls `pithos --help-json` | validates render config against built-ins and renders command cards |
+| `@pdx/pdx`                    | imports `makeEngine` and `liveServices` through the package root | typed in-process durable state transitions; no subprocess parsing   |
+| `@pdx/spawner`                | imports `@pdx/pithos/builtins` and calls `pithos --help-json`    | validates render config against built-ins and renders command cards |
 | Harness CLIs (`claude`, `pi`) | no direct integration                                            | Harness sessions are represented only by Run transcript metadata    |
 
 The composed behavior is specified in [`../../specs/control-plane-supervision.md`](../../specs/control-plane-supervision.md) and Task graph semantics in [`../../specs/task-graph.md`](../../specs/task-graph.md). Use [`../../UBIQUITOUS_LANGUAGE.md`](../../UBIQUITOUS_LANGUAGE.md) for terms.
 
 ## Public package surface
 
-Exported from `@pithos/pithos`:
+Exported from `@pdx/pithos`:
 
 - CLI helpers: `makePithosCommand`, `runPithosCli`, `renderPithosHelpJson`.
 - Engine boundary: `makeEngine`, `Engine`, render helpers for briefing/graph/task inspect text.
@@ -61,7 +61,7 @@ Exported from `@pithos/pithos`:
 - Chain helpers: chain-policy resolution and graph dependency utilities.
 - Config/services/errors: `loadConfig`, `liveServices`, `PithosError`.
 
-Exported from `@pithos/pithos/builtins`:
+Exported from `@pdx/pithos/builtins`:
 
 - built-in Agent kinds
 - system actors
@@ -201,24 +201,24 @@ Use isolated DBs for development and smoke tests:
 export PDX_DATA_DIR="$(mktemp -d)/pdx"
 export PITHOS_DB="$PDX_DATA_DIR/pithos.sqlite"
 mkdir -p "$PDX_DATA_DIR"
-pnpm --filter @pithos/pithos start -- init --fresh
+pnpm --filter @pdx/pithos start -- init --fresh
 ```
 
 ## Development
 
 ```sh
-pnpm --filter @pithos/pithos typecheck
-pnpm --filter @pithos/pithos test
-pnpm --filter @pithos/pithos start -- --help
-pnpm --filter @pithos/pithos start -- --help-json
+pnpm --filter @pdx/pithos typecheck
+pnpm --filter @pdx/pithos test
+pnpm --filter @pdx/pithos start -- --help
+pnpm --filter @pdx/pithos start -- --help-json
 ```
 
 Basic isolated CLI check:
 
 ```sh
 export PITHOS_DB="$(mktemp -d)/pithos.sqlite"
-pnpm --filter @pithos/pithos start -- init --fresh
-pnpm --filter @pithos/pithos start -- scope list
+pnpm --filter @pdx/pithos start -- init --fresh
+pnpm --filter @pdx/pithos start -- scope list
 ```
 
 Prefer real isolated SQLite fixtures for behavior tests. Do not replace DB invariant tests with broad mocks.

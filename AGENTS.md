@@ -23,9 +23,9 @@ make local   # symlinks bins into ~/.local/bin; requires it on PATH
 Fast dev run without the full build/link pipeline:
 
 ```sh
-pnpm --filter @pithos/pithos start -- --help
-pnpm --filter @pithos/pdx start -- --help
-pnpm --filter @pithos/spawner start -- --help
+pnpm --filter @pdx/pithos start -- --help
+pnpm --filter @pdx/pdx start -- --help
+pnpm --filter @pdx/spawner start -- --help
 ```
 
 ## Smoke-test environment

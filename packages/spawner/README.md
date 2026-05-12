@@ -1,10 +1,10 @@
-# @pithos/spawner
+# @pdx/spawner
 
-Developer map for the Spawner package: the Harness launcher for built-in Agent runs.
+Developer map for the Spawner package: the Harness launcher for Pandora's Box Agent runs.
 
 ## Package role
 
-`@pithos/spawner` is a library used by `pdx`. It also exposes one preview binary:
+`@pdx/spawner` is a library used by `pdx`. It also exposes one preview binary:
 
 ```sh
 pandora-spawn --help
@@ -65,7 +65,7 @@ Specs describe the full control plane: [`../../specs/control-plane-supervision.m
 
 ## Public library surface
 
-Exported from `@pithos/spawner`:
+Exported from `@pdx/spawner`:
 
 - `renderAgent(input)` — pure render/validation. No launch.
 - `launchRenderedAgent(rendered)` — launch an already-rendered plan.
@@ -185,10 +185,10 @@ Read `src/spawner.ts` for exact argv construction. Stable behavior worth knowing
 ## Development
 
 ```sh
-pnpm --filter @pithos/spawner typecheck
-pnpm --filter @pithos/spawner test
-pnpm --filter @pithos/spawner start -- --help
-pnpm --filter @pithos/spawner start -- preview --help
+pnpm --filter @pdx/spawner typecheck
+pnpm --filter @pdx/spawner test
+pnpm --filter @pdx/spawner start -- --help
+pnpm --filter @pdx/spawner start -- preview --help
 ```
 
 Preview with an isolated DB context:
@@ -197,8 +197,8 @@ Preview with an isolated DB context:
 export PDX_DATA_DIR="$(mktemp -d)/pdx"
 export PITHOS_DB="$PDX_DATA_DIR/pithos.sqlite"
 mkdir -p "$PDX_DATA_DIR"
-pnpm --filter @pithos/pithos start -- init --fresh
-pnpm --filter @pithos/spawner start -- preview \
+pnpm --filter @pdx/pithos start -- init --fresh
+pnpm --filter @pdx/spawner start -- preview \
   --agent war \
   --mode afk \
   --scope scope_repo \

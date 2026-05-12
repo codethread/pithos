@@ -1,11 +1,11 @@
 {
-	"name": "pithos-marketplace",
+	"name": "pandoras-box-marketplace",
 	"owner": {
 		"name": "codethread",
 		"email": "adamhalldesigns@gmail.com"
 	},
 	"metadata": {
-		"description": "Pithos Claude Code plugin marketplace"
+		"description": "Pandora's Box Claude Code plugin marketplace"
 	},
 	"plugins": [
 		{

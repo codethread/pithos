@@ -24,7 +24,7 @@ const base = {
 
 const piBucket = (cwd: string): string => `--${cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-")}--`;
 const claudeSessionPath = (cwd: string, sessionId: string): string =>
-	`${homedir()}/.claude/projects/${cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-")}/${sessionId}.jsonl`;
+	`${homedir()}/.claude/projects/${cwd.replace(/[/:\\]/g, "-")}/${sessionId}.jsonl`;
 const piSessionPath = (cwd: string, sessionId: string): string =>
 	`${homedir()}/.pi/agent/sessions/${piBucket(cwd)}/${sessionId}.jsonl`;
 

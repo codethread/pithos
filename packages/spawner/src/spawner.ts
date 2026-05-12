@@ -399,7 +399,7 @@ const logicalName = (input: RenderAgentInput): string =>
 		? "pdx--pandora"
 		: `pdx--${input.agent}__${input.scopeId.replace(/[^a-zA-Z0-9]+/g, "-")}--${input.sessionId.slice(0, 8)}`;
 
-const claudeProjectSlug = (cwd: string): string => cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-");
+const claudeProjectSlug = (cwd: string): string => cwd.replace(/[/:\\]/g, "-");
 
 const piSessionBucket = (cwd: string): string =>
 	`--${cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-")}--`;

@@ -24,6 +24,7 @@ import {
 	Spawner,
 	SupervisorLog,
 	Tmux,
+	type FileSystemService,
 	type LaunchAgentInput,
 	type LaunchAgentResult,
 	type PithosClientService,
@@ -113,8 +114,9 @@ const parseConfig = (dataDir: string, envHome = "/tmp/user-home") =>
 	run(parsePdxConfig(configInput(dataDir, envHome)));
 
 interface ReadyTaskInput {
+	readonly id?: string;
 	readonly scope_id: string;
-	readonly capability: string;
+	readonly capability: "triage" | "design" | "execute" | "escalate";
 	readonly scope_kind?: "global" | "repo" | "worktree";
 	readonly canonical_path?: string | null;
 }
@@ -173,6 +175,8 @@ const makePithos = (
 			}),
 		runTimeout: (input) =>
 			Effect.sync(() => calls.push(`runTimeout:${input.runId}:${input.reason}`)),
+		runLaunchAbort: (input) =>
+			Effect.sync(() => calls.push(`runLaunchAbort:${input.runId}:${input.reason}`)),
 		runInspect: (input) => Effect.succeed(runOutput({ id: input.runId })),
 		activeRunForTask: () =>
 			Effect.succeed(
@@ -184,13 +188,35 @@ const makePithos = (
 					task_id: "task_held",
 				}),
 			),
-		taskInspect: (input) => Effect.succeed({ task: { id: input.taskId, status: "queued" } }),
+		taskInspect: (input) =>
+			Effect.succeed({
+				task: {
+					id: input.taskId,
+					status: "queued",
+					scope_id: ready[0]?.scope_id ?? "scope_repo",
+					capability: ready[0]?.capability ?? "execute",
+					canonical_path: ready[0]?.canonical_path ?? "/repo",
+				},
+			}),
 		taskHeartbeat: (input) => Effect.sync(() => calls.push(`taskHeartbeat:${input.runId}`)),
 		taskEnqueue: (input) =>
 			Effect.sync(() => calls.push(`taskEnqueue:${input.capability}:${input.title}`)),
+		escalateLaunchPrecondition: (input) =>
+			Effect.sync(() =>
+				calls.push(
+					`escalateLaunchPrecondition:${input.expectedTaskId}:${input.expectedScopeId}:${input.canonicalPath}`,
+				),
+			),
+		createRepairEscalation: (input) =>
+			Effect.sync(() =>
+				calls.push(
+					`createRepairEscalation:${input.affectedTaskId}:${input.sourceKind}:${input.escalationTitle}`,
+				),
+			),
 		briefing: () =>
 			Effect.succeed(
-				ready.map((task) => ({
+				ready.map((task, index) => ({
+					id: task.id ?? `task_ready_${index}`,
 					scope_kind: task.scope_kind ?? "global",
 					canonical_path: task.canonical_path ?? null,
 					...task,
@@ -230,6 +256,7 @@ const noopFs = FileSystem.of({
 	appendFile: () => Effect.void,
 	readFile: () => Effect.succeed(""),
 	readDirectory: () => Effect.succeed([]),
+	existsDirectory: () => Effect.succeed(true),
 	mkdir: () => Effect.void,
 	writeFileAtomic: () => Effect.void,
 	removeFile: () => Effect.void,
@@ -238,7 +265,11 @@ const noopFs = FileSystem.of({
 const pithosTestServices = (): PithosServices => {
 	let counter = 0;
 	return {
-		fs: { readText: () => Effect.succeed("{}"), removeFile: () => Effect.void },
+		fs: {
+			readText: () => Effect.succeed("{}"),
+			removeFile: () => Effect.void,
+			existsDirectory: () => Effect.succeed(true),
+		},
 		input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
 		output: { write: () => Effect.void, writeError: () => Effect.void },
 		ids: {
@@ -302,6 +333,13 @@ const runSpawnTick = async (input: {
 	readonly maxAfk?: number;
 	readonly runId?: string;
 	readonly sessionId?: string;
+	readonly fs?: FileSystemService;
+	readonly launchAgent?: (
+		launch: LaunchAgentInput,
+	) => Effect.Effect<
+		Partial<LaunchAgentResult> & LaunchAgentInput & { readonly logicalName: string },
+		PdxError
+	>;
 }) =>
 	run(
 		reconcileTick(await parseConfig(input.dataDir), input.maxAfk).pipe(
@@ -318,28 +356,30 @@ const runSpawnTick = async (input: {
 			Effect.provideService(
 				Spawner,
 				makeSpawner({
-					launchAgent: (launch) =>
-						Effect.sync(() => {
-							input.launches.push(launch);
-							return launch.mode === "hitl"
-								? {
-										...launch,
-										logicalName: `pdx--${launch.agent}`,
-										hitl: { tmuxTarget: `pdx--${launch.agent}`, panePid: 1 },
-									}
-								: {
-										...launch,
-										logicalName: `pdx--${launch.agent}`,
-										afk: { pid: 456, processStartTime: "now" },
-									};
-						}),
+					launchAgent:
+						input.launchAgent ??
+						((launch) =>
+							Effect.sync(() => {
+								input.launches.push(launch);
+								return launch.mode === "hitl"
+									? {
+											...launch,
+											logicalName: `pdx--${launch.agent}`,
+											hitl: { tmuxTarget: `pdx--${launch.agent}`, panePid: 1 },
+										}
+									: {
+											...launch,
+											logicalName: `pdx--${launch.agent}`,
+											afk: { pid: 456, processStartTime: "now" },
+										};
+							})),
 				}),
 			),
 			Effect.provideService(Tmux, alwaysLiveTmux),
 			Effect.provideService(Process, alwaysLiveProcess),
 			Effect.provideService(SupervisorLog, testLog),
 			Effect.provideService(LifecycleReporter, testLifecycle),
-			Effect.provideService(FileSystem, noopFs),
+			Effect.provideService(FileSystem, input.fs ?? noopFs),
 			Effect.provideService(Clock, testClock),
 		),
 	);
@@ -474,6 +514,7 @@ describe("pdx substrate", () => {
 			appendFile: (_path, content) => Effect.sync(() => writes.push(content)),
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -553,6 +594,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: (path) => Effect.sync(() => calls.push(`mkdir:${path}`)),
 			writeFileAtomic: () => Effect.void,
 			removeFile: (path) => Effect.sync(() => calls.push(`remove:${path}`)),
@@ -646,6 +688,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -685,6 +728,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -741,6 +785,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -785,6 +830,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -819,6 +865,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: (path) => Effect.sync(() => mkdirs.push(path)),
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -980,6 +1027,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: (path) => Effect.succeed(path.endsWith("run_live.pid") ? "456\n" : "789\n"),
 			readDirectory: () => Effect.succeed(["run_live.pid", "run_stale.pid", "note.txt"]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -1060,6 +1108,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -1149,6 +1198,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -1186,6 +1236,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -1215,6 +1266,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(`${lines.join("\n")}\n`),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -1263,6 +1315,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(`${line}\n`),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -1299,6 +1352,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed("{\n"),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -1315,6 +1369,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(`${line}\n\n${line}\n`),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
 			removeFile: () => Effect.void,
@@ -1522,7 +1577,16 @@ describe("pdx substrate", () => {
 		const config = await parseConfig("/tmp/pdx-show-task");
 		const pithos = makePithos([], [], {
 			activeRunForTask: () => Effect.succeed(null),
-			taskInspect: (input) => Effect.succeed({ task: { id: input.taskId, status: "queued" } }),
+			taskInspect: (input) =>
+				Effect.succeed({
+					task: {
+						id: input.taskId,
+						status: "queued",
+						scope_id: "scope_repo",
+						capability: "execute",
+						canonical_path: "/repo",
+					},
+				}),
 		});
 		await expect(
 			run(
@@ -1649,7 +1713,7 @@ describe("pdx substrate", () => {
 			}),
 		);
 		const calls: string[] = [];
-		const enqueues: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
+		const repairEscalations: Parameters<PithosClientService["createRepairEscalation"]>[0][] = [];
 		const pithos = makePithos(calls, [], {
 			activeRunForTask: () =>
 				Effect.succeed(
@@ -1674,10 +1738,12 @@ describe("pdx substrate", () => {
 					}),
 					interruptedTask: { id: "task_held", scope_id: "scope_repo" },
 				}),
-			taskEnqueue: (input) =>
+			createRepairEscalation: (input) =>
 				Effect.sync(() => {
-					enqueues.push(input);
-					calls.push(`taskEnqueue:${input.capability}:${input.title}`);
+					repairEscalations.push(input);
+					calls.push(
+						`createRepairEscalation:${input.affectedTaskId}:${input.sourceKind}:${input.escalationTitle}`,
+					);
 				}),
 		});
 		const kills: string[] = [];
@@ -1706,16 +1772,18 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(kills).toEqual(["321:SIGTERM"]);
-		expect(calls).toContain("taskEnqueue:escalate:Investigate interrupted task task_held");
-		expect(enqueues[0]).toMatchObject({
-			scope: "global",
-			capability: "escalate",
+		expect(calls).toContain(
+			"createRepairEscalation:task_held:repair_source:Investigate interrupted task task_held",
+		);
+		expect(repairEscalations[0]).toMatchObject({
 			runId: PDX_SYSTEM_RUN_ID,
+			affectedTaskId: "task_held",
+			sourceKind: "repair_source",
 		});
-		expect(enqueues[0]?.body).toContain("Run: run_new_owner");
-		expect(enqueues[0]?.body).toContain("Task: task_held");
-		expect(enqueues[0]?.body).toContain("Scope: scope_repo");
-		expect(enqueues[0]?.body).toContain("Reason: operator stop");
+		expect(repairEscalations[0]?.escalationBody).toContain("Run: run_new_owner");
+		expect(repairEscalations[0]?.escalationBody).toContain("Task: task_held");
+		expect(repairEscalations[0]?.escalationBody).toContain("Scope: scope_repo");
+		expect(repairEscalations[0]?.escalationBody).toContain("Reason: operator stop");
 		expect(await run(registry.list)).toContainEqual(
 			expect.objectContaining({ runId: "run_new_owner", state: "terminating" }),
 		);
@@ -1957,6 +2025,80 @@ describe("pdx substrate", () => {
 		expect(await run(registry.list)).toContainEqual(
 			expect.objectContaining({ runId: "run_toil", agent: "toil", state: "live", pid: 123 }),
 		);
+	});
+
+	it("missing repo cwd before run creation repairs launch precondition without spawning", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const calls: string[] = [];
+		const launches: unknown[] = [];
+		await runSpawnTick({
+			dataDir,
+			registry,
+			pithos: makePithos(calls, [
+				{
+					id: "task_execute",
+					scope_id: "scope_repo",
+					capability: "execute",
+					scope_kind: "repo",
+					canonical_path: "/missing-repo",
+				},
+			]),
+			launches,
+			fs: { ...noopFs, existsDirectory: () => Effect.succeed(false) },
+		});
+		expect(launches).toEqual([]);
+		expect(calls).not.toContain("runUpsert:war:run_war");
+		expect(calls).toContain("escalateLaunchPrecondition:task_execute:scope_repo:/missing-repo");
+		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
+	});
+
+	it("aborts no-claim run and repairs launch precondition when cwd disappears during launch", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const calls: string[] = [];
+		const launches: unknown[] = [];
+		let existsChecks = 0;
+		await runSpawnTick({
+			dataDir,
+			registry,
+			pithos: makePithos(calls, [
+				{
+					id: "task_execute",
+					scope_id: "scope_repo",
+					capability: "execute",
+					scope_kind: "repo",
+					canonical_path: "/repo-vanished",
+				},
+			]),
+			launches,
+			fs: {
+				...noopFs,
+				existsDirectory: () =>
+					Effect.sync(() => {
+						existsChecks += 1;
+						return existsChecks < 3;
+					}),
+			},
+			launchAgent: (launch) =>
+				Effect.sync(() => launches.push(launch)).pipe(
+					Effect.zipRight(
+						Effect.fail(new PdxError({ code: "LAUNCH_ERROR", message: "cwd vanished" })),
+					),
+				),
+		});
+		expect(launches).toEqual([expect.objectContaining({ agent: "war", cwd: "/repo-vanished" })]);
+		expect(calls).toEqual(
+			expect.arrayContaining([
+				"runUpsert:war:run_war",
+				"runLaunchAbort:run_war:launch_precondition_failed",
+				"escalateLaunchPrecondition:task_execute:scope_repo:/repo-vanished",
+			]),
+		);
+		expect(calls).not.toContain("runCleanup:run_war:launch_failed");
+		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
 	});
 
 	it.each(["launching", "live", "terminating"] as const)(
@@ -2248,6 +2390,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: (path, content) => Effect.sync(() => writes.push(`${path}:${content}`)),
 			removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -2381,6 +2524,7 @@ describe("pdx substrate", () => {
 						appendFile: () => Effect.void,
 						readFile: () => Effect.succeed(""),
 						readDirectory: () => Effect.succeed([]),
+						existsDirectory: () => Effect.succeed(true),
 						mkdir: () => Effect.void,
 						writeFileAtomic: () => Effect.void,
 						removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -2702,6 +2846,7 @@ describe("pdx substrate", () => {
 						appendFile: () => Effect.void,
 						readFile: () => Effect.succeed(""),
 						readDirectory: () => Effect.succeed([]),
+						existsDirectory: () => Effect.succeed(true),
 						mkdir: () => Effect.void,
 						writeFileAtomic: (path) => Effect.sync(() => writes.push(path)),
 						removeFile: () => Effect.void,
@@ -2764,6 +2909,7 @@ describe("pdx substrate", () => {
 							appendFile: () => Effect.void,
 							readFile: () => Effect.succeed(""),
 							readDirectory: () => Effect.succeed([]),
+							existsDirectory: () => Effect.succeed(true),
 							mkdir: () => Effect.void,
 							writeFileAtomic: () => Effect.void,
 							removeFile: (path) => Effect.sync(() => removes.push(path)),
@@ -2786,6 +2932,7 @@ describe("pdx substrate", () => {
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
 			readDirectory: () => Effect.succeed([]),
+			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () =>
 				Effect.fail(new PdxError({ code: "FS_ERROR", message: "pidfile write failed" })),
@@ -2865,7 +3012,8 @@ describe("pdx substrate", () => {
 		const pithos = makePithos([], [], {
 			briefing: () =>
 				Effect.succeed(
-					ready.map((task) => ({
+					ready.map((task, index) => ({
+						id: task.id ?? `task_ready_${index}`,
 						scope_kind: task.scope_kind ?? "global",
 						canonical_path: task.canonical_path ?? null,
 						...task,

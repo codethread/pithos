@@ -12,22 +12,23 @@
 
 ## Work graph and chains
 
-| Term                        | Definition                                                                                                                                                    | Aliases to avoid                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| **Task graph**              | The full durable relationship map Pithos stores and inspects: tasks, dependencies, source links, supersessions, artifacts, runs, and events.                  | Task chain, workflow, DAG if it obscures the product purpose                    |
-| **Task chain**              | The work thread the user and agents discuss: the delegation path from initial triage through design, escalation/review, execution, result review, and repair. | Task graph, pipeline if it implies fixed stages, persisted chain object         |
-| **Task**                    | A durable unit of queue work in Pithos.                                                                                                                       | Job, claim, ticket, inbox item                                                  |
-| **Capability**              | A task category that determines which agent kind may claim the task.                                                                                          | Skill, stage, recipe step, queue name                                           |
-| **Dependency**              | A blocking graph edge meaning the upstream task must be `done` before the downstream task is claimable.                                                       | Blocker link, parent, prerequisite if it implies non-success states can satisfy |
-| **Source link**             | A non-blocking provenance edge meaning this task is about, or came from, a source task. It helps reconstruct the chain but does not affect claimability.      | relates_to, dependency, parent, blocker                                         |
-| **Supersession**            | A replacement edge from a fresh task to the task it replaces while preserving history.                                                                        | Edit, retry, rewire, resume                                                     |
-| **Artifact**                | Evidence or output attached to a task or run.                                                                                                                 | Message, inbox item, notification                                               |
-| **Attached context**        | Durable context connected to a task chain for later interrogation without necessarily being a blocking task step, such as artifacts, source links, or events. | Edge if it is not a relationship, task if it is not claimable work              |
-| **Escalation task**         | A normal global-scope `escalate` capability task that routes attention to Pandora.                                                                            | Escalated status, blocked task, inbox message, nudge                            |
-| **Checkpoint escalation**   | An escalation task that depends on successful prior work and becomes claimable only after that work is `done`.                                                | Review gate, approval artifact                                                  |
-| **Interruption escalation** | A global escalation task that references a failed/interrupted task without depending on it.                                                                   | Failure dependency, blocked escalation                                          |
-| **Claimable task**          | A queued task whose dependencies are all `done` and whose capability can be claimed by an allowed agent.                                                      | Open claim, available claim, ready task                                         |
-| **Broken chain**            | A task chain blocked by a failed, cancelled, or dead-lettered dependency.                                                                                     | Blocked chain, failed queue                                                     |
+| Term                               | Definition                                                                                                                                                                                                                                        | Aliases to avoid                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| **Task graph**                     | The full durable relationship map Pithos stores and inspects: tasks, dependencies, source links, supersessions, artifacts, runs, and events.                                                                                                      | Task chain, workflow, DAG if it obscures the product purpose                    |
+| **Task chain**                     | The work thread the user and agents discuss: the delegation path from initial triage through design, escalation/review, execution, result review, and repair.                                                                                     | Task graph, pipeline if it implies fixed stages, persisted chain object         |
+| **Task**                           | A durable unit of queue work in Pithos.                                                                                                                                                                                                           | Job, claim, ticket, inbox item                                                  |
+| **Capability**                     | A task category that determines which agent kind may claim the task.                                                                                                                                                                              | Skill, stage, recipe step, queue name                                           |
+| **Dependency**                     | A blocking graph edge meaning the upstream task must be `done` before the downstream task is claimable.                                                                                                                                           | Blocker link, parent, prerequisite if it implies non-success states can satisfy |
+| **Source link**                    | A non-blocking provenance edge meaning this task is about, or came from, a source task. It helps reconstruct the chain but does not affect claimability. Source links may be normal continuation provenance or repair provenance for broken work. | relates_to, dependency, parent, blocker                                         |
+| **Supersession**                   | A replacement edge from a fresh task to the task it replaces while preserving history.                                                                                                                                                            | Edit, retry, rewire, resume                                                     |
+| **Artifact**                       | Evidence or output attached to a task or run.                                                                                                                                                                                                     | Message, inbox item, notification                                               |
+| **Attached context**               | Durable context connected to a task chain for later interrogation without necessarily being a blocking task step, such as artifacts, source links, or events.                                                                                     | Edge if it is not a relationship, task if it is not claimable work              |
+| **Escalation task**                | A normal global-scope `escalate` capability task that routes attention to Pandora.                                                                                                                                                                | Escalated status, blocked task, inbox message, nudge                            |
+| **Checkpoint escalation**          | An escalation task that depends on successful prior work and becomes claimable only after that work is `done`.                                                                                                                                    | Review gate, approval artifact                                                  |
+| **Interruption escalation**        | A global escalation task that references a failed/interrupted task without depending on it.                                                                                                                                                       | Failure dependency, blocked escalation                                          |
+| **Launch-precondition escalation** | A global escalation task created by **pdx** when queued work cannot be launched because its scope runtime path is invalid before any **Run** claims it. It references the cancelled task without depending on it.                                 | Spawn failure, retry, blocked escalation                                        |
+| **Claimable task**                 | A queued task whose dependencies are all `done` and whose capability can be claimed by an allowed agent.                                                                                                                                          | Open claim, available claim, ready task                                         |
+| **Broken chain**                   | A task chain blocked by a failed, cancelled, or dead-lettered dependency.                                                                                                                                                                         | Blocked chain, failed queue                                                     |
 
 ## Runs
 
@@ -103,8 +104,9 @@ Task transitions apply to queue work, not to the live agent run.
 - The seeded **pdx** system actor is an **Agent kind** for durable authorship only; it is not spawnable and has no claims.
 - A **Dependency** is satisfied only when the upstream **Task** is `done`.
 - A **Supersession** replaces one **Task** with exactly one fresh replacement task.
-- All **Escalation tasks** live in global scope. A **Checkpoint escalation** depends on successful prior work; an **Interruption escalation** references failed work without depending on it.
-- A normal attention **Escalation task** may carry a **Source link** to the task it is about so **Pandora** can route the chain onward without making the escalation wait on that source.
+- All **Escalation tasks** live in global scope. A **Checkpoint escalation** depends on successful prior work; an **Interruption escalation** references failed work without depending on it; a **Launch-precondition escalation** references cancelled unlaunchable work without depending on it.
+- A normal attention **Escalation task** may carry a continuation **Source link** to the task it is about so **Pandora** can route the chain onward without making the escalation wait on that source.
+- An **Interruption escalation** or **Launch-precondition escalation** carries a repair **Source link** to broken work; **Pandora** should repair it with **Supersession** or explicit replanning, not ordinary chain continuation.
 - **pdx** uses the **Spawner** to launch **Agent runs** and is the only owner of **Run** finalization, **Cleanup**, **Interrupt**, and **Kill** policy.
 - **Spawner** translates an **Agent kind** plus launch context into a **Harness session**.
 - A **Harness** runs prompts and writes session logs; it does not own Pithos graph policy or control-plane placement.
@@ -119,6 +121,7 @@ Task transitions apply to queue work, not to the live agent run.
 - pdx calls **Cleanup** only after it has observed or confirmed that the **Agent run** execution resource is gone.
 - A non-Pandora **No-claim session** that exceeds the bootstrap timeout becomes a **Timed out run**; no **Task** is mutated.
 - **Interrupt** acts on a **Run** and may mutate its **Held task**; **Cancel** acts on a **Task** that is not actively held.
+- If **pdx** finds a **Claimable task** whose repo/worktree runtime path no longer exists before run creation, no **Run** is created. If that path disappears after a run row is created but before launch succeeds, **pdx** terminalizes the no-claim **Run** before repairing the queued task. In both cases **pdx** uses **Cancel** on the queued task and creates a **Launch-precondition escalation** for **Pandora** to repair with **Supersession** or replanning.
 
 ## Example dialogue
 
@@ -133,6 +136,10 @@ Task transitions apply to queue work, not to the live agent run.
 > **Dev:** "Does that escalation depend on the failed task?"
 >
 > **Domain expert:** "No. A **Dependency** only unblocks on `done`, so an **Interruption escalation** references the failed task without depending on it."
+>
+> **Dev:** "What if a repo directory vanished before War launched?"
+>
+> **Domain expert:** "No one held the task yet, so **pdx** does not mark it `failed`. It uses **Cancel** on the queued task, creates a **Launch-precondition escalation**, and Pandora repairs the **Broken chain** by recreating/upserting the scope and superseding the cancelled task or replanning."
 >
 > **Dev:** "How does work continue after Pandora reviews it?"
 >
@@ -152,6 +159,7 @@ Task transitions apply to queue work, not to the live agent run.
 - "Restart" was ambiguous between **Same-run resurrection** and spawning a **Fresh run** after **Cleanup**; avoid "restart" unless explicitly qualified.
 - "Kill", "Interrupt", "Cancel", and "Cleanup" were conflated; use **Kill** for the pdx operator action, **Interrupt** for the Pithos transition behind a live run stop, **Cancel** for abandoning non-held tasks, and **Cleanup** for confirmed natural lifecycle death.
 - "Nudge" previously meant prompt/message injection; use **Wakeup** for content-free notification and avoid **nudge** in the new control plane.
+- "Launch failure" can mean invalid scope runtime path or harness/config/process failure. Use **Launch-precondition escalation** only for the former; harness/config/process failures remain supervisor errors and must not silently cancel user work.
 - "Spawner" was overloaded as launcher and supervisor; use **Spawner** only for harness launch, and **pdx** for supervision and Run finalization.
 - "Coordinator" under-described Pandora because she claims work; call **Pandora** a long-lived HITL agent that consumes **Escalation tasks**.
 - "Agent" can mean a role, a live invocation, or the underlying model runtime; use **Agent kind** for the role, **Agent run** or **Run** for the invocation, and **Harness** for Claude/Pi.

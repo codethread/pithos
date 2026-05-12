@@ -9,6 +9,7 @@ import {
 	readlink,
 	rename,
 	rm,
+	stat,
 	symlink,
 	writeFile,
 } from "node:fs/promises";
@@ -123,6 +124,18 @@ export const FileSystemLive = FileSystem.of({
 			try: () => readdir(path),
 			catch: (error) => fsError("readDirectory", error),
 		}),
+	existsDirectory: (path) =>
+		Effect.tryPromise({
+			try: async () => {
+				try {
+					return (await stat(path)).isDirectory();
+				} catch (error) {
+					if (isNodeErrorCode(error, "ENOENT")) return false;
+					throw error;
+				}
+			},
+			catch: (error) => fsError("existsDirectory", error),
+		}),
 	mkdir: (path) =>
 		Effect.tryPromise({
 			try: () => mkdir(path, { recursive: true }),
@@ -201,6 +214,8 @@ const pithosClient = (dbPath: string): PithosClientService => {
 				return { run: result.run, interruptedTask: result.interrupted_task };
 			}),
 		runTimeout: (input) => run("pithos run timeout", () => void engine.runTimeout(input)),
+		runLaunchAbort: (input) =>
+			run("pithos run launch abort", () => void engine.runLaunchAbort(input)),
 		runInspect: (input) => run("pithos run inspect", () => engine.runInspect(input).run),
 		activeRunForTask: (input) =>
 			run("pithos active run for task", () => engine.activeRunForTask(input).run),
@@ -225,6 +240,13 @@ const pithosClient = (dbPath: string): PithosClientService => {
 						chain: "auto",
 					}),
 			),
+		escalateLaunchPrecondition: (input) =>
+			run(
+				"pithos launch precondition escalation",
+				() => void engine.escalateLaunchPrecondition(input),
+			),
+		createRepairEscalation: (input) =>
+			run("pithos repair escalation", () => void engine.createRepairEscalation(input)),
 		briefing: () => run("pithos briefing", () => engine.briefing({ agent: undefined }).ready),
 	};
 };

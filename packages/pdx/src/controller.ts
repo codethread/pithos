@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Ref, Schedule } from "effect";
+import { Deferred, Effect, Fiber, Ref, Schedule, Either } from "effect";
 import { requestIpc, listenIpc } from "./ipc-socket.js";
 import type { IpcResponse } from "./ipc.js";
 import { PdxError } from "./errors.js";
@@ -37,6 +37,8 @@ const writeAfkPidfile = (config: PdxConfig, runId: string, pid: number) =>
 
 const cleanupRun = (runId: string, reason: string) =>
 	PithosClient.pipe(Effect.flatMap((pithos) => pithos.runCleanup({ runId, reason })));
+
+const cwdExists = (cwd: string) => FileSystem.pipe(Effect.flatMap((fs) => fs.existsDirectory(cwd)));
 
 const cleanupAfkRun = (config: PdxConfig, runId: string, reason: string) =>
 	Effect.gen(function* () {
@@ -656,6 +658,75 @@ const agentPolicy = {
 	war: { capability: "execute", mode: "afk" },
 } as const;
 
+const launchPreconditionTitle = (taskId: string): string => `Repair unlaunchable task ${taskId}`;
+
+const launchPreconditionBody = (input: {
+	readonly agent: "toil" | "greed" | "war";
+	readonly taskId: string;
+	readonly scopeId: string;
+	readonly canonicalPath: string;
+	readonly reason: string;
+}) =>
+	`pdx could not launch a queued task because its scope runtime path is not an existing directory.\n\nAgent: ${input.agent}\nTask: ${input.taskId}\nScope: ${input.scopeId}\nPath: ${input.canonicalPath}\nReason: ${input.reason}\n\nSuggested next steps: inspect the cancelled task and repair the broken chain by upserting a valid scope and superseding the task, or replan the work.`;
+
+const escalateLaunchPrecondition = (input: {
+	readonly agent: "toil" | "greed" | "war";
+	readonly task: {
+		readonly id: string;
+		readonly scope_id: string;
+		readonly capability: "triage" | "design" | "execute" | "escalate";
+		readonly canonical_path: string | null;
+	};
+	readonly cwd: string;
+	readonly reason: string;
+}) =>
+	PithosClient.pipe(
+		Effect.flatMap((pithos) =>
+			pithos.escalateLaunchPrecondition({
+				runId: PDX_SYSTEM_RUN_ID,
+				expectedTaskId: input.task.id,
+				expectedScopeId: input.task.scope_id,
+				expectedCapability: input.task.capability,
+				canonicalPath: input.cwd,
+				agentKind: input.agent,
+				reason: input.reason,
+				escalationTitle: launchPreconditionTitle(input.task.id),
+				escalationBody: launchPreconditionBody({
+					agent: input.agent,
+					taskId: input.task.id,
+					scopeId: input.task.scope_id,
+					canonicalPath: input.cwd,
+					reason: input.reason,
+				}),
+			}),
+		),
+	);
+
+const escalateLaunchPreconditionIfStillMatching = (input: {
+	readonly agent: "toil" | "greed" | "war";
+	readonly task: {
+		readonly id: string;
+		readonly scope_id: string;
+		readonly capability: "triage" | "design" | "execute" | "escalate";
+		readonly canonical_path: string | null;
+	};
+	readonly cwd: string;
+	readonly reason: string;
+}) =>
+	Effect.gen(function* () {
+		const pithos = yield* PithosClient;
+		const current = yield* pithos.taskInspect({ taskId: input.task.id });
+		if (
+			current.task.status !== "queued" ||
+			current.task.scope_id !== input.task.scope_id ||
+			current.task.capability !== input.task.capability ||
+			current.task.canonical_path !== input.cwd
+		) {
+			return;
+		}
+		yield* escalateLaunchPrecondition(input);
+	});
+
 const hasAgentScopeCap = (
 	entries: readonly RegistryEntry[],
 	agent: "toil" | "greed" | "war",
@@ -723,6 +794,24 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 					}),
 				);
 			}
+			const cwdExistsBeforeRun = yield* cwdExists(cwd);
+			if (!cwdExistsBeforeRun) {
+				if (task.scope_kind === "global") {
+					return yield* Effect.fail(
+						new PdxError({
+							code: "FS_ERROR",
+							message: `global launch cwd is not an existing directory: ${cwd}`,
+						}),
+					);
+				}
+				yield* escalateLaunchPrecondition({
+					agent,
+					task,
+					cwd,
+					reason: "launch_precondition_failed",
+				});
+				return;
+			}
 			const runId = yield* ids.nextRunId;
 			const sessionId = yield* ids.nextSessionId;
 			const launchedAt = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
@@ -734,6 +823,24 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				scopeId: task.scope_id,
 				cwd,
 			});
+			const cwdExistsBeforeRunUpsert = yield* cwdExists(cwd);
+			if (!cwdExistsBeforeRunUpsert) {
+				if (task.scope_kind === "global") {
+					return yield* Effect.fail(
+						new PdxError({
+							code: "FS_ERROR",
+							message: `global launch cwd is not an existing directory before run upsert: ${cwd}`,
+						}),
+					);
+				}
+				yield* escalateLaunchPreconditionIfStillMatching({
+					agent,
+					task,
+					cwd,
+					reason: "launch_precondition_failed",
+				});
+				return;
+			}
 			yield* pithos.runUpsert({
 				agent,
 				mode: policy.mode,
@@ -768,16 +875,29 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 					pithos_db: config.pithosDbPath,
 				},
 			});
-			const launched = yield* spawner
-				.launchRenderedAgent(rendered)
-				.pipe(
-					Effect.catchAll((error) =>
-						cleanupRun(runId, "launch_failed").pipe(
-							Effect.zipRight(registry.remove(runId)),
-							Effect.zipRight(Effect.fail(error)),
-						),
-					),
-				);
+			const launchResult = yield* Effect.either(spawner.launchRenderedAgent(rendered));
+			if (Either.isLeft(launchResult)) {
+				const error = launchResult.left;
+				const cwdExistsAfterLaunchFailure = yield* cwdExists(cwd);
+				if (!cwdExistsAfterLaunchFailure && task.scope_kind !== "global") {
+					yield* pithos.runLaunchAbort({
+						runId,
+						reason: "launch_precondition_failed",
+					});
+					yield* registry.remove(runId);
+					yield* escalateLaunchPreconditionIfStillMatching({
+						agent,
+						task,
+						cwd,
+						reason: "launch_precondition_failed",
+					});
+					return;
+				}
+				yield* cleanupRun(runId, "launch_failed");
+				yield* registry.remove(runId);
+				return yield* Effect.fail(error);
+			}
+			const launched = launchResult.right;
 			const liveEntry =
 				policy.mode === "hitl"
 					? launched.hitl === undefined
@@ -1147,17 +1267,17 @@ export const handleKillRequest = (input: {
 			);
 		}
 		if (interruptResult.interruptedTask !== null) {
-			yield* pithos.taskEnqueue({
-				scope: "global",
-				capability: "escalate",
-				title: `Investigate interrupted task ${interruptResult.interruptedTask.id}`,
-				body: escalationBody({
+			yield* pithos.createRepairEscalation({
+				runId: PDX_SYSTEM_RUN_ID,
+				affectedTaskId: interruptResult.interruptedTask.id,
+				sourceKind: "repair_source",
+				escalationTitle: `Investigate interrupted task ${interruptResult.interruptedTask.id}`,
+				escalationBody: escalationBody({
 					runId,
 					taskId: interruptResult.interruptedTask.id,
 					scopeId: interruptResult.interruptedTask.scope_id,
 					reason: input.reason,
 				}),
-				runId: PDX_SYSTEM_RUN_ID,
 			});
 		}
 		yield* registry.upsert({ ...entry, state: "terminating", killAttempts: 1 });

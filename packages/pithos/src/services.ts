@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, statSync } from "node:fs";
 import process from "node:process";
 import { Context, Effect, Layer } from "effect";
 import { PithosError } from "./errors.js";
@@ -7,6 +7,7 @@ import { PithosError } from "./errors.js";
 export interface FsService {
 	readonly readText: (path: string) => Effect.Effect<string, PithosError>;
 	readonly removeFile: (path: string) => Effect.Effect<void, PithosError>;
+	readonly existsDirectory: (path: string) => Effect.Effect<boolean, PithosError>;
 }
 
 export interface IdService {
@@ -41,6 +42,12 @@ export interface Services {
 
 export class PithosServices extends Context.Tag("PithosServices")<PithosServices, Services>() {}
 
+const isMissingPathError = (error: unknown): boolean => {
+	if (!(error instanceof Error)) return false;
+	if (!("code" in error)) return false;
+	return error.code === "ENOENT" || error.code === "ENOTDIR";
+};
+
 export const liveServices: Services = {
 	fs: {
 		readText: (path) =>
@@ -60,6 +67,20 @@ export const liveServices: Services = {
 						code: "USER_ERROR",
 						message: error instanceof Error ? error.message : String(error),
 					}),
+			}),
+		existsDirectory: (path) =>
+			Effect.suspend(() => {
+				try {
+					return Effect.succeed(statSync(path).isDirectory());
+				} catch (error) {
+					if (isMissingPathError(error)) return Effect.succeed(false);
+					return Effect.fail(
+						new PithosError({
+							code: "USER_ERROR",
+							message: error instanceof Error ? error.message : String(error),
+						}),
+					);
+				}
 			}),
 	},
 	input: {

@@ -23,6 +23,7 @@ export interface FileSystemService {
 	readonly appendFile: (path: string, content: string) => Effect.Effect<void, PdxError>;
 	readonly readFile: (path: string) => Effect.Effect<string, PdxError>;
 	readonly readDirectory: (path: string) => Effect.Effect<readonly string[], PdxError>;
+	readonly existsDirectory: (path: string) => Effect.Effect<boolean, PdxError>;
 	readonly mkdir: (path: string) => Effect.Effect<void, PdxError>;
 	readonly writeFileAtomic: (path: string, content: string) => Effect.Effect<void, PdxError>;
 	readonly removeFile: (path: string) => Effect.Effect<void, PdxError>;
@@ -63,10 +64,11 @@ export interface PithosInterruptResult {
 }
 
 export interface PithosReadyTask {
+	readonly id: string;
 	readonly scope_id: string;
 	readonly scope_kind: "global" | "repo" | "worktree";
 	readonly canonical_path: string | null;
-	readonly capability: string;
+	readonly capability: "triage" | "design" | "execute" | "escalate";
 }
 
 export interface PithosClientService {
@@ -99,6 +101,10 @@ export interface PithosClientService {
 		readonly runId: string;
 		readonly reason: string;
 	}) => Effect.Effect<void, PdxError>;
+	readonly runLaunchAbort: (input: {
+		readonly runId: string;
+		readonly reason: string;
+	}) => Effect.Effect<void, PdxError>;
 	readonly runInspect: (input: { readonly runId: string }) => Effect.Effect<PdxRunOutput, PdxError>;
 	readonly activeRunForTask: (input: {
 		readonly taskId: string;
@@ -108,6 +114,9 @@ export interface PithosClientService {
 			readonly task: {
 				readonly id: string;
 				readonly status: string;
+				readonly scope_id: string;
+				readonly capability: "triage" | "design" | "execute" | "escalate";
+				readonly canonical_path: string | null;
 			};
 		},
 		PdxError
@@ -120,6 +129,24 @@ export interface PithosClientService {
 		readonly body: string;
 		readonly runId?: string;
 		readonly dependsOn?: readonly string[];
+	}) => Effect.Effect<void, PdxError>;
+	readonly escalateLaunchPrecondition: (input: {
+		readonly runId: string;
+		readonly expectedTaskId: string;
+		readonly expectedScopeId: string;
+		readonly expectedCapability: "triage" | "design" | "execute" | "escalate";
+		readonly canonicalPath: string;
+		readonly agentKind: string;
+		readonly reason: string;
+		readonly escalationTitle: string;
+		readonly escalationBody: string;
+	}) => Effect.Effect<void, PdxError>;
+	readonly createRepairEscalation: (input: {
+		readonly runId: string;
+		readonly affectedTaskId: string;
+		readonly sourceKind: "repair_source";
+		readonly escalationTitle: string;
+		readonly escalationBody: string;
 	}) => Effect.Effect<void, PdxError>;
 	readonly briefing: () => Effect.Effect<readonly PithosReadyTask[], PdxError>;
 }

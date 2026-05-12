@@ -17,10 +17,14 @@ import {
 
 const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-task-")), "pithos.db");
 
-const services = (): Services => ({
+const services = (options?: { readonly existingDirectories?: ReadonlySet<string> }): Services => ({
 	fs: {
 		readText: () => Effect.succeed(JSON.stringify({ ok: true })),
 		removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
+		existsDirectory: (path) =>
+			Effect.succeed(
+				options?.existingDirectories === undefined || options.existingDirectories.has(path),
+			),
 	},
 	input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
 	output: { write: () => Effect.void, writeError: () => Effect.void },
@@ -30,9 +34,9 @@ const services = (): Services => ({
 	clock: { nowIso: () => Effect.succeed("2026-05-08T00:00:00.000Z") },
 });
 
-const setup = (runIdEnv?: string) => {
+const setup = (runIdEnv?: string, svc: Services = services()) => {
 	const dbPath = tempDb();
-	const engine = makeEngine({ config: { dbPath, runId: runIdEnv }, services: services() });
+	const engine = makeEngine({ config: { dbPath, runId: runIdEnv }, services: svc });
 	engine.init({ fresh: true });
 	const repo = engine.scopeUpsert({ kind: "repo", path: "/tmp/pithos-repo" }).scope.id;
 	engine.runUpsert({
@@ -285,6 +289,59 @@ describe("task lifecycle", () => {
 		).toThrow(/scope is archived/);
 	});
 
+	it("rejects enqueue when a repo scope path disappeared after upsert", () => {
+		const existingDirectories = new Set(["/tmp/pithos-repo"]);
+		const { dbPath, engine, repo } = setup(undefined, services({ existingDirectories }));
+		existingDirectories.delete("/tmp/pithos-repo");
+
+		expect(() =>
+			engine.enqueue({
+				scope: repo,
+				capability: "execute",
+				title: "bad",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_toil",
+				dependsOn: [],
+				chain: "auto",
+			}),
+		).toThrow(
+			"Create or restore the directory, then run `pithos scope upsert --kind repo --path /tmp/pithos-repo`.",
+		);
+
+		const db = new Database(dbPath);
+		expect(db.prepare("SELECT COUNT(*) FROM tasks").pluck().get()).toBe(0);
+		db.close();
+	});
+
+	it("rejects supersede when the replacement repo scope path disappeared after upsert", () => {
+		const existingDirectories = new Set(["/tmp/pithos-repo"]);
+		const { dbPath, engine, repo } = setup(undefined, services({ existingDirectories }));
+		const original = enqueueTask(engine, { title: "replace me" }).task.id;
+		existingDirectories.delete("/tmp/pithos-repo");
+
+		expect(() =>
+			engine.supersede({
+				taskId: original,
+				runId: "run_toil",
+				reason: "move to repo",
+				title: "replacement",
+				body: "body",
+				bodyFile: undefined,
+				scope: repo,
+				capability: "execute",
+			}),
+		).toThrow(
+			"Create or restore the directory, then run `pithos scope upsert --kind repo --path /tmp/pithos-repo`.",
+		);
+
+		const db = new Database(dbPath);
+		expect(db.prepare("SELECT COUNT(*) FROM tasks").pluck().get()).toBe(1);
+		expect(db.prepare("SELECT COUNT(*) FROM task_supersessions").pluck().get()).toBe(0);
+		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(original)).toBe("queued");
+		db.close();
+	});
+
 	it("resolves PITHOS_RUN_ID, validates dependencies, and blocks claims", () => {
 		const { engine, repo } = setup("run_toil");
 		expect(() =>
@@ -491,7 +548,12 @@ describe("task lifecycle", () => {
 			final_dependency_ids: [],
 		});
 		const inspect = engine.taskInspect({ taskId: escalation.task.id });
-		expect(inspect.source).toMatchObject({ id: source, scope_id: "global", status: "claimed" });
+		expect(inspect.source).toMatchObject({
+			id: source,
+			scope_id: "global",
+			status: "claimed",
+			source_kind: "chain_source",
+		});
 		expect(inspect.dependencies).toEqual([]);
 		expect(inspect.lineage).toEqual([]);
 		expect(inspect.task.claimable).toBe(true);
@@ -505,20 +567,27 @@ describe("task lifecycle", () => {
 			all: false,
 		}) as ReturnType<Engine["graphInspect"]> & {
 			graph: {
-				nodes: readonly { id: string; source_task_id: string | null }[];
-				edges: readonly { kind: string; from_task_id: string; to_task_id: string }[];
+				nodes: readonly { id: string; source_task_id: string | null; source_kind: string | null }[];
+				edges: readonly {
+					kind: string;
+					from_task_id: string;
+					to_task_id: string;
+					source_kind?: string;
+				}[];
 			};
 		};
 		expect(graph.graph.nodes.map((node) => node.id).sort()).toEqual(
 			[escalation.task.id, source].sort(),
 		);
-		expect(graph.graph.nodes.find((node) => node.id === escalation.task.id)?.source_task_id).toBe(
-			source,
-		);
+		expect(graph.graph.nodes.find((node) => node.id === escalation.task.id)).toMatchObject({
+			source_task_id: source,
+			source_kind: "chain_source",
+		});
 		expect(graph.graph.edges).toContainEqual({
 			kind: "source",
 			from_task_id: escalation.task.id,
 			to_task_id: source,
+			source_kind: "chain_source",
 		});
 
 		const eventPayload = JSON.parse(
@@ -526,8 +595,9 @@ describe("task lifecycle", () => {
 				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
 				.pluck()
 				.get(escalation.task.id) as string,
-		) as unknown as { chain: { source_task_id: string | null } };
+		) as unknown as { chain: { source_task_id: string | null; source_kind: string | null } };
 		expect(eventPayload.chain.source_task_id).toBe(source);
+		expect(eventPayload.chain.source_kind).toBe("chain_source");
 	});
 
 	it("routes Pandora follow-up from held escalation to its source task", () => {
@@ -556,6 +626,32 @@ describe("task lifecycle", () => {
 			implicit_dependency_ids: [source],
 			final_dependency_ids: [source],
 		});
+	});
+
+	it("rejects ordinary continuation from held repair-source escalations", () => {
+		const { dbPath, engine } = setup();
+		claimSourcedEscalationWithPandora(engine);
+		const db = new Database(dbPath);
+		db.prepare("UPDATE task_sources SET kind='repair_source'").run();
+		db.close();
+
+		expect(() =>
+			enqueueTask(engine, {
+				title: "bad auto continuation",
+				capability: "design",
+				runId: "run_pandora",
+			}),
+		).toThrow(/--chain auto cannot continue from repair_source; supersede or replan/);
+		expect(() =>
+			enqueueTask(engine, {
+				title: "bad explicit continuation",
+				capability: "triage",
+				runId: "run_pandora",
+				chain: "source",
+			}),
+		).toThrow(
+			/--chain source requires a chain_source; repair_source must be superseded or replanned/,
+		);
 	});
 
 	it("makes held escalation without source a visible auto-chain no-op", () => {
@@ -886,6 +982,60 @@ describe("task lifecycle", () => {
 		});
 	});
 
+	it("launch-aborts no-claim live runs without mutating tasks", () => {
+		const { dbPath, engine } = setup();
+
+		expect(
+			engine.runLaunchAbort({ runId: "run_war", reason: "launch_precondition_failed" }),
+		).toMatchObject({
+			ok: true,
+			run: {
+				id: "run_war",
+				status: "cancelled",
+				task_id: null,
+				harness_kind: "pi",
+				session_log_path: "/tmp/s_war.jsonl",
+			},
+		});
+
+		const db = new Database(dbPath);
+		expect(db.prepare("SELECT COUNT(*) FROM tasks").pluck().get()).toBe(0);
+		const aborted = JSON.parse(
+			db
+				.prepare("SELECT payload_json FROM events WHERE type='run.launch_aborted' AND run_id=?")
+				.pluck()
+				.get("run_war") as string,
+		) as unknown as { reason: string; previous_status: string; status: string };
+		expect(aborted).toEqual({
+			reason: "launch_precondition_failed",
+			previous_status: "live",
+			status: "cancelled",
+		});
+		db.close();
+	});
+
+	it("rejects launch-abort for runs that hold or held tasks", () => {
+		const { engine, repo } = setup();
+		const held = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "held launch abort reject",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		expect(() => engine.runLaunchAbort({ runId: "run_war", reason: "bad launch" })).toThrow(
+			/launch abort requires no held task/,
+		);
+		engine.complete({ taskId: held, runId: "run_war", token: 1, resultJson: "{}" });
+		expect(() => engine.runLaunchAbort({ runId: "run_war", reason: "bad launch" })).toThrow(
+			/launch abort requires a run that has never claimed a task/,
+		);
+	});
+
 	it("timeouts only no-claim live runs", () => {
 		const { engine, repo } = setup();
 		expect(() => engine.runTimeout({ runId: "run_pdx", reason: "no claim" })).toThrow(PithosError);
@@ -962,6 +1112,224 @@ describe("task lifecycle", () => {
 		expect(() => engine.cancel({ taskId: held, runId: "run_toil", reason: "bad" })).toThrow(
 			/use pdx kill or pithos run interrupt/,
 		);
+	});
+
+	it("atomically cancels an unlaunchable queued task and creates a repair escalation", () => {
+		const { dbPath, engine, repo } = setup();
+		const original = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "unlaunchable work",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+
+		const result = engine.escalateLaunchPrecondition({
+			runId: "run_pdx",
+			expectedTaskId: original,
+			expectedScopeId: repo,
+			expectedCapability: "execute",
+			canonicalPath: "/tmp/pithos-repo",
+			agentKind: "war",
+			reason: "scope_cwd_missing_at_launch",
+			escalationTitle: "Launch precondition failed",
+			escalationBody: "The repo cwd was missing before launch.",
+		});
+
+		expect(result).toMatchObject({
+			ok: true,
+			task: { id: original, status: "cancelled" },
+			escalation: {
+				status: "queued",
+				scope_id: "global",
+				capability: "escalate",
+				source_task_id: original,
+				source_kind: "repair_source",
+			},
+		});
+		expect(engine.taskInspect({ taskId: original }).task.status).toBe("cancelled");
+		expect(engine.taskInspect({ taskId: result.escalation.id })).toMatchObject({
+			task: { id: result.escalation.id, status: "queued", scope_id: "global" },
+			source: { id: original, source_kind: "repair_source" },
+			dependencies: [],
+		});
+
+		const db = new Database(dbPath);
+		expect(
+			db
+				.prepare(
+					"SELECT kind FROM task_sources WHERE task_id=? AND source_task_id=? AND source_run_id=?",
+				)
+				.pluck()
+				.get(result.escalation.id, original, "run_pdx"),
+		).toBe("repair_source");
+		const created = JSON.parse(
+			db
+				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
+				.pluck()
+				.get(result.escalation.id) as string,
+		) as { source_kind: string; source_task_id: string };
+		expect(created).toMatchObject({ source_task_id: original, source_kind: "repair_source" });
+		db.close();
+	});
+
+	it("creates a pdx-authored repair escalation with repair source provenance", () => {
+		const { dbPath, engine, repo } = setup();
+		const affected = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "interrupted work",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		engine.runInterrupt({ runId: "run_war", taskId: undefined, reason: "operator kill" });
+
+		const result = engine.createRepairEscalation({
+			runId: "run_pdx",
+			affectedTaskId: affected,
+			sourceKind: "repair_source",
+			escalationTitle: "Interrupted run requires attention",
+			escalationBody: "The run was interrupted and needs repair.",
+		});
+
+		expect(result).toMatchObject({
+			ok: true,
+			escalation: {
+				status: "queued",
+				scope_id: "global",
+				capability: "escalate",
+				source_task_id: affected,
+				source_kind: "repair_source",
+			},
+		});
+		expect(engine.taskInspect({ taskId: result.escalation.id })).toMatchObject({
+			task: { id: result.escalation.id, status: "queued", scope_id: "global" },
+			source: { id: affected, status: "failed", source_kind: "repair_source" },
+			dependencies: [],
+		});
+		const graph = engine.graphInspect({
+			taskId: result.escalation.id,
+			scope: undefined,
+			all: false,
+		});
+		expect(graph.graph.edges).toContainEqual({
+			kind: "source",
+			from_task_id: result.escalation.id,
+			to_task_id: affected,
+			source_kind: "repair_source",
+		});
+
+		const db = new Database(dbPath);
+		expect(
+			db
+				.prepare(
+					"SELECT kind FROM task_sources WHERE task_id=? AND source_task_id=? AND source_run_id=?",
+				)
+				.pluck()
+				.get(result.escalation.id, affected, "run_pdx"),
+		).toBe("repair_source");
+		const created = JSON.parse(
+			db
+				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
+				.pluck()
+				.get(result.escalation.id) as string,
+		) as { source_kind: string; source_task_id: string };
+		expect(created).toMatchObject({ source_task_id: affected, source_kind: "repair_source" });
+		db.close();
+	});
+
+	it("rolls back repair escalation creation when affected task is missing", () => {
+		const { dbPath, engine } = setup();
+		expect(() =>
+			engine.createRepairEscalation({
+				runId: "run_pdx",
+				affectedTaskId: "task_missing",
+				sourceKind: "repair_source",
+				escalationTitle: "Missing source",
+				escalationBody: "This should not be persisted.",
+			}),
+		).toThrow(PithosError);
+
+		const db = new Database(dbPath);
+		expect(db.prepare("SELECT COUNT(*) FROM tasks WHERE capability='escalate'").pluck().get()).toBe(
+			0,
+		);
+		expect(db.prepare("SELECT COUNT(*) FROM task_sources").pluck().get()).toBe(0);
+		db.close();
+	});
+
+	it("rolls back repair escalation creation for non-pdx actors", () => {
+		const { dbPath, engine, repo } = setup();
+		const affected = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "affected work",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+
+		expect(() =>
+			engine.createRepairEscalation({
+				runId: "run_toil",
+				affectedTaskId: affected,
+				sourceKind: "repair_source",
+				escalationTitle: "Bad actor",
+				escalationBody: "This should not be persisted.",
+			}),
+		).toThrow(/repair escalation must be authored by pdx/);
+
+		const db = new Database(dbPath);
+		expect(db.prepare("SELECT COUNT(*) FROM tasks WHERE capability='escalate'").pluck().get()).toBe(
+			0,
+		);
+		expect(db.prepare("SELECT COUNT(*) FROM task_sources").pluck().get()).toBe(0);
+		db.close();
+	});
+
+	it("rolls back launch-precondition repair when expected task preconditions changed", () => {
+		const { dbPath, engine, repo } = setup();
+		const original = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "race work",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+
+		expect(() =>
+			engine.escalateLaunchPrecondition({
+				runId: "run_pdx",
+				expectedTaskId: original,
+				expectedScopeId: repo,
+				expectedCapability: "design",
+				canonicalPath: "/tmp/pithos-repo",
+				agentKind: "war",
+				reason: "scope_cwd_missing_at_launch",
+				escalationTitle: "Launch precondition failed",
+				escalationBody: "The repo cwd was missing before launch.",
+			}),
+		).toThrow(PithosError);
+
+		const db = new Database(dbPath);
+		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(original)).toBe("queued");
+		expect(db.prepare("SELECT COUNT(*) FROM tasks WHERE capability='escalate'").pluck().get()).toBe(
+			0,
+		);
+		expect(db.prepare("SELECT COUNT(*) FROM task_sources").pluck().get()).toBe(0);
+		db.close();
 	});
 
 	it("shows upstream lineage details, artifacts, and supersession metadata without siblings", () => {

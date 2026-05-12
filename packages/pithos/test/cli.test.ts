@@ -27,6 +27,7 @@ const services = (
 		fs: {
 			readText: () => Effect.succeed("body"),
 			removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
+			existsDirectory: () => Effect.succeed(true),
 		},
 		input: {
 			readStdin: () =>
@@ -1251,6 +1252,7 @@ describe("pithos cli", () => {
 			applied: "flat_no_held_task",
 			held_task_id: null,
 			source_task_id: null,
+			source_kind: null,
 			implicit_dependency_ids: [],
 			final_dependency_ids: [],
 		});
@@ -1292,6 +1294,7 @@ describe("pithos cli", () => {
 			applied: "none_selected",
 			held_task_id: null,
 			source_task_id: null,
+			source_kind: null,
 			implicit_dependency_ids: [],
 			final_dependency_ids: [blocker],
 		});

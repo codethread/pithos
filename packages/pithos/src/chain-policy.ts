@@ -2,6 +2,7 @@ import { PithosError } from "./errors.js";
 
 export type ChainCapability = "triage" | "design" | "execute" | "escalate";
 export type ChainPolicy = "auto" | "none" | "held" | "source";
+export type SourceKind = "chain_source" | "repair_source";
 
 export interface ChainTask {
 	readonly id: string;
@@ -24,6 +25,7 @@ export interface DependencyEdge {
 export interface SourceEdge {
 	readonly taskId: string;
 	readonly sourceTaskId: string;
+	readonly sourceKind?: SourceKind;
 }
 
 export interface SupersessionEdge {
@@ -45,6 +47,7 @@ export interface ChainPolicyDecision {
 	readonly applied: ChainAppliedReason;
 	readonly heldTaskId: string | null;
 	readonly sourceTaskId: string | null;
+	readonly sourceKind: SourceKind | null;
 	readonly implicitDependencyIds: readonly string[];
 }
 
@@ -79,17 +82,24 @@ export const resolveChainPolicy = (input: {
 	readonly policy: ChainPolicy;
 	readonly newTaskCapability: ChainCapability;
 	readonly heldTask: ChainTask | null;
-	readonly heldSourceTaskId: string | null;
+	readonly heldSource: { readonly taskId: string; readonly kind: SourceKind } | null;
 }): ChainPolicyDecision => {
 	const heldTaskId = input.heldTask?.id ?? null;
 	const base = {
 		policy: input.policy,
 		heldTaskId,
-		sourceTaskId: input.heldSourceTaskId,
+		sourceTaskId: input.heldSource?.taskId ?? null,
+		sourceKind: input.heldSource?.kind ?? null,
 	} as const;
 
 	if (input.policy === "none") {
-		return { ...base, applied: "none_selected", sourceTaskId: null, implicitDependencyIds: [] };
+		return {
+			...base,
+			applied: "none_selected",
+			sourceTaskId: null,
+			sourceKind: null,
+			implicitDependencyIds: [],
+		};
 	}
 
 	if (input.heldTask === null) {
@@ -106,6 +116,7 @@ export const resolveChainPolicy = (input: {
 		return {
 			...base,
 			sourceTaskId: null,
+			sourceKind: null,
 			applied: "depends_on_held",
 			implicitDependencyIds: [input.heldTask.id],
 		};
@@ -115,13 +126,18 @@ export const resolveChainPolicy = (input: {
 		if (isEscalation(input.newTaskCapability)) {
 			throw chainValidationError("--chain source cannot be used when enqueueing escalation tasks");
 		}
-		if (input.heldSourceTaskId === null) {
+		if (input.heldSource === null) {
 			throw chainValidationError("--chain source requires the held task to have a source link");
+		}
+		if (input.heldSource.kind !== "chain_source") {
+			throw chainValidationError(
+				"--chain source requires a chain_source; repair_source must be superseded or replanned",
+			);
 		}
 		return {
 			...base,
 			applied: "depends_on_source",
-			implicitDependencyIds: [input.heldSourceTaskId],
+			implicitDependencyIds: [input.heldSource.taskId],
 		};
 	}
 
@@ -129,6 +145,7 @@ export const resolveChainPolicy = (input: {
 		return {
 			...base,
 			sourceTaskId: null,
+			sourceKind: null,
 			applied: "depends_on_held",
 			implicitDependencyIds: [input.heldTask.id],
 		};
@@ -137,23 +154,30 @@ export const resolveChainPolicy = (input: {
 		return {
 			...base,
 			sourceTaskId: input.heldTask.id,
+			sourceKind: "chain_source",
 			applied: "source_from_held",
 			implicitDependencyIds: [],
 		};
 	}
 	if (isEscalation(input.heldTask.capability) && !isEscalation(input.newTaskCapability)) {
-		if (input.heldSourceTaskId === null) {
+		if (input.heldSource === null) {
 			return { ...base, applied: "flat_held_escalation_without_source", implicitDependencyIds: [] };
+		}
+		if (input.heldSource.kind !== "chain_source") {
+			throw chainValidationError(
+				"--chain auto cannot continue from repair_source; supersede or replan the source task instead",
+			);
 		}
 		return {
 			...base,
 			applied: "depends_on_source",
-			implicitDependencyIds: [input.heldSourceTaskId],
+			implicitDependencyIds: [input.heldSource.taskId],
 		};
 	}
 	return {
 		...base,
 		sourceTaskId: null,
+		sourceKind: null,
 		applied: "flat_escalation_from_escalation",
 		implicitDependencyIds: [],
 	};

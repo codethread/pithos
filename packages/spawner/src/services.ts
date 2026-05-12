@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 export interface SpawnedProcess {
 	readonly pid?: number;
+	readonly once?: (event: "error", listener: (error: Error) => void) => unknown;
 }
 
 export interface CommandResult {
@@ -67,7 +68,8 @@ export const LiveSpawnerServices: LaunchServices = {
 			stdio: "ignore",
 			detached: false,
 		});
-		return child.pid === undefined ? {} : { pid: child.pid };
+		const once = child.once.bind(child) as NonNullable<SpawnedProcess["once"]>;
+		return child.pid === undefined ? { once } : { pid: child.pid, once };
 	},
 	writeTempText: (prefix, content) => {
 		const path = join(tmpdir(), `${prefix}-${randomUUID()}.md`);

@@ -101,16 +101,17 @@ Important details:
 
 Owns the Pithos domain API used by both the CLI and `pdx`:
 
-- scope upsert/list/archive
-- Run upsert/inspect/Cleanup/Interrupt/timeout
-- task enqueue/claim/heartbeat/complete/fail/cancel/supersede
+- scope upsert/list/archive, including repo/worktree directory admission checks
+- Run upsert/inspect/Cleanup/Interrupt/timeout/launch-abort
+- task enqueue/claim/heartbeat/complete/fail/cancel/supersede, including active-scope and repo/worktree directory admission checks
+- library-only pdx repair escalation creation with `repair_source` provenance
 - artifact add
 - graph inspect
 - briefing
 - event tail
 - text renderers for task/graph/briefing views
 
-Engine code opens the SQLite DB, runs migrations, executes transition logic, and closes the DB per operation. Race-sensitive updates run inside SQLite transactions and use fenced preconditions so stale writes fail rather than drifting state.
+Engine code opens the SQLite DB, runs migrations, executes transition logic, and closes the DB per operation. Race-sensitive updates run inside SQLite transactions and use fenced preconditions so stale writes fail rather than drifting state. Scope/task admission validates external filesystem state at the Pithos boundary: repo/worktree paths must exist as directories when scopes are upserted and when tasks are enqueued or superseded into those scopes.
 
 ### `src/db.ts` — schema and seed data
 
@@ -155,7 +156,7 @@ Schemas for rows crossing the SQLite boundary. Malformed rows fail with `INTERNA
 
 Defines the service interface used by CLI/Engine code:
 
-- filesystem reads/removes
+- filesystem reads/removes and directory status checks
 - stdin reading
 - stdout/stderr writing
 - ID generation
@@ -173,10 +174,13 @@ Pithos owns durable invariants, not live resource observation. Important rules t
 
 - A Run may hold at most one Held task (`runs.task_id`).
 - A Task has exactly one Capability.
+- A Task must reference an existing Scope row; the database foreign key is the integrity backstop for row existence.
+- Engine prechecks require the Scope to be active and provide tagged JSON errors for missing or archived scopes.
+- Repo/worktree Scope paths are validated as directories at scope upsert and task enqueue/supersede time. The filesystem can change later, so pdx still owns launch-time runtime-path checks.
 - Claim authorization is enforced by seeded `agent_claims`.
 - Enqueue authorization is enforced by seeded `agent_enqueues`.
 - Dependencies are satisfied only by upstream Tasks in `done`.
-- Source links are non-blocking provenance.
+- Source links are non-blocking provenance; `chain_source` supports normal continuation, while `repair_source` points at broken work for supersession/replan.
 - Supersessions preserve history while replacing work with a fresh Task.
 - Fencing tokens invalidate stale task writes.
 - Cleanup is for confirmed natural Run death; Interrupt is for deliberate Kill of a live Run; Cancel is for non-held Task abandonment.

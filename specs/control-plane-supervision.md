@@ -55,6 +55,15 @@ This is a destructive pre-v1 rewrite.
 - **Decision:** `pdx` exposes supervisor status and immediate kill, but no restart in MVP.
   - **Rationale:** Restarting a bad task can loop. The safer workflow is kill → escalate → Pandora and the user decide whether to supersede, cancel, or replan.
 
+- **Decision:** `pdx` cancels queued work that cannot pass launch preconditions and escalates for repair.
+  - **Rationale:** A repo/worktree directory can be deleted after a task was validly created. Retrying the same queued task would loop, while marking it failed would imply an agent attempted it. Cancelling the non-held task breaks the chain visibly and routes repair to Pandora through supersession or replanning.
+
+- **Decision:** Launch-precondition cancellation and escalation are one durable Pithos transaction.
+  - **Rationale:** Cancelling without persisting Pandora-visible repair work strands the chain. Pithos owns the atomic transition so pdx cannot observe a partially cancelled-but-not-escalated state.
+
+- **Decision:** Missing scope runtime paths are classified separately from harness launch failures.
+  - **Rationale:** A missing cwd makes one queued task unlaunchable until the scope is repaired. A missing harness binary, bad manifest, permission error, or subprocess failure is supervisor/operator configuration failure and must not silently cancel user work.
+
 - **Decision:** `escalate` is a normal task capability consumed by Pandora.
   - **Rationale:** Artifacts record evidence/results; escalation tasks route attention. This gives Pandora an explicit queue-facing inbox without reintroducing prompt injection or long-running per-agent inbox files.
 
@@ -117,8 +126,12 @@ pdx reconcile loop (each tick settles lifecycle before spawning)
   4. write pdx-paced heartbeat for live HITL entries when due
   5. inspect claimable tasks from Pithos
   6. maintain exactly one live Pandora singleton
-  7. spawn at most one AFK/HITL agent through spawner library according to manifest/policy and caps
-       seeded order: pandora, toil, greed, war
+  7. choose at most one ready non-Pandora task in seeded agent order (`toil`, `greed`, `war`)
+  8. validate the chosen task's launch cwd before run creation/render/launch
+       global scope -> `<data-dir>` must be present
+       repo/worktree scope -> `scope.canonical_path` must exist and be a directory
+       missing/not-directory repo/worktree cwd -> cancel the queued task with preconditions, enqueue a global Launch-precondition escalation, and do not create a run
+  9. spawn at most one AFK/HITL agent through spawner library according to manifest/policy and caps
        never pre-claim; spawned agents claim their own work via Pithos
        cap entries by in-memory registry, so a live launched-but-not-claimed agent still occupies its slot
 
@@ -169,6 +182,10 @@ Caps are counted from the in-memory registry, including `launching`, `live`, and
 Default reconcile interval is 5 seconds. `pdx open --interval-seconds <n>` remains available for tuning. There is no backoff in MVP.
 
 Spawn policy is intentionally simple in MVP: one spawn per reconcile tick, after lifecycle settlement, in seeded agent order (`pandora`, `toil`, `greed`, `war`). `repo` and `worktree` scopes use `scope.canonical_path` as cwd. `global` scope uses `<pdx data-dir>` as cwd.
+
+Before pdx creates a non-Pandora run, renders a prompt, or calls Spawner, it validates that the selected task's cwd exists and is a directory. pdx performs a final cwd check immediately before `runUpsert`; a missing repo/worktree cwd at either pre-run check calls the atomic Pithos launch-precondition transition and does not create a run.
+
+If the cwd exists through `runUpsert` but disappears before or during `launchRenderedAgent`, pdx first calls the Pithos launch-abort transition for the just-created no-claim run with reason `launch_precondition_failed`; that run becomes `cancelled` and never holds a task. pdx then calls the same atomic launch-precondition task transition only if the task remains queued and still matches the selected task id, scope id, and capability. A failed precondition means a race already changed durable truth; pdx logs structured context and lets the next reconcile tick observe the new state. Other launch failures remain tagged supervisor errors; they do not cancel tasks.
 
 The 30 second No-claim session timeout is a registry bootstrap rule, not a generic `runs.task_id IS NULL` rule. It applies only to non-Pandora registry entries that have never observed an initial claim. Once a run has ever held a task, later idle/null `runs.task_id` periods are not No-claim sessions. Instead, pdx applies role-specific policy: Pandora remains long-lived, while non-Pandora HITL sessions are reaped after their first claimed task clears.
 
@@ -238,7 +255,7 @@ CREATE TABLE agent_enqueues (
 
 `pithos run upsert` validates `--agent` against `agent_kinds`. The seeded `pdx` agent kind is a system actor: it is not spawnable, has no manifest/template, has no claim authority, and is excluded from Registry/caps/no-claim timeout. Its global run authors supervisor-created escalation tasks such as kill-induced Interruption escalations.
 
-`pithos task enqueue` validates `--capability` against `capabilities`, enforces capability-specific task rules, and validates `(run.agent_kind, requested_capability)` against `agent_enqueues`. Capability validation failures use `VALIDATION_ERROR` with contextual messages, for example: `<capability> requires scope kind in {repo, worktree} with non-null canonical_path; got <scope-id> kind=<kind>`.
+`pithos task enqueue` validates `--capability` against `capabilities`, enforces capability-specific task rules, validates that the target scope exists and is active, validates current repo/worktree scope directories when applicable, and validates `(run.agent_kind, requested_capability)` against `agent_enqueues`. Scope validation failures use `VALIDATION_ERROR` with contextual messages, for example: `scope not found: <scope-id>; create or reactivate it with pithos scope upsert first` or `scope path does not exist: <path>; create the directory, then run pithos scope upsert --kind <repo|worktree> --path <path>`.
 
 `pithos task claim` validates `(run.agent_kind, requested_capability)` against `agent_claims` in the claim transaction.
 
@@ -254,7 +271,7 @@ Terminal run statuses include:
 ended, failed, cancelled, timed_out
 ```
 
-`timed_out` is used for non-Pandora No-claim sessions that exceed the 30 second bootstrap timeout without a held task.
+`timed_out` is used for non-Pandora No-claim sessions that exceed the 30 second bootstrap timeout without a held task. `cancelled` is used for deliberate no-claim launch aborts, including the race where cwd disappears after `runUpsert` but before launch succeeds; Pithos records the abort reason such as `launch_precondition_failed` and no task is mutated by the run transition.
 
 Add required `runs.mode`:
 
@@ -289,12 +306,14 @@ Capability-specific enqueue/supersede validation:
 
 | Capability | Required scope                                      | Body      | Notes                                     |
 | ---------- | --------------------------------------------------- | --------- | ----------------------------------------- |
-| `triage`   | any                                                 | non-empty | decomposition/routing work                |
-| `design`   | any                                                 | non-empty | design/research/alignment work            |
+| `triage`   | any active scope                                    | non-empty | decomposition/routing work                |
+| `design`   | any active scope                                    | non-empty | design/research/alignment work            |
 | `execute`  | `repo` or `worktree` with non-null `canonical_path` | non-empty | mutating or repo-local execution work     |
 | `escalate` | `global`                                            | non-empty | Pandora and the user attention checkpoint |
 
-`pithos task supersede` applies the same validation to the replacement task after overrides. Because `escalate` is global-only, all Checkpoint and Interruption escalation tasks live in global scope and reference original task/run/scope details in body or metadata.
+Any task created in a `repo` or `worktree` scope also requires that scope's `canonical_path` to exist as a directory at enqueue/supersede time. This is a Pithos boundary validation, not a durable guarantee that the path will still exist when pdx later launches a run.
+
+`pithos task supersede` applies the same validation to the replacement task after overrides. Because `escalate` is global-only, all Checkpoint, Interruption, and Launch-precondition escalation tasks live in global scope and reference original task/run/scope details in body or metadata.
 
 ## 6. Escalation and Repair
 
@@ -310,7 +329,7 @@ Because the dependency points at expected successful work, the escalation become
 
 ### Failure/interruption escalation
 
-Failure or interruption escalations must not depend on failed/cancelled/dead-lettered tasks, because only `done` satisfies dependencies. They are global-scope `escalate` tasks and reference the failed task/run/scope in body or metadata instead.
+Failure or interruption escalations must not depend on failed/cancelled/dead-lettered tasks, because only `done` satisfies dependencies. They are global-scope `escalate` tasks and reference the failed task/run/scope in body or metadata instead. When there is one affected task, the escalation carries a source link to that task for provenance; Pandora treats it as a repair source, not as a normal successful handoff target.
 
 Example escalation body:
 
@@ -328,6 +347,37 @@ Inspect:
 Expected resolution:
 - supersede the failed task with corrected work, or
 - cancel/replan downstream chain.
+```
+
+### Launch-precondition escalation
+
+A Launch-precondition escalation is created by pdx when a queued non-Pandora task cannot be launched because the selected repo/worktree cwd is missing or not a directory before any run claims the task. pdx cancels the queued task instead of marking it failed, because no agent attempted the work. The escalation is a normal global `escalate` task authored by the `pdx` system run.
+
+Launch-precondition escalations must not depend on the cancelled task. The cancelled task is a broken dependency for downstream work, so depending on it would block Pandora forever. The escalation carries a repair source link to the cancelled task and includes the task id, scope id, canonical path, agent kind, capability, and cancel reason in the body.
+
+The Pithos launch-precondition transition performs the task cancel, repair source-link creation, escalation enqueue, and event writes in one transaction. It requires the expected task id, expected `queued` status, expected scope id, expected capability, expected reason, and absence of an active holder. If escalation enqueue or source-link creation fails, the whole transition rolls back and pdx records a supervisor error instead of leaving a cancelled task without repair work.
+
+Pandora must not resolve a Launch-precondition escalation by enqueueing ordinary follow-up with default `--chain auto`, because the escalation source is cancelled. Repair is either `pithos task supersede <cancelled-task>` after recreating/upserting the scope, or an explicit replan/cancel path using `--chain none` or named manual dependencies.
+
+Example escalation body:
+
+```text
+Launch precondition failed: scope cwd missing
+
+Task: task_xyz
+Scope: repo:/path/to/repo
+Canonical path: /path/to/repo
+Agent: war
+Capability: execute
+Reason: scope_cwd_missing_at_launch
+
+pdx cancelled the queued task before creating a run because the scope directory no longer exists.
+Any queued dependents are now part of a broken chain until the cancelled task is superseded or the downstream work is replanned.
+
+Expected resolution:
+- recreate or restore the directory
+- run pithos scope upsert --kind repo --path /path/to/repo
+- inspect and supersede task_xyz with corrected equivalent work, or cancel/replan downstream chain
 ```
 
 ### Supersede repair
@@ -427,6 +477,9 @@ pithos task supersede \
 
 pithos task cancel <task-id> --run <run-id> --reason <text>
 
+# pdx library callers use the atomic launch-precondition transition:
+# cancel queued task + source-linked escalation in one transaction.
+
 pithos task inspect <task-id> [--json]
 
 pithos task artifact add \
@@ -442,6 +495,12 @@ pithos events tail [--limit <n>]
 
 pithos briefing [--agent pandora] [--json]
 ```
+
+`pithos scope upsert --kind repo|worktree --path <path>` resolves the canonical path and requires it to exist as a directory. Missing paths, files, and broken symlinks fail with tagged JSON telling the caller to create the directory first, then upsert the scope. `global` scope does not accept a runtime path.
+
+The Pithos library exposes a supervisor-only launch-precondition transition for pdx. Input includes expected task id, expected scope id, expected capability, canonical path, agent kind, reason, and escalation body. The transition atomically verifies the task is still queued and unheld, cancels it, creates a global `escalate` task authored by the `pdx` system run, records a `repair_source` link from that escalation to the cancelled task, and emits events. It is not a public CLI shortcut because operators should use normal `task cancel` or `task supersede` explicitly.
+
+The Pithos library also exposes repair-escalation creation for pdx/system callers. Input includes escalation title/body, affected task id, and `source_kind: repair_source`. pdx uses it for interruption/failure escalations after `run interrupt` returns an affected task, so those escalations carry the same non-blocking repair provenance as launch-precondition escalations.
 
 Removed/not exposed:
 
@@ -506,6 +565,10 @@ Output minimum:
 { "ok": true, "run": { "id": "run_...", "status": "timed_out" } }
 ```
 
+### Pithos run launch abort (library-only)
+
+Used by pdx when a run row was created for launch but no execution resource successfully started and no task was claimed. The run becomes `cancelled`, `runs.task_id` remains null, and no task is mutated by this run transition. The reason distinguishes the abort cause, for example `launch_precondition_failed` when cwd disappears between `runUpsert` and `launchRenderedAgent`. The transition emits `run.launch_aborted`.
+
 ### `pithos task cancel`
 
 Intentional abandon.
@@ -514,6 +577,7 @@ Intentional abandon.
 - Not allowed for `claimed` or `running`; use `pdx run kill <run-id>` / `pdx task kill <task-id>` or `pithos run interrupt`.
 - Not allowed for `done`.
 - Emits `task.cancelled`.
+- Supervisor/library callers that cancel due to a launch precondition must use the atomic launch-precondition transition rather than plain cancel. It applies fenced preconditions, cancels the queued task, creates the source-linked escalation, and commits only if the whole repair handoff is persisted.
 
 ## 8. pdx Interfaces
 
@@ -805,22 +869,23 @@ Per-agent roles and enqueue authority:
 
 Pithos events are durable audit records. Payloads may grow, but these event names and minimum fields are part of the control-plane contract.
 
-| Event                | Keys                               | Minimum payload                                                                                        |
-| -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `task.created`       | `task_id`, optional `actor_run_id` | `scope_id`, `capability`, `title`, `depends_on_task_ids`, optional `supersedes_task_id`                |
-| `task.claimed`       | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`                                                                              |
-| `task.heartbeat`     | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`, `previous_status`, `status`                                                 |
-| `run.heartbeat`      | `run_id`                           | `status`                                                                                               |
-| `task.completed`     | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`                                                                              |
-| `task.failed`        | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`, `reason`                                                                    |
-| `task.cancelled`     | `task_id`, `actor_run_id`          | `reason`, optional `superseded_by_task_id`                                                             |
-| `task.superseded`    | old `task_id`, `actor_run_id`      | `new_task_id`, `reason`, `retargeted_dependent_task_ids`                                               |
-| `task.reclaimed`     | `task_id`, `run_id`                | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token` |
-| `task.dead_lettered` | `task_id`, `run_id`                | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token` |
-| `task.interrupted`   | `task_id`, `run_id`                | `run_id`, `reason`, `previous_status`, `previous_fencing_token`, `new_fencing_token`                   |
-| `run.cleanup`        | `run_id`                           | `reason`, `previous_status`, `status`, optional `task_id`                                              |
-| `run.interrupted`    | `run_id`                           | `reason`, `previous_status`, `status`, optional `task_id`                                              |
-| `run.timed_out`      | `run_id`                           | `reason`, `previous_status`, `status`                                                                  |
+| Event                | Keys                               | Minimum payload                                                                                                                            |
+| -------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `task.created`       | `task_id`, optional `actor_run_id` | `scope_id`, `capability`, `title`, `depends_on_task_ids`, optional `supersedes_task_id`, optional `source_task_id`, optional `source_kind` |
+| `task.claimed`       | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`                                                                                                                  |
+| `task.heartbeat`     | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`, `previous_status`, `status`                                                                                     |
+| `run.heartbeat`      | `run_id`                           | `status`                                                                                                                                   |
+| `task.completed`     | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`                                                                                                                  |
+| `task.failed`        | `task_id`, `actor_run_id`          | `run_id`, `fencing_token`, `reason`                                                                                                        |
+| `task.cancelled`     | `task_id`, `actor_run_id`          | `reason`, optional `superseded_by_task_id`                                                                                                 |
+| `task.superseded`    | old `task_id`, `actor_run_id`      | `new_task_id`, `reason`, `retargeted_dependent_task_ids`                                                                                   |
+| `task.reclaimed`     | `task_id`, `run_id`                | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token`                                     |
+| `task.dead_lettered` | `task_id`, `run_id`                | `previous_run_id`, `reason`, `attempts`, `max_attempts`, `previous_fencing_token`, `new_fencing_token`                                     |
+| `task.interrupted`   | `task_id`, `run_id`                | `run_id`, `reason`, `previous_status`, `previous_fencing_token`, `new_fencing_token`                                                       |
+| `run.cleanup`        | `run_id`                           | `reason`, `previous_status`, `status`, optional `task_id`                                                                                  |
+| `run.interrupted`    | `run_id`                           | `reason`, `previous_status`, `status`, optional `task_id`                                                                                  |
+| `run.timed_out`      | `run_id`                           | `reason`, `previous_status`, `status`                                                                                                      |
+| `run.launch_aborted` | `run_id`                           | `reason`, `previous_status`, `status`                                                                                                      |
 
 `specs/task-graph.md` defines graph semantics for dependency and supersession payloads; this table is the consolidated event vocabulary for the control-plane rewrite.
 

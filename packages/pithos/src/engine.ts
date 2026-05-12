@@ -16,6 +16,7 @@ import {
 	type HarnessKind,
 	type Mode,
 	type ScopeKind,
+	type SourceKind,
 	type TaskStatus,
 } from "./db.js";
 import { fail } from "./errors.js";
@@ -89,6 +90,10 @@ export interface Engine {
 		readonly ok: true;
 		readonly run: RunOutput;
 	};
+	readonly runLaunchAbort: (input: { readonly runId: string; readonly reason: string }) => {
+		readonly ok: true;
+		readonly run: RunOutput;
+	};
 	readonly eventsTail: (input: { readonly limit: number | undefined }) => {
 		readonly ok: true;
 		readonly events: readonly EventOutput[];
@@ -157,6 +162,24 @@ export interface Engine {
 		readonly scope: string | undefined;
 		readonly capability: Capability | undefined;
 	}) => SupersedeOutput;
+	readonly escalateLaunchPrecondition: (input: {
+		readonly runId: string | undefined;
+		readonly expectedTaskId: string;
+		readonly expectedScopeId: string;
+		readonly expectedCapability: Capability;
+		readonly canonicalPath: string;
+		readonly agentKind: string;
+		readonly reason: string;
+		readonly escalationTitle: string;
+		readonly escalationBody: string;
+	}) => LaunchPreconditionEscalationOutput;
+	readonly createRepairEscalation: (input: {
+		readonly runId: string | undefined;
+		readonly affectedTaskId: string;
+		readonly sourceKind: "repair_source";
+		readonly escalationTitle: string;
+		readonly escalationBody: string;
+	}) => RepairEscalationOutput;
 }
 
 export type Json =
@@ -199,12 +222,16 @@ export interface LineageEntryOutput {
 	readonly artifacts: readonly ArtifactOutput[];
 }
 
+export interface TaskSourceSummaryOutput extends TaskSummaryOutput {
+	readonly source_kind: SourceKind;
+}
+
 export interface TaskInspectOutput {
 	readonly ok: true;
 	readonly task: TaskInspectTaskOutput;
 	readonly dependencies: readonly TaskDetailOutput[];
 	readonly dependents: readonly TaskDetailOutput[];
-	readonly source: TaskSummaryOutput | null;
+	readonly source: TaskSourceSummaryOutput | null;
 	readonly lineage: readonly LineageEntryOutput[];
 	readonly supersedes: string | null;
 	readonly superseded_by: string | null;
@@ -253,6 +280,12 @@ const renderTaskBullet = (
 	unresolvedDependencyIds: readonly string[] = [],
 ): string => `- ${taskTitleLine({ ...task, unresolved_dependency_ids: unresolvedDependencyIds })}`;
 
+const sourceKindLabel = (kind: SourceKind): string =>
+	kind === "chain_source" ? "continuation provenance" : "repair provenance";
+
+const renderSourceBullet = (source: TaskSourceSummaryOutput | null): string =>
+	source === null ? "- none" : `- ${sourceKindLabel(source.source_kind)}: ${taskTitleLine(source)}`;
+
 export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string => {
 	const lineageTasks = new Map(inspect.lineage.map((entry) => [entry.task.id, entry.task]));
 	const recentHistory = [...inspect.lineage]
@@ -289,6 +322,9 @@ export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string =>
 					)
 					.join("\n"),
 	];
+	if (inspect.source !== null) {
+		currentParts.push("Source link:", renderSourceBullet(inspect.source));
+	}
 	return (
 		[
 			`# ${taskTitleLine(inspect.task)}`,
@@ -319,6 +355,7 @@ export interface GraphNodeOutput extends TaskSummaryOutput {
 	readonly supersedes_task_id: string | null;
 	readonly superseded_by_task_id: string | null;
 	readonly source_task_id: string | null;
+	readonly source_kind: SourceKind | null;
 }
 
 export type GraphEdgeOutput =
@@ -332,6 +369,7 @@ export type GraphEdgeOutput =
 			readonly kind: "source";
 			readonly from_task_id: string;
 			readonly to_task_id: string;
+			readonly source_kind: SourceKind;
 	  }
 	| {
 			readonly kind: "supersedes";
@@ -370,6 +408,7 @@ export interface ChainOutput {
 	readonly applied: ChainPolicyDecision["applied"];
 	readonly held_task_id: string | null;
 	readonly source_task_id: string | null;
+	readonly source_kind: SourceKind | null;
 	readonly implicit_dependency_ids: readonly string[];
 	readonly final_dependency_ids: readonly string[];
 }
@@ -392,6 +431,31 @@ export interface SupersedeOutput {
 		readonly old_task_id: string;
 		readonly new_task_id: string;
 		readonly retargeted_dependent_task_ids: readonly string[];
+	};
+}
+
+export interface LaunchPreconditionEscalationOutput {
+	readonly ok: true;
+	readonly task: { readonly id: string; readonly status: "cancelled" };
+	readonly escalation: {
+		readonly id: string;
+		readonly status: "queued";
+		readonly scope_id: "global";
+		readonly capability: "escalate";
+		readonly source_task_id: string;
+		readonly source_kind: "repair_source";
+	};
+}
+
+export interface RepairEscalationOutput {
+	readonly ok: true;
+	readonly escalation: {
+		readonly id: string;
+		readonly status: "queued";
+		readonly scope_id: "global";
+		readonly capability: "escalate";
+		readonly source_task_id: string;
+		readonly source_kind: "repair_source";
 	};
 }
 
@@ -787,9 +851,12 @@ const ArtifactRowSchema = Schema.Struct({
 const parseArtifact = (value: unknown): ArtifactOutput =>
 	decodeRow(ArtifactRowSchema, value, "malformed artifact row");
 
+const SourceKindSchema = Schema.Literal("chain_source", "repair_source");
+
 const TaskSourceEdgeRowSchema = Schema.Struct({
 	task_id: Schema.String,
 	source_task_id: Schema.String,
+	kind: SourceKindSchema,
 });
 
 type TaskSourceEdgeRow = typeof TaskSourceEdgeRowSchema.Type;
@@ -840,20 +907,20 @@ const taskSupersessionLinks = (
 
 const taskSourceEdges = (db: Db): readonly TaskSourceEdgeRow[] =>
 	db
-		.prepare(sql`SELECT task_id, source_task_id FROM task_sources`)
+		.prepare(sql`SELECT task_id, source_task_id, kind FROM task_sources`)
 		.all()
 		.map(parseTaskSourceEdge);
 
-const taskSourceTaskId = (db: Db, taskId: string): string | null => {
+const taskSourceEdge = (db: Db, taskId: string): TaskSourceEdgeRow | null => {
 	const row = db
-		.prepare(sql`SELECT task_id, source_task_id FROM task_sources WHERE task_id=?`)
+		.prepare(sql`SELECT task_id, source_task_id, kind FROM task_sources WHERE task_id=?`)
 		.get(taskId);
-	return row === undefined ? null : parseTaskSourceEdge(row).source_task_id;
+	return row === undefined ? null : parseTaskSourceEdge(row);
 };
 
-const taskSourceSummary = (db: Db, taskId: string): TaskSummaryOutput | null => {
-	const sourceTaskId = taskSourceTaskId(db, taskId);
-	return sourceTaskId === null ? null : taskSummary(db, sourceTaskId);
+const taskSourceSummary = (db: Db, taskId: string): TaskSourceSummaryOutput | null => {
+	const edge = taskSourceEdge(db, taskId);
+	return edge === null ? null : { ...taskSummary(db, edge.source_task_id), source_kind: edge.kind };
 };
 
 const validateReferenceTaskCurrent = (db: Db, taskId: string, label: string): void => {
@@ -872,18 +939,19 @@ const insertTaskSource = (
 	taskId: string,
 	sourceTaskId: string,
 	sourceRunId: string,
+	kind: SourceKind,
 ): void => {
 	const inserted = db
 		.prepare(sql`
 			INSERT INTO task_sources(task_id, source_task_id, source_run_id, kind)
-			SELECT ?, t.id, ?, 'chain_source'
+			SELECT ?, t.id, ?, ?
 			FROM tasks t
 			WHERE t.id = ?
 			  AND NOT EXISTS (
 				SELECT 1 FROM task_supersessions ts WHERE ts.old_task_id = t.id
 			  )
 		`)
-		.run(taskId, sourceRunId, sourceTaskId);
+		.run(taskId, sourceRunId, kind, sourceTaskId);
 	if (inserted.changes === 1) return;
 	validateReferenceTaskCurrent(db, sourceTaskId, "source");
 	fail("STALE_TOKEN_RACE", "source task changed before source link write");
@@ -1065,6 +1133,57 @@ export const renderBriefingText = (briefing: BriefingOutput): string => {
 	return `${lines.join("\n")}\n`;
 };
 
+const createRepairEscalationTask = (
+	ctx: EngineContext,
+	db: Db,
+	input: {
+		readonly actorRunId: string;
+		readonly affectedTaskId: string;
+		readonly sourceKind: "repair_source";
+		readonly escalationTitle: string;
+		readonly escalationBody: string;
+	},
+): RepairEscalationOutput => {
+	const actorRun = liveRun(db, input.actorRunId);
+	if (actorRun.agent_kind !== "pdx") {
+		fail("VALIDATION_ERROR", "repair escalation must be authored by pdx");
+	}
+	scopeForCapability(db, "global", "escalate");
+	const affectedTask = taskSummary(db, input.affectedTaskId);
+	const title = requireNonEmpty(input.escalationTitle, "escalation title");
+	const bodyText = requireNonEmpty(input.escalationBody, "escalation body");
+	const escalationId = Effect.runSync(ctx.services.ids.make("task"));
+	return db.transaction((): RepairEscalationOutput => {
+		db.prepare(
+			sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
+		).run(escalationId, "global", "escalate", title, bodyText, input.actorRunId);
+		insertTaskSource(db, escalationId, affectedTask.id, input.actorRunId, input.sourceKind);
+		event(ctx, db, "task.created", {
+			task_id: escalationId,
+			actor_run_id: input.actorRunId,
+			payload: {
+				scope_id: "global",
+				capability: "escalate",
+				title,
+				depends_on_task_ids: [],
+				source_task_id: affectedTask.id,
+				source_kind: input.sourceKind,
+			},
+		});
+		return {
+			ok: true as const,
+			escalation: {
+				id: escalationId,
+				status: "queued" as const,
+				scope_id: "global" as const,
+				capability: "escalate" as const,
+				source_task_id: affectedTask.id,
+				source_kind: input.sourceKind,
+			},
+		};
+	})();
+};
+
 const graphForIds = (
 	db: Db,
 	selector: GraphSelectorOutput,
@@ -1139,7 +1258,8 @@ const graphForIds = (
 					.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
 					.pluck()
 					.get(task.id) as string | undefined) ?? null,
-			source_task_id: taskSourceTaskId(db, task.id),
+			source_task_id: taskSourceEdge(db, task.id)?.source_task_id ?? null,
+			source_kind: taskSourceEdge(db, task.id)?.kind ?? null,
 		}));
 	const edges = [
 		...(
@@ -1165,6 +1285,7 @@ const graphForIds = (
 				kind: "source" as const,
 				from_task_id: e.task_id,
 				to_task_id: e.source_task_id,
+				source_kind: e.kind,
 			})),
 		...(
 			db.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`).all() as {
@@ -1209,6 +1330,15 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					? undefined
 					: requireNonEmpty(path ?? fail("VALIDATION_ERROR", "missing --path"), "--path");
 			const canonical = rawPath === undefined ? null : resolve(rawPath);
+			if ((kind === "repo" || kind === "worktree") && canonical !== null) {
+				const existsDirectory = Effect.runSync(ctx.services.fs.existsDirectory(canonical));
+				if (!existsDirectory) {
+					fail(
+						"VALIDATION_ERROR",
+						`${kind} scope path must exist as a directory before upsert: ${canonical}. Create the directory first, then upsert the scope.`,
+					);
+				}
+			}
 			const sid = kind === "global" ? "global" : `${kind}:${canonical}`;
 			const scopeRow = parseScopeIdentity(
 				db.prepare(upsertScope).get(sid, kind, canonical),
@@ -1603,6 +1733,39 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			})();
 			return { ok: true, run: toRunOutput(finalRun) };
 		}),
+	runLaunchAbort: ({ runId, reason }) =>
+		withDb(ctx, (db) => {
+			const nonEmptyReason = requireNonEmpty(reason, "--reason");
+			const finalRun: RunRow = db.transaction((): RunRow => {
+				const run = runById(db, runId);
+				if (run.status !== "live") {
+					fail("VALIDATION_ERROR", "launch abort requires a live run");
+				}
+				if (run.task_id !== null) {
+					fail("VALIDATION_ERROR", "launch abort requires no held task");
+				}
+				const hasClaimed = db
+					.prepare(sql`SELECT 1 FROM events WHERE type='task.claimed' AND actor_run_id=?`)
+					.get(run.id);
+				if (hasClaimed !== undefined) {
+					fail("VALIDATION_ERROR", "launch abort requires a run that has never claimed a task");
+				}
+				const runUpdate = db
+					.prepare(
+						sql`UPDATE runs SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='live' AND task_id IS NULL`,
+					)
+					.run(run.id);
+				if (runUpdate.changes === 0) {
+					fail("STALE_TOKEN_RACE", "launch abort run snapshot changed before update");
+				}
+				event(ctx, db, "run.launch_aborted", {
+					run_id: run.id,
+					payload: { reason: nonEmptyReason, previous_status: run.status, status: "cancelled" },
+				});
+				return runById(db, run.id);
+			})();
+			return { ok: true, run: toRunOutput(finalRun) };
+		}),
 	eventsTail: ({ limit }) =>
 		withDb(ctx, (db) => {
 			if (limit !== undefined && limit < 1) fail("VALIDATION_ERROR", "--limit must be positive");
@@ -1634,7 +1797,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);
 			authorized(db, "agent_enqueues", actorRunId, capability);
-			enforceCapScope(db, scope, capability);
+			enforceTaskAdmissionScope(ctx, db, scope, capability);
 			const uniqueDepends = new Set(dependsOn);
 			if (uniqueDepends.size !== dependsOn.length) {
 				fail("VALIDATION_ERROR", "duplicate --depends-on task id");
@@ -1646,13 +1809,15 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const chainOutput = db.transaction((): ChainOutput => {
 				const actorRun = liveRun(db, actorRunId);
 				const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
-				const heldSourceTaskId =
-					actorRun.task_id === null ? null : taskSourceTaskId(db, actorRun.task_id);
+				const heldSource = actorRun.task_id === null ? null : taskSourceEdge(db, actorRun.task_id);
 				const decision = resolveChainPolicy({
 					policy: chain,
 					newTaskCapability: capability,
 					heldTask,
-					heldSourceTaskId,
+					heldSource:
+						heldSource === null
+							? null
+							: { taskId: heldSource.source_task_id, kind: heldSource.kind },
 				});
 				const dependencyIds = finalDependencyIds({
 					manualDependencyIds: dependsOn,
@@ -1663,6 +1828,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					applied: decision.applied,
 					held_task_id: decision.heldTaskId,
 					source_task_id: decision.sourceTaskId,
+					source_kind: decision.sourceKind,
 					implicit_dependency_ids: decision.implicitDependencyIds,
 					final_dependency_ids: dependencyIds,
 				};
@@ -1683,6 +1849,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						taskId,
 						decision.sourceTaskId ?? fail("INTERNAL_ERROR", "source decision missing source task"),
 						actorRunId,
+						"chain_source",
 					);
 				}
 				assertAcyclic(db);
@@ -1699,6 +1866,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							applied: output.applied,
 							held_task_id: output.held_task_id,
 							source_task_id: output.source_task_id,
+							source_kind: output.source_kind,
 							implicit_dependency_ids: output.implicit_dependency_ids,
 							final_dependency_ids: output.final_dependency_ids,
 						},
@@ -2009,7 +2177,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const replacementScope = scope ?? old.scope_id;
 			const replacementCap = capability ?? old.capability;
 			authorized(db, "agent_enqueues", actorRunId, replacementCap);
-			enforceCapScope(db, replacementScope, replacementCap);
+			enforceTaskAdmissionScope(ctx, db, replacementScope, replacementCap);
 			const replacementBody =
 				body === undefined && bodyFile === undefined ? old.body : resolveBody(ctx, body, bodyFile);
 			const replacementTitle = title ?? old.title;
@@ -2107,9 +2275,134 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				};
 			})();
 		}),
+	escalateLaunchPrecondition: ({
+		runId,
+		expectedTaskId,
+		expectedScopeId,
+		expectedCapability,
+		canonicalPath,
+		agentKind,
+		reason,
+		escalationTitle,
+		escalationBody,
+	}) =>
+		withDb(ctx, (db) => {
+			const actorRunId = resolveRunId(ctx, runId);
+			const actorRun = liveRun(db, actorRunId);
+			if (actorRun.agent_kind !== "pdx") {
+				fail("VALIDATION_ERROR", "launch-precondition escalation must be authored by pdx");
+			}
+			const agentExists = db
+				.prepare(sql`SELECT 1 FROM agent_kinds WHERE agent_kind = ?`)
+				.get(agentKind);
+			if (agentExists === undefined) fail("VALIDATION_ERROR", `unknown agent kind: ${agentKind}`);
+			scopeForCapability(db, "global", "escalate");
+			const nonEmptyReason = requireNonEmpty(reason, "--reason");
+			const title = requireNonEmpty(escalationTitle, "escalation title");
+			const bodyText = requireNonEmpty(escalationBody, "escalation body");
+			const expectedPath = requireNonEmpty(canonicalPath, "canonical path");
+			const escalationId = Effect.runSync(ctx.services.ids.make("task"));
+			return db.transaction((): LaunchPreconditionEscalationOutput => {
+				const task = taskSummary(db, expectedTaskId);
+				if (task.status !== "queued") {
+					fail("STALE_TOKEN_RACE", `launch precondition task is not queued: ${task.status}`);
+				}
+				if (task.scope_id !== expectedScopeId) {
+					fail("STALE_TOKEN_RACE", "launch precondition task scope changed before cancel");
+				}
+				if (task.capability !== expectedCapability) {
+					fail("STALE_TOKEN_RACE", "launch precondition task capability changed before cancel");
+				}
+				if (task.canonical_path !== expectedPath) {
+					fail("STALE_TOKEN_RACE", "launch precondition scope path changed before cancel");
+				}
+				const holder = db
+					.prepare(
+						sql`SELECT id FROM runs WHERE task_id=? AND status NOT IN ('ended','failed','cancelled','timed_out')`,
+					)
+					.pluck()
+					.get(expectedTaskId) as string | undefined;
+				if (holder !== undefined) {
+					fail("STALE_TOKEN_RACE", `launch precondition task is held by run: ${holder}`);
+				}
+				const cancelUpdate = db
+					.prepare(
+						sql`UPDATE tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`,
+					)
+					.run(expectedTaskId);
+				if (cancelUpdate.changes === 0) {
+					fail("STALE_TOKEN_RACE", "launch precondition task changed before cancel");
+				}
+				db.prepare(
+					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
+				).run(escalationId, "global", "escalate", title, bodyText, actorRunId);
+				insertTaskSource(db, escalationId, expectedTaskId, actorRunId, "repair_source");
+				event(ctx, db, "task.cancelled", {
+					task_id: expectedTaskId,
+					actor_run_id: actorRunId,
+					payload: {
+						reason: nonEmptyReason,
+						scope_id: expectedScopeId,
+						capability: expectedCapability,
+						canonical_path: expectedPath,
+						agent_kind: agentKind,
+						escalation_task_id: escalationId,
+						source_kind: "repair_source",
+					},
+				});
+				event(ctx, db, "task.created", {
+					task_id: escalationId,
+					actor_run_id: actorRunId,
+					payload: {
+						scope_id: "global",
+						capability: "escalate",
+						title,
+						depends_on_task_ids: [],
+						source_task_id: expectedTaskId,
+						source_kind: "repair_source",
+						reason: nonEmptyReason,
+						launch_precondition: {
+							task_id: expectedTaskId,
+							scope_id: expectedScopeId,
+							capability: expectedCapability,
+							canonical_path: expectedPath,
+							agent_kind: agentKind,
+						},
+					},
+				});
+				return {
+					ok: true as const,
+					task: { id: expectedTaskId, status: "cancelled" as const },
+					escalation: {
+						id: escalationId,
+						status: "queued" as const,
+						scope_id: "global" as const,
+						capability: "escalate" as const,
+						source_task_id: expectedTaskId,
+						source_kind: "repair_source" as const,
+					},
+				};
+			})();
+		}),
+	createRepairEscalation: ({
+		runId,
+		affectedTaskId,
+		sourceKind,
+		escalationTitle,
+		escalationBody,
+	}) =>
+		withDb(ctx, (db) =>
+			createRepairEscalationTask(ctx, db, {
+				actorRunId: resolveRunId(ctx, runId),
+				affectedTaskId,
+				sourceKind,
+				escalationTitle,
+				escalationBody,
+			}),
+		),
 });
 
-export const enforceCapScope = (db: Db, scopeId: string, cap: Capability): void => {
+const scopeForCapability = (db: Db, scopeId: string, cap: Capability): ScopeRow => {
 	const s = scopeById(db, scopeId);
 	enforceActiveScope(s);
 
@@ -2126,6 +2419,32 @@ export const enforceCapScope = (db: Db, scopeId: string, cap: Capability): void 
 			`execute requires repo/worktree scope with canonical_path; got ${scopeId} kind=${s.kind}`,
 		);
 	}
+
+	return s;
+};
+
+const enforceTaskAdmissionScope = (
+	ctx: EngineContext,
+	db: Db,
+	scopeId: string,
+	cap: Capability,
+): void => {
+	const s = scopeForCapability(db, scopeId, cap);
+	if (s.kind === "global") return;
+	const canonicalPath =
+		s.canonical_path ??
+		fail("INTERNAL_ERROR", `${s.kind} scope ${scopeId} is missing canonical_path`);
+	const existsDirectory = Effect.runSync(ctx.services.fs.existsDirectory(canonicalPath));
+	if (!existsDirectory) {
+		fail(
+			"VALIDATION_ERROR",
+			`${s.kind} scope path is missing or not a directory: ${canonicalPath}. Create or restore the directory, then run \`pithos scope upsert --kind ${s.kind} --path ${canonicalPath}\`.`,
+		);
+	}
+};
+
+export const enforceCapScope = (db: Db, scopeId: string, cap: Capability): void => {
+	void scopeForCapability(db, scopeId, cap);
 };
 
 export { authorized, event };

@@ -9,7 +9,12 @@ import {
 import { Either, ParseResult, Schema } from "effect";
 import { SpawnerError } from "./errors.js";
 import { resolveAgentsPath, resolveTemplatesDir } from "./paths.js";
-import { LiveSpawnerServices, type LaunchServices, type RenderServices } from "./services.js";
+import {
+	LiveSpawnerServices,
+	type LaunchServices,
+	type RenderServices,
+	type SpawnedProcess,
+} from "./services.js";
 
 export const AgentKindSchema = Schema.Literal(...BUILTIN_SPAWNABLE_AGENT_KINDS);
 export const ModeSchema = Schema.Literal("afk", "hitl");
@@ -409,6 +414,11 @@ const sessionLogPathFor = (
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
 
+const launchErrorMessage = (context: string, error: unknown): string => {
+	const message = error instanceof Error ? error.message : String(error);
+	return `${context}: ${message}`;
+};
+
 const promptArgIndex = (rendered: RenderedAgent): number => {
 	const index = rendered.harness.argv.findIndex(
 		(arg) => arg === "--system-prompt" || arg === "--append-system-prompt",
@@ -558,14 +568,23 @@ export const launchRenderedAgent = (
 				message: `${rendered.agent}: rendered harness argv is empty`,
 			});
 		}
-		const child = services.spawnProcess(file, rendered.harness.argv.slice(1), {
-			cwd: rendered.cwd,
-			env: rendered.harness.env,
-		});
+		let child: SpawnedProcess;
+		try {
+			child = services.spawnProcess(file, rendered.harness.argv.slice(1), {
+				cwd: rendered.cwd,
+				env: rendered.harness.env,
+			});
+			child.once?.("error", () => undefined);
+		} catch (error) {
+			throw new SpawnerError({
+				code: "LAUNCH_ERROR",
+				message: launchErrorMessage(`${rendered.agent}: failed to spawn ${file}`, error),
+			});
+		}
 		if (child.pid === undefined)
 			throw new SpawnerError({
 				code: "LAUNCH_ERROR",
-				message: `${rendered.agent}: harness process did not report pid`,
+				message: `${rendered.agent}: failed to spawn ${file} in ${rendered.cwd}: process did not report pid`,
 			});
 		return {
 			agent: rendered.agent,

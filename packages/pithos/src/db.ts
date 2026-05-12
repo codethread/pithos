@@ -13,6 +13,7 @@ export type Db = Database.Database;
 export type ScopeKind = "global" | "repo" | "worktree";
 export type Mode = "afk" | "hitl";
 export type HarnessKind = "claude" | "pi" | "system";
+export type SourceKind = "chain_source" | "repair_source";
 export type { AgentKind, Capability };
 
 export type TaskStatus =
@@ -132,7 +133,7 @@ CREATE TABLE IF NOT EXISTS task_sources (
 	task_id TEXT PRIMARY KEY REFERENCES tasks(id),
 	source_task_id TEXT NOT NULL REFERENCES tasks(id),
 	source_run_id TEXT NOT NULL REFERENCES runs(id),
-	kind TEXT NOT NULL CHECK (kind IN ('chain_source')),
+	kind TEXT NOT NULL CHECK (kind IN ('chain_source', 'repair_source')),
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CHECK (task_id <> source_task_id)
 );

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -6,6 +6,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
 	BUILTIN_CONTRACT,
+	liveServices,
 	PithosError,
 	RunRowSchema,
 	decodeRow,
@@ -16,7 +17,9 @@ import {
 
 const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-")), "pithos.db");
 
-const services = (): Services & { stdout: string[]; stderr: string[] } => {
+const services = (
+	fs: Partial<Services["fs"]> = {},
+): Services & { stdout: string[]; stderr: string[] } => {
 	const stdout: string[] = [];
 	const stderr: string[] = [];
 	let idCounter = 0;
@@ -26,6 +29,8 @@ const services = (): Services & { stdout: string[]; stderr: string[] } => {
 		fs: {
 			readText: () => Effect.succeed("body"),
 			removeFile: (path) => Effect.sync(() => rmSync(path, { force: true })),
+			existsDirectory: () => Effect.succeed(true),
+			...fs,
 		},
 		input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
 		output: {
@@ -398,6 +403,38 @@ describe("pithos foundation", () => {
 		const engine = makeEngine({ config: { dbPath }, services: services() });
 		engine.init({ fresh: true });
 		expect(() => engine.scopeUpsert({ kind: "repo", path: "" })).toThrow(PithosError);
+	});
+
+	it("scope upsert requires repo/worktree paths to exist as directories", () => {
+		const dbPath = tempDb();
+		const root = mkdtempSync(join(tmpdir(), "pithos-scope-path-"));
+		const filePath = join(root, "file.txt");
+		writeFileSync(filePath, "not a directory");
+		const engine = makeEngine({
+			config: { dbPath },
+			services: services({ existsDirectory: liveServices.fs.existsDirectory }),
+		});
+		engine.init({ fresh: true });
+		expect(engine.scopeUpsert({ kind: "repo", path: root }).scope).toMatchObject({
+			id: `repo:${root}`,
+			canonical_path: root,
+		});
+		const errors = [["repo", join(root, "missing")] as const, ["worktree", filePath] as const].map(
+			([kind, path]) => {
+				try {
+					engine.scopeUpsert({ kind, path });
+				} catch (error) {
+					if (error instanceof PithosError) return error;
+					throw error;
+				}
+				throw new Error("scope upsert should reject non-directory paths");
+			},
+		);
+		expect(errors.map((error) => error.code)).toEqual(["VALIDATION_ERROR", "VALIDATION_ERROR"]);
+		expect(errors.map((error) => error.message)).toEqual([
+			expect.stringContaining("Create the directory first"),
+			expect.stringContaining("Create the directory first"),
+		]);
 	});
 
 	it("run upsert rejects unknown scopes as PithosError", () => {

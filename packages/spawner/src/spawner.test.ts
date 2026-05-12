@@ -4,7 +4,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SpawnerError } from "./errors.js";
-import { launchRenderedAgent, renderAgent, renderSessionTranscript } from "./spawner.js";
+import { LiveSpawnerServices } from "./services.js";
+import {
+	launchRenderedAgent,
+	renderAgent,
+	renderSessionTranscript,
+	type RenderedAgent,
+} from "./spawner.js";
 
 const templateDir = join(dirname(fileURLToPath(import.meta.url)), "../../../templates");
 const noopExec = () => ({ status: 0, stdout: "", stderr: "" });
@@ -682,6 +688,34 @@ describe("renderAgent", () => {
 });
 
 describe("launchRenderedAgent", () => {
+	it("surfaces AFK spawn precondition failures as tagged launch errors", () => {
+		const rendered: RenderedAgent = {
+			...base,
+			agent: "war",
+			mode: "afk",
+			logicalName: "pdx--war__scope-repo--123e4567",
+			harness: {
+				kind: "pi",
+				argv: [process.execPath, "--version"],
+				env: {},
+			},
+			sessionLogPath: "/tmp/session.jsonl",
+			prompt: "prompt",
+			cwd: `/tmp/pdx-spawner-missing-cwd-test-${process.pid.toString()}`,
+		};
+
+		let thrown: unknown;
+		expect(() => {
+			try {
+				launchRenderedAgent(rendered, LiveSpawnerServices);
+			} catch (error) {
+				thrown = error;
+				throw error;
+			}
+		}).toThrow(SpawnerError);
+		expect(thrown).toMatchObject({ _tag: "SpawnerError", code: "LAUNCH_ERROR" });
+	});
+
 	it("returns runtime metadata without rendered argv/env", () => {
 		const rendered = renderAgent(
 			{ ...base, agent: "war", mode: "afk" },

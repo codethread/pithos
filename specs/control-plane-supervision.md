@@ -84,6 +84,9 @@ This is a destructive pre-v1 rewrite.
 ```text
 pdx open
   -> fail loudly if a pdx daemon session already exists
+  -> normal open: reuse existing `<data-dir>` state
+  -> `--update`: remove `<data-dir>/templates/` only, then continue
+  -> `--clean`: remove the full `<data-dir>` first, then continue
   -> pithos init (non-destructive)
   -> start pdx daemon in tmux target `pdx--daemon`
   -> daemon startup settlement:
@@ -512,7 +515,7 @@ Intentional abandon.
 Minimal operator/Pandora-facing API:
 
 ```text
-pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>]
+pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>] [--update | --clean]
 pdx close [--data-dir <path>]
 
 pdx daemon status [--data-dir <path>]
@@ -613,7 +616,7 @@ renderSessionTranscript(input): string
 
 The package root also exports the public service interfaces and intended live implementation used by consumers. Consumers must import `@pdx/spawner`, not sibling package `src/*` internals.
 
-`renderAgent` is pure render/preview: no Pithos mutation, no process launch, no tmux creation. It loads and validates manifest/templates, validates supplied mode against manifest mode, renders the prompt, builds harness argv/env, and generates `claim_command`.
+`renderAgent` is pure render/preview: no Pithos mutation, no process launch, no tmux creation. It loads and validates manifest/templates, validates supplied mode against manifest mode, renders the prompt, builds harness argv/env, and generates `claim_command`. When `PDX_DATA_DIR` is set, manifest/templates are loaded from `<data-dir>/templates/`; otherwise the bundled repo-root `templates/` directory is used.
 
 `launchRenderedAgent` launches an already rendered plan and returns runtime launch metadata. `launchAgent` is a convenience wrapper that calls `renderAgent` then `launchRenderedAgent`; `pdx` uses `renderAgent` before run upsert, persists non-null transcript metadata, then calls `launchRenderedAgent` so the launched process exactly matches the persisted render plan.
 
@@ -694,7 +697,7 @@ Spawner/template context contains self-claim context, not task content:
 
 Templates do not receive full `pithos --help` by default. Spawner calls `pithos --help-json` and filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`. `pdx run show` and `pdx task show` remain public operator commands, but are not included in Pandora's default filtered command cards. Missing configured help paths or malformed help JSON fail rendering loudly.
 
-Spawner renders `claim_command` from manifest claim capability plus launch context, for example:
+Spawner renders `claim_command` from the built-in claim capability for that agent plus launch context, for example:
 
 ```sh
 pithos task claim --run <run-id> --scope <scope-id> --capability <claim>
@@ -702,14 +705,12 @@ pithos task claim --run <run-id> --scope <scope-id> --capability <claim>
 
 Pithos still enforces claim authorization and one-active-task-per-run.
 
-Manifest entries repeat claim/enqueue metadata for rendering and consistency checks, even though Pithos seeds enforcement data. They also declare harness runtime tuning; these fields are MVP contract, not compatibility baggage:
+Manifest entries declare agent mode plus harness runtime tuning. Claim/enqueue authorization remains in Pithos built-ins and Spawner derives that metadata at render time:
 
 ```json
 {
 	"agent": "war",
 	"mode": "afk",
-	"claims": ["execute"],
-	"enqueues": ["escalate"],
 	"harness": {
 		"kind": "claude",
 		"model": "sonnet",
@@ -747,7 +748,7 @@ Dev/internal CLI may expose:
 pandora-spawn preview --agent <name> --mode <afk|hitl> --scope <scope-id> --run <run-id> --session-id <session-id> --cwd <path>
 ```
 
-Preview output is JSON `RenderedAgent`, including prompt and harness argv/env. Preview performs manifest/template validation only; it does not validate Pithos run/scope state. Because preview renders the exact harness environment, it requires DB context: either `PITHOS_DB` or `PDX_DATA_DIR` from which Spawner derives `<data-dir>/pithos.sqlite`. `PITHOS_BIN` is optional and defaults to `pithos`.
+Preview output is JSON `RenderedAgent`, including prompt and harness argv/env. Preview performs manifest/template validation only; it does not validate Pithos run/scope state. Because preview renders the exact harness environment, it requires DB context: either `PITHOS_DB` or `PDX_DATA_DIR` from which Spawner derives `<data-dir>/pithos.sqlite`. When `PDX_DATA_DIR` is supplied, preview also reads manifest/templates from `<data-dir>/templates/`; otherwise it reads the bundled repo-root `templates/` defaults. `PITHOS_BIN` is optional and defaults to `pithos`.
 
 Spawner error codes:
 
@@ -822,7 +823,7 @@ Pithos events are durable audit records. Payloads may grow, but these event name
 | Area                           | Files                                                                                     |
 | ------------------------------ | ----------------------------------------------------------------------------------------- |
 | Pithos library + CLI surface   | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md`              |
-| Spawner launcher-only refactor | `packages/spawner/src/`, `packages/spawner/templates/`                                    |
+| Spawner launcher-only refactor | `packages/spawner/src/`, `templates/`                                                     |
 | pdx package                    | `packages/pdx/`                                                                           |
 | Docs                           | `README.md`, `packages/pithos/README.md`, `packages/spawner/README.md`, `specs/README.md` |
 

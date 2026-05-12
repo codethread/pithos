@@ -3,11 +3,10 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BUILTIN_AGENT_ENQUEUES } from "@pdx/pithos/builtins";
 import { SpawnerError } from "./errors.js";
 import { launchRenderedAgent, renderAgent, renderSessionTranscript } from "./spawner.js";
 
-const templateDir = join(dirname(fileURLToPath(import.meta.url)), "../templates");
+const templateDir = join(dirname(fileURLToPath(import.meta.url)), "../../../templates");
 const noopExec = () => ({ status: 0, stdout: "", stderr: "" });
 
 const base = {
@@ -250,35 +249,32 @@ const pdxHelpTree = {
 } as const;
 const pdxHelpJson = JSON.stringify(pdxHelpTree);
 
-const agentsFile = ({
-	agent,
-	mode,
-	harnessKind,
-	claims,
-	enqueues,
-	tools,
-	harnessMode = "append",
-	includes = ["_common.md"],
-}: {
+const agentsFile = (input: {
 	agent: string;
 	mode: string;
 	harnessKind: "claude" | "pi";
-	claims: readonly string[];
-	enqueues: readonly string[];
 	tools?: readonly string[];
+	model?: string;
 	harnessMode?: "replace" | "append";
 	includes?: readonly string[];
-}): string =>
-	JSON.stringify({
+}): string => {
+	const {
+		agent,
+		mode,
+		harnessKind,
+		tools,
+		model = "model_test",
+		harnessMode = "append",
+		includes = ["_common.md"],
+	} = input;
+	return JSON.stringify({
 		agents: [
 			{
 				agent,
 				mode,
-				claims,
-				enqueues,
 				harness: {
 					kind: harnessKind,
-					model: "model_test",
+					model,
 					system_prompt_mode: harnessMode,
 					...(tools === undefined ? {} : { tools }),
 				},
@@ -287,6 +283,7 @@ const agentsFile = ({
 			},
 		],
 	});
+};
 
 const fakeRenderServices = (
 	agentsJson: string,
@@ -368,7 +365,7 @@ const makeLaunchServices = (
 describe("bundled agent templates", () => {
 	it("document the stdin payload contract", () => {
 		const templateText = readdirSync(templateDir)
-			.filter((entry) => entry.endsWith(".md") || entry.endsWith(".tmpl"))
+			.filter((entry) => entry === "_common.md" || entry.endsWith(".tmpl"))
 			.map((entry) => readFileSync(join(templateDir, entry), "utf8"))
 			.join("\n");
 
@@ -407,8 +404,6 @@ describe("renderAgent", () => {
 					agent: "war",
 					mode: "afk",
 					harnessKind,
-					claims: ["execute"],
-					enqueues: ["escalate"],
 					tools: ["bash", "read"],
 				}),
 			),
@@ -435,6 +430,45 @@ describe("renderAgent", () => {
 		expect(rendered.harness.argv).toContain("bash,read");
 	});
 
+	it("loads manifest and templates from $PDX_DATA_DIR/templates when set", () => {
+		const dataDir = "/tmp/pdx-custom";
+		const templatesDir = `${dataDir}/templates`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			{
+				readText: (path: string) => {
+					if (path === `${templatesDir}/agents.json`) {
+						return agentsFile({
+							agent: "war",
+							mode: "afk",
+							harnessKind: "pi",
+							tools: ["bash"],
+							model: "model_from_data_dir",
+						});
+					}
+					if (path === `${templatesDir}/_common.md`) return "DATA_DIR_COMMON";
+					if (path === `${templatesDir}/war.md.tmpl`)
+						return "{{_common.md}} {{model}} {{tools_csv}}";
+					throw new Error(`unexpected readText call: ${path}`);
+				},
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: (file: string, args: readonly string[]) => {
+					if (file === "pithos" && args.length === 1 && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		expect(rendered.prompt).toContain("DATA_DIR_COMMON model_from_data_dir bash");
+		expect(rendered.harness.argv).toContain("model_from_data_dir");
+		expect(rendered.harness.argv).toContain("bash");
+	});
+
 	it("renders War prompt with generated Pithos command cards", () => {
 		const rendered = renderAgent(
 			{ ...base, agent: "war", mode: "afk" },
@@ -443,8 +477,6 @@ describe("renderAgent", () => {
 					agent: "war",
 					mode: "afk",
 					harnessKind: "pi",
-					claims: ["execute"],
-					enqueues: ["escalate"],
 				}),
 			),
 		);
@@ -467,11 +499,6 @@ describe("renderAgent", () => {
 						agent,
 						mode: "afk",
 						harnessKind: "pi",
-						claims: agent === "toil" ? ["triage"] : ["design"],
-						enqueues:
-							agent === "toil"
-								? ["triage", "design", "execute", "escalate"]
-								: ["triage", "design", "escalate"],
 					}),
 				),
 			);
@@ -488,8 +515,6 @@ describe("renderAgent", () => {
 					agent: "pandora",
 					mode: "hitl",
 					harnessKind: "pi",
-					claims: ["escalate"],
-					enqueues: ["triage", "design", "escalate"],
 				}),
 			),
 		);
@@ -517,8 +542,6 @@ describe("renderAgent", () => {
 						agent: "pandora",
 						mode: "hitl",
 						harnessKind: "pi",
-						claims: ["escalate"],
-						enqueues: ["triage", "design", "escalate"],
 					}),
 					{ pdxStdout: missingTranscriptHelp },
 				),
@@ -535,8 +558,6 @@ describe("renderAgent", () => {
 						agent: "war",
 						mode: "afk",
 						harnessKind: "pi",
-						claims: ["execute"],
-						enqueues: ["escalate"],
 					}),
 					{ pithosStdout: "{" },
 				),
@@ -553,8 +574,6 @@ describe("renderAgent", () => {
 						agent: "war",
 						mode: "afk",
 						harnessKind: "pi",
-						claims: ["execute"],
-						enqueues: ["escalate"],
 					}),
 					{ pithosStatus: 127, pithosStderr: "missing pithos" },
 				),
@@ -571,8 +590,6 @@ describe("renderAgent", () => {
 						agent: "war",
 						mode: "afk",
 						harnessKind: "pi",
-						claims: ["execute"],
-						enqueues: ["escalate"],
 					}),
 				),
 			),
@@ -588,8 +605,6 @@ describe("renderAgent", () => {
 						agent: "war",
 						mode: "afk",
 						harnessKind: "pi",
-						claims: ["execute"],
-						enqueues: ["escalate"],
 					}),
 				),
 			),
@@ -605,8 +620,6 @@ describe("renderAgent", () => {
 						agent: "war",
 						mode: "afk",
 						harnessKind: "pi",
-						claims: ["execute"],
-						enqueues: ["escalate"],
 						includes: ["sub/evil.md"],
 					}),
 				),
@@ -621,8 +634,6 @@ describe("renderAgent", () => {
 						agent: "war",
 						mode: "afk",
 						harnessKind: "pi",
-						claims: ["execute"],
-						enqueues: ["escalate"],
 						includes: ["_common.md", "_common.md"],
 					}),
 				),
@@ -640,8 +651,6 @@ describe("renderAgent", () => {
 							agent: "war",
 							mode: "afk",
 							harnessKind: "pi",
-							claims: ["execute"],
-							enqueues: ["escalate"],
 						}),
 					).readText,
 					env: () => undefined,
@@ -661,8 +670,6 @@ describe("launchRenderedAgent", () => {
 					agent: "war",
 					mode: "afk",
 					harnessKind: "pi",
-					claims: ["execute"],
-					enqueues: ["escalate"],
 				}),
 			),
 		);
@@ -681,8 +688,6 @@ describe("launchRenderedAgent", () => {
 					agent: "war",
 					mode: "hitl",
 					harnessKind: "pi",
-					claims: ["execute"],
-					enqueues: ["escalate"],
 					harnessMode: "append",
 				}),
 			),
@@ -825,42 +830,5 @@ describe("renderSessionTranscript", () => {
 				},
 			),
 		).toThrow(/required message\.content must be an array/);
-	});
-});
-
-// Smoke-check contract for required claim/enqueue pairs.
-describe("manifest contract", () => {
-	it("rejects claim drift from built-in contract", () => {
-		expect(() =>
-			renderAgent(
-				{ ...base, agent: "war", mode: "afk" },
-				fakeRenderServices(
-					agentsFile({
-						agent: "war",
-						mode: "afk",
-						harnessKind: "pi",
-						claims: ["triage"],
-						enqueues: BUILTIN_AGENT_ENQUEUES.war,
-					}),
-				),
-			),
-		).toThrow(SpawnerError);
-	});
-
-	it("rejects multi-claim manifests", () => {
-		expect(() =>
-			renderAgent(
-				{ ...base, agent: "war", mode: "afk" },
-				fakeRenderServices(
-					agentsFile({
-						agent: "war",
-						mode: "afk",
-						harnessKind: "pi",
-						claims: ["execute", "triage"],
-						enqueues: BUILTIN_AGENT_ENQUEUES.war,
-					}),
-				),
-			),
-		).toThrow(SpawnerError);
 	});
 });

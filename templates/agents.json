@@ -3,8 +3,6 @@
 		{
 			"agent": "pandora",
 			"mode": "hitl",
-			"claims": ["escalate"],
-			"enqueues": ["triage", "design", "escalate"],
 			"harness": {
 				"kind": "pi",
 				"model": "deepseek-v4-pro",
@@ -17,8 +15,6 @@
 		{
 			"agent": "toil",
 			"mode": "afk",
-			"claims": ["triage"],
-			"enqueues": ["triage", "design", "execute", "escalate"],
 			"harness": {
 				"kind": "pi",
 				"model": "openai-codex/gpt-5.4",
@@ -31,8 +27,6 @@
 		{
 			"agent": "greed",
 			"mode": "hitl",
-			"claims": ["design"],
-			"enqueues": ["triage", "design", "escalate"],
 			"harness": {
 				"kind": "pi",
 				"model": "openai-codex/gpt-5.5",
@@ -44,8 +38,6 @@
 		{
 			"agent": "war",
 			"mode": "afk",
-			"claims": ["execute"],
-			"enqueues": ["escalate"],
 			"harness": {
 				"kind": "pi",
 				"model": "openai-codex/gpt-5.4",

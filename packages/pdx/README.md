@@ -101,13 +101,15 @@ Binds services to real implementations:
 - Node `fs`, `child_process`, `crypto`, and `process` are confined here for pdx runtime IO.
 - `PithosClient` wraps `@pdx/pithos` `makeEngine(...)`; this is the library boundary to durable state.
 - `Spawner` wraps `@pdx/spawner` render/launch/Harness session transcript APIs; pdx persists render metadata before launch.
+- Before first render, pdx materializes the repo-root bundled manifest/templates from `../../templates/` into `<data-dir>/templates/` without overwriting an existing user-owned copy.
+- `pdx open --update` replaces only `<data-dir>/templates/`; `pdx open --clean` wipes the full data dir before startup.
 - AFK stdout/stderr files are created under `<data-dir>/runs` before Spawner launches detached work.
 
 ### `src/controller.ts` — supervision policy
 
 Owns pdx behavior:
 
-- `openPdx` initializes Pithos, starts the pdx daemon tmux session, and waits for IPC readiness.
+- `openPdx` supports normal reuse, `--update` template refresh, and `--clean` full data-dir reset before starting the pdx daemon tmux session and waiting for IPC readiness.
 - `runDaemon` settles startup orphans, upserts the `pdx` system Run, starts reconcile, and serves IPC.
 - `reconcileTick` performs Cleanup/settlement first, maintains Pandora, sends Wakeups for new Escalation tasks, and spawns at most one ready non-Pandora Agent run per tick.
 - `handleKillRequest` performs Interrupt in Pithos before killing the live resource and enqueues an Interruption escalation when a Held task was interrupted.
@@ -144,10 +146,14 @@ Defines `PdxError` with machine-readable codes. Keep new pdx failures tagged; do
 For a data dir `<data-dir>` (`~/.pdx` by default):
 
 ```text
-<data-dir>/pithos.sqlite      # Pithos DB used by pdx's PithosClient
-<data-dir>/pdx.sock           # daemon IPC socket
-<data-dir>/pdx.jsonl          # Supervisor log JSONL
-<data-dir>/runs/<run>.pid     # AFK mode pidfiles
+<data-dir>/pithos.sqlite          # Pithos DB used by pdx's PithosClient
+<data-dir>/pdx.sock               # daemon IPC socket
+<data-dir>/pdx.jsonl              # Supervisor log JSONL
+<data-dir>/templates/README.md    # copied operator-facing template/config docs
+<data-dir>/templates/agents.json  # user-owned Spawner manifest seeded from bundled defaults
+<data-dir>/templates/*.md.tmpl    # user-owned prompt templates seeded from bundled defaults
+<data-dir>/templates/_common.md   # user-owned shared prompt include
+<data-dir>/runs/<run>.pid         # AFK mode pidfiles
 <data-dir>/runs/<run>.stdout.log
 <data-dir>/runs/<run>.stderr.log
 ```

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import {
+	access,
 	appendFile,
 	mkdir,
 	open,
@@ -11,7 +12,9 @@ import {
 } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
+	bundledTemplatesDir,
 	launchRenderedAgent,
 	LiveSpawnerServices as liveSpawnerServices,
 	renderAgent,
@@ -134,7 +137,7 @@ export const FileSystemLive = FileSystem.of({
 		}).pipe(Effect.asVoid),
 	removeFile: (path) =>
 		Effect.tryPromise({
-			try: () => rm(path, { force: true }),
+			try: () => rm(path, { force: true, recursive: true }),
 			catch: (error) => fsError("removeFile", error),
 		}).pipe(Effect.asVoid),
 });
@@ -244,6 +247,33 @@ const spawnerError = (operation: string, error: unknown) => {
 	return new PdxError({ code: "PROCESS_ERROR", message: `${operation} failed: ${String(error)}` });
 };
 
+const isNodeErrorCode = (error: unknown, code: string): boolean =>
+	typeof error === "object" && error !== null && "code" in error && error.code === code;
+
+const materializeSpawnerTemplates = async (dataDir: string): Promise<void> => {
+	const targetDir = join(dataDir, "templates");
+	const targetAgentsPath = join(targetDir, "agents.json");
+	await mkdir(targetDir, { recursive: true });
+	try {
+		await access(targetAgentsPath);
+		return;
+	} catch (error) {
+		if (!isNodeErrorCode(error, "ENOENT")) throw error;
+	}
+	const entries = await readdir(bundledTemplatesDir, { withFileTypes: true });
+	for (const entry of entries) {
+		if (!entry.isFile()) continue;
+		const sourcePath = join(bundledTemplatesDir, entry.name);
+		const targetPath = join(targetDir, entry.name);
+		const content = await readFile(sourcePath, "utf8");
+		try {
+			await writeFile(targetPath, content, { encoding: "utf8", flag: "wx" });
+		} catch (error) {
+			if (!isNodeErrorCode(error, "EEXIST")) throw error;
+		}
+	}
+};
+
 export const makeSpawnerLive = (config: {
 	readonly dataDir: string;
 	readonly pithosDbPath: string;
@@ -260,8 +290,11 @@ export const makeSpawnerLive = (config: {
 	};
 	return Spawner.of({
 		renderAgent: (input) =>
-			Effect.try({
-				try: () => renderAgent(input, renderServices),
+			Effect.tryPromise({
+				try: async () => {
+					await materializeSpawnerTemplates(config.dataDir);
+					return renderAgent(input, renderServices);
+				},
 				catch: (error) => spawnerError("spawner render", error),
 			}),
 		launchRenderedAgent: (rendered) =>

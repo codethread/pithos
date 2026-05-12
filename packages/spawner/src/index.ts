@@ -16,3 +16,4 @@ export {
 	type FakeSpawnerServicesInput,
 } from "./services.js";
 export { SpawnerError, type ErrorCode } from "./errors.js";
+export { bundledTemplatesDir } from "./paths.js";

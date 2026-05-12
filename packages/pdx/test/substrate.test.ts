@@ -392,6 +392,22 @@ describe("pdx substrate", () => {
 		expect(stdout).toContain("Local supervisor for Pandora's Box agent runs");
 	});
 
+	it("CLI open rejects --update with --clean", async () => {
+		await expect(
+			runPdxCli(["open", "--update", "--clean", "--data-dir", "/tmp/pdx-home"]),
+		).rejects.toMatchObject({
+			code: 2,
+			stdout: "",
+			stderr: `${JSON.stringify({
+				ok: false,
+				error: {
+					code: "VALIDATION_ERROR",
+					message: "--update and --clean are mutually exclusive",
+				},
+			})}\n`,
+		});
+	});
+
 	it("derives config paths from data dir", async () => {
 		const config = await parseConfig("/tmp/pdx-home");
 		expect(config).toMatchObject({
@@ -503,6 +519,31 @@ describe("pdx substrate", () => {
 		);
 	});
 
+	it("materializes bundled spawner templates into the data dir before render", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
+		const spawner = makeSpawnerLive({
+			dataDir,
+			pithosDbPath: join(dataDir, "pithos.sqlite"),
+		});
+		const error = await run(
+			Effect.flip(
+				spawner.renderAgent({
+					agent: "war",
+					mode: "afk",
+					runId: "run_test",
+					sessionId: "not-a-uuid",
+					scopeId: "scope_repo",
+					cwd: "/tmp/repo",
+				}),
+			),
+		);
+		expect(error.code).toBe("VALIDATION_ERROR");
+		expect(await readFile(join(dataDir, "templates", "agents.json"), "utf8")).toContain(
+			'"agent": "pandora"',
+		);
+		expect(await readFile(join(dataDir, "templates", "war.md.tmpl"), "utf8")).not.toHaveLength(0);
+	});
+
 	it("maps spawner boundary validation errors without flattening to process errors", async () => {
 		const spawner = makeSpawnerLive({ dataDir: "/tmp/pdx-data", pithosDbPath: "/tmp/pdx.sqlite" });
 		const error = await run(
@@ -551,7 +592,7 @@ describe("pdx substrate", () => {
 		const pithos = makePithos();
 		await expect(
 			run(
-				openPdx(await parseConfig("/tmp/pdx-home"), 4, 5).pipe(
+				openPdx(await parseConfig("/tmp/pdx-home"), 4, 5, { update: false, clean: false }).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(Clock, testClock),
@@ -593,7 +634,7 @@ describe("pdx substrate", () => {
 		);
 		try {
 			await run(
-				openPdx(config, 4, 5).pipe(
+				openPdx(config, 4, 5, { update: false, clean: false }).pipe(
 					Effect.provideService(Tmux, tmux),
 					Effect.provideService(FileSystem, fs),
 					Effect.provideService(Clock, testClock),
@@ -619,6 +660,89 @@ describe("pdx substrate", () => {
 			],
 		});
 	});
+
+	it("open --update removes the data-dir templates copy before starting", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const config = await parseConfig(dataDir);
+		const removes: string[] = [];
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(false),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
+			mkdir: () => Effect.void,
+			writeFileAtomic: () => Effect.void,
+			removeFile: (path) => Effect.sync(() => removes.push(path)),
+		});
+		const pithos = makePithos();
+		const server = await run(
+			listenIpc(config.socketPath, () => Effect.succeed({ ok: true, data: { ready: true } })),
+		);
+		try {
+			await run(
+				openPdx(config, 4, 5, { update: true, clean: false }).pipe(
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(FileSystem, fs),
+					Effect.provideService(Clock, testClock),
+					Effect.provideService(PithosClient, pithos),
+				),
+			);
+		} finally {
+			await run(server.close);
+		}
+		expect(removes).toEqual([`${config.dataDir}/templates`]);
+	});
+
+	it("open --clean wipes the full data dir before starting", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const parsed = await parseConfig(dataDir);
+		const socketDir = await mkdtemp(join(tmpdir(), "pdx-clean-socket-"));
+		const config = { ...parsed, socketPath: join(socketDir, "pdx.sock") };
+		const removes: string[] = [];
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(false),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+		});
+		const fs = FileSystem.of({
+			appendFile: () => Effect.void,
+			readFile: () => Effect.succeed(""),
+			readDirectory: () => Effect.succeed([]),
+			mkdir: () => Effect.void,
+			writeFileAtomic: () => Effect.void,
+			removeFile: (path) => Effect.sync(() => removes.push(path)),
+		});
+		const pithos = makePithos();
+		const server = await run(
+			listenIpc(config.socketPath, () => Effect.succeed({ ok: true, data: { ready: true } })),
+		);
+		try {
+			await run(
+				openPdx(config, 4, 5, { update: false, clean: true }).pipe(
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(FileSystem, fs),
+					Effect.provideService(Clock, testClock),
+					Effect.provideService(PithosClient, pithos),
+				),
+			);
+		} finally {
+			await run(server.close);
+		}
+		expect(removes).toEqual([config.dataDir]);
+	});
+
 	it("daemon startup creates runs dir, system run, Pandora singleton, and excludes pdx from caps", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const mkdirs: string[] = [];
@@ -2671,7 +2795,7 @@ describe("pdx substrate", () => {
 
 	it("Pandora template documents wakeup marker recognition", async () => {
 		const template = await readFile(
-			new URL("../../spawner/templates/pandora.md.tmpl", import.meta.url),
+			new URL("../../../templates/pandora.md.tmpl", import.meta.url),
 			"utf8",
 		);
 		expect(template).toContain("# wakeup: claimable escalate");

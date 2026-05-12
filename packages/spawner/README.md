@@ -13,6 +13,9 @@ pandora-spawn preview --help
 
 Preview renders the Agent run plan as JSON. It does not mutate Pithos, create a Run, touch tmux, or launch a Harness session.
 
+For the actual agent manifest and prompt-template contract, see the repo-root
+[`templates/`](../../templates/) directory and [`templates/README.md`](../../templates/README.md).
+
 ## Boundaries
 
 Spawner owns:
@@ -29,7 +32,7 @@ Spawner does not own:
 
 - durable Tasks, Runs, Claims, Fencing tokens, Artifacts, Events, or Task graph invariants — Pithos owns those
 - Registry state, Kill, Cleanup, Interrupt, Wakeups, or live Run finalization — `pdx` owns those
-- claim/enqueue authorization truth — Pithos built-ins own that; Spawner validates its manifest against them
+- claim/enqueue authorization truth — Pithos built-ins own that; Spawner derives render metadata from them
 - task body routing — Agent runs claim Claimable tasks themselves via the rendered claim command
 
 ## Cross-package flow
@@ -50,18 +53,17 @@ Specs describe the full control plane: [`../../specs/control-plane-supervision.m
 
 ## File map
 
-| Path                    | Why read it                                                              |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `src/index.ts`          | package-root exports; keep consumers on this boundary                    |
-| `src/main.ts`           | `pandora-spawn preview` CLI boundary and tagged CLI errors               |
-| `src/spawner.ts`        | manifest contract, render pipeline, launch mechanics, transcript parsers |
-| `src/services.ts`       | Render/Launch service interfaces, live Node IO, fake services            |
-| `src/paths.ts`          | template asset discovery for source and built layouts                    |
-| `src/errors.ts`         | `SpawnerError` codes and CLI exit mapping                                |
-| `templates/agents.json` | Agent manifest contract instance                                         |
-| `templates/*.md.tmpl`   | Agent kind prompts                                                       |
-| `templates/_common.md`  | shared prompt include                                                    |
-| `src/spawner.test.ts`   | behavior examples for render, launch, transcript, and manifest failures  |
+| Path                        | Why read it                                                                 |
+| --------------------------- | --------------------------------------------------------------------------- |
+| `src/index.ts`              | package-root exports; keep consumers on this boundary                       |
+| `src/main.ts`               | `pandora-spawn preview` CLI boundary and tagged CLI errors                  |
+| `src/spawner.ts`            | manifest contract, render pipeline, launch mechanics, transcript parsers    |
+| `src/services.ts`           | Render/Launch service interfaces, live Node IO, fake services               |
+| `src/paths.ts`              | template asset discovery for repo-root bundled defaults and data-dir copies |
+| `src/errors.ts`             | `SpawnerError` codes and CLI exit mapping                                   |
+| `../../templates/README.md` | manifest/template contract and operator-facing config docs                  |
+| `../../templates/`          | bundled default manifest and prompts seeded into `<data-dir>/templates/`    |
+| `src/spawner.test.ts`       | behavior examples for render, launch, transcript, and manifest failures     |
 
 ## Public library surface
 
@@ -73,105 +75,22 @@ Exported from `@pdx/spawner`:
 - `renderSessionTranscript(input)` — parse a stored Claude/Pi Harness session log.
 - `LiveSpawnerServices` — live filesystem/process/env implementation.
 - `makeFakeSpawnerServices(input)` — deterministic service implementation for tests.
+- `bundledTemplatesDir` — repo-root bundled default template directory used when `PDX_DATA_DIR` is unset and by `pdx` when seeding a fresh data dir.
 
 `RenderedAgent` is the important API object: it contains `logicalName`, `harness.kind`, `harness.argv`, `harness.env`, `sessionLogPath`, and `prompt`. `LaunchResult` intentionally contains runtime metadata only: pid for AFK mode or tmux target/pane pid for HITL mode.
 
-## `templates/agents.json` contract
+## Manifest/template config
 
-`agents.json` is Spawner's Agent manifest. It is render configuration, not durable authorization truth. Pithos seeds and enforces authorization; Spawner validates this file matches Pithos built-ins.
+Spawner intentionally keeps the render contract in the repo-root
+[`templates/README.md`](../../templates/README.md) next to the bundled default
+`agents.json` and prompt templates themselves.
 
-Top-level shape:
+Use that doc for:
 
-```json
-{
-	"agents": [
-		{
-			"agent": "war",
-			"mode": "afk",
-			"claims": ["execute"],
-			"enqueues": ["escalate"],
-			"harness": {
-				"kind": "pi",
-				"model": "openai-codex/gpt-5.4",
-				"system_prompt_mode": "append",
-				"tools": ["bash", "read"]
-			},
-			"includes": ["_common.md"],
-			"template": "war.md.tmpl"
-		}
-	]
-}
-```
-
-Field contract:
-
-| Field                        | Required | Contract                                                                          |
-| ---------------------------- | -------- | --------------------------------------------------------------------------------- |
-| `agents`                     | yes      | array of manifest entries                                                         |
-| `agent`                      | yes      | one of spawnable Agent kinds: `pandora`, `toil`, `greed`, `war`                   |
-| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                               |
-| `claims`                     | yes      | non-empty array; MVP requires exactly one item and it must match Pithos built-ins |
-| `enqueues`                   | yes      | array of Capabilities; must match Pithos built-ins exactly                        |
-| `harness.kind`               | yes      | `claude` or `pi`                                                                  |
-| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                  |
-| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`              |
-| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value         |
-| `includes`                   | optional | unique template basenames only; no paths, no recursive rendering                  |
-| `template`                   | yes      | template basename under `templates/`                                              |
-
-Current built-in claim/enqueue contract:
-
-| Agent kind | Mode today | Claims     | Enqueues                                  |
-| ---------- | ---------- | ---------- | ----------------------------------------- |
-| `pandora`  | `hitl`     | `escalate` | `triage`, `design`, `escalate`            |
-| `toil`     | `afk`      | `triage`   | `triage`, `design`, `execute`, `escalate` |
-| `greed`    | `hitl`     | `design`   | `triage`, `design`, `escalate`            |
-| `war`      | `afk`      | `execute`  | `escalate`                                |
-
-If you change Agent kinds, Capabilities, claims, or enqueues, update Pithos built-ins and this manifest together. If they disagree, rendering fails loudly.
-
-## Template contract
-
-Templates are simple `{{variable}}` substitutions. Unknown variables fail loudly. Includes are inserted as raw text and are not recursively rendered.
-
-Available template variables:
-
-- `agent`
-- `run_id`
-- `session_id`
-- `scope_id`
-- `cwd`
-- `claim_command`
-- `command_cards`
-- `claims`
-- `enqueues`
-- `model`
-- `tools_csv`
-- one variable per include filename, for example `_common.md`
-
-Templates receive launch/self-claim context only. They do not receive task bodies.
-
-## Environment contract
-
-Render/preview needs DB context:
-
-- `PITHOS_DB`, or
-- `PDX_DATA_DIR` from which Spawner derives `$PDX_DATA_DIR/pithos.sqlite`
-
-Optional command overrides:
-
-- `PITHOS_BIN` defaults to `pithos`
-- `PDX_BIN` defaults to `pdx`
-
-Rendered Harness env includes:
-
-- `PITHOS_DB`
-- `PITHOS_RUN_ID`
-- `PITHOS_SESSION_ID`
-- `PITHOS_SCOPE_ID`
-- `PITHOS_BIN`
-- `PDX_BIN`
-- `PDX_DATA_DIR` when provided
+- `agents.json` schema and the built-in Pithos claim/enqueue contract Spawner derives at render time
+- template variables and include rules
+- `PDX_DATA_DIR` loading behavior
+- user-editable config guidance
 
 ## Harness notes
 
@@ -194,9 +113,8 @@ pnpm --filter @pdx/spawner start -- preview --help
 Preview with an isolated DB context:
 
 ```sh
-export PDX_DATA_DIR="$(mktemp -d)/pdx"
-export PITHOS_DB="$PDX_DATA_DIR/pithos.sqlite"
-mkdir -p "$PDX_DATA_DIR"
+export PITHOS_DB="$(mktemp -d)/pdx/pithos.sqlite"
+mkdir -p "$(dirname "$PITHOS_DB")"
 pnpm --filter @pdx/pithos start -- init --fresh
 pnpm --filter @pdx/spawner start -- preview \
   --agent war \
@@ -206,5 +124,8 @@ pnpm --filter @pdx/spawner start -- preview \
   --session-id 123e4567-e89b-12d3-a456-426614174000 \
   --cwd "$PWD" | jq .
 ```
+
+If you want preview to use the same user-editable manifest/templates as `pdx`,
+set `PDX_DATA_DIR` and ensure `<data-dir>/templates/` has already been seeded.
 
 Use fake services for deterministic render/launch tests. Do not require live model credentials for package tests.

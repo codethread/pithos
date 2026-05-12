@@ -119,16 +119,34 @@ const isMissingTmuxSessionError = (error: PdxError): boolean =>
 
 const isMissingProcessError = (error: PdxError): boolean => error.message.includes("ESRCH");
 
-export const openPdx = (config: PdxConfig, maxAfk: number, intervalSeconds: number) =>
+export const openPdx = (
+	config: PdxConfig,
+	maxAfk: number,
+	intervalSeconds: number,
+	input: { readonly update: boolean; readonly clean: boolean },
+) =>
 	Effect.gen(function* () {
 		const tmux = yield* Tmux;
 		const fs = yield* FileSystem;
 		const pithos = yield* PithosClient;
+		if (input.update && input.clean) {
+			yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: "--update and --clean are mutually exclusive",
+				}),
+			);
+		}
 		const exists = yield* tmux.hasSession(DAEMON_TARGET);
 		if (exists) {
 			yield* Effect.fail(
 				new PdxError({ code: "VALIDATION_ERROR", message: `${DAEMON_TARGET} already exists` }),
 			);
+		}
+		if (input.clean) {
+			yield* fs.removeFile(config.dataDir);
+		} else if (input.update) {
+			yield* fs.removeFile(`${config.dataDir}/templates`);
 		}
 		yield* fs.mkdir(config.dataDir);
 		yield* pithos.init();

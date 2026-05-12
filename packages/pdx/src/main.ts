@@ -52,6 +52,8 @@ type CommandInput =
 			readonly dataDir: string | undefined;
 			readonly maxAfk: number;
 			readonly intervalSeconds: number;
+			readonly update: boolean;
+			readonly clean: boolean;
 	  }
 	| { readonly command: "close"; readonly dataDir: string | undefined }
 	| { readonly command: "daemon.status"; readonly dataDir: string | undefined }
@@ -155,7 +157,10 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 
 		switch (input.command) {
 			case "open":
-				yield* openPdx(config, input.maxAfk, input.intervalSeconds).pipe(Effect.provide(provided));
+				yield* openPdx(config, input.maxAfk, input.intervalSeconds, {
+					update: input.update,
+					clean: input.clean,
+				}).pipe(Effect.provide(provided));
 				yield* Effect.sync(() => process.stdout.write("tmux attach -t pdx--pandora\n"));
 				return;
 			case "close":
@@ -401,16 +406,36 @@ const makeCommand = (runtime: RuntimeInput) => {
 				Options.withDescription("Seconds between pdx reconciliation loops."),
 				Options.withDefault(defaultIntervalSeconds),
 			),
+			update: Options.boolean("update").pipe(
+				Options.withDescription(
+					"Replace <data-dir>/templates from the repo bundled defaults before starting.",
+				),
+			),
+			clean: Options.boolean("clean").pipe(
+				Options.withDescription(
+					"Wipe the entire pdx data dir before starting, including DB, logs, and templates.",
+				),
+			),
 		},
-		({ dataDir, maxAfk, intervalSeconds }) =>
+		({ dataDir, maxAfk, intervalSeconds, update, clean }) =>
 			Effect.gen(function* () {
 				yield* parsePositiveInt(maxAfk, "--max-afk");
 				yield* parsePositiveInt(intervalSeconds, "--interval-seconds");
+				if (update && clean) {
+					yield* Effect.fail(
+						new PdxError({
+							code: "VALIDATION_ERROR",
+							message: "--update and --clean are mutually exclusive",
+						}),
+					);
+				}
 				yield* runCommand(runtime, {
 					command: "open",
 					dataDir: opt(dataDir),
 					maxAfk,
 					intervalSeconds,
+					update,
+					clean,
 				});
 			}),
 	).pipe(

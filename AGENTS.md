@@ -47,7 +47,8 @@ pdx close --data-dir "$PDX_DATA_DIR"
 Notes:
 
 - `PITHOS_DB` is required by the `pithos` CLI.
-- `PDX_DATA_DIR` is consumed by Spawner/templates and should be passed to `pdx` as `--data-dir "$PDX_DATA_DIR"`.
+- `PDX_DATA_DIR` should be passed to `pdx` as `--data-dir "$PDX_DATA_DIR"`; Spawner loads user-owned templates from `$PDX_DATA_DIR/templates`.
+- `pdx open` seeds `$PDX_DATA_DIR/templates` from the repo-root defaults when missing; use `pdx open --update --data-dir "$PDX_DATA_DIR"` to replace only the templates copy.
 - `TMUX_TMPDIR` isolates the tmux server for smoke runs; otherwise `pdx open` can fail with `pdx--daemon already exists` even when `PDX_DATA_DIR` is isolated.
 - `PITHOS_BIN` and `PDX_BIN` are optional Spawner/template overrides; they default to `pithos` and `pdx`.
 - Spawner sets `PITHOS_RUN_ID`, `PITHOS_SESSION_ID`, and `PITHOS_SCOPE_ID` for launched Agent runs; do not invent them in supervisor code.
@@ -181,13 +182,15 @@ Before substantial work, read the orientation docs in this order:
 2. `UBIQUITOUS_LANGUAGE.md` for project terms and aliases to avoid.
 3. `specs/README.md` for the spec index.
 4. The specific specs relevant to the work.
-5. The nested `README.md` files for touched packages/directories.
+5. `templates/README.md` when touching agent manifest/prompt config.
+6. The nested `README.md` files for touched packages/directories.
 
 Reference map:
 
 - `README.md`: user-facing project intro and architecture overview
 - `UBIQUITOUS_LANGUAGE.md`: domain terms and aliases to avoid; do not duplicate it here
 - `specs/README.md`: index for system specs
+- `templates/README.md`: agent manifest and prompt-template config contract
 - `packages/<package>/README.md`: package-local developer docs
 - `CONTRIBUTING.md`: human-facing contribution overview; agents should rely on `AGENTS.md` for workflow rules
 

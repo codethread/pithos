@@ -64,10 +64,20 @@ Requires `~/.local/bin` to be on your `PATH`.
 
 ### Configuration
 
-The Evils' roster, harness kind, model, and tool surface are currently
-hardcoded in [`packages/spawner/templates/agents.json`](./packages/spawner/templates/agents.json).
-Edit that manifest (and the matching `*.md.tmpl` template) to change what
-Pandora and her Evils run as. A proper config surface is on the roadmap.
+Repo defaults live in [`./templates/`](./templates/) and are documented in
+[`./templates/README.md`](./templates/README.md).
+
+`pdx open` reuses the existing data dir and seeds `<data-dir>/templates/` only
+when the user copy is missing. Edit `<data-dir>/templates/agents.json` to
+change which harness/model/tools each agent runs with.
+
+If you also want to change prompts, edit the copied `*.md.tmpl` files in the
+same directory.
+
+Useful reset modes:
+
+- `pdx open --update` — keep DB/logs, replace `<data-dir>/templates/` from repo defaults
+- `pdx open --clean` — wipe the full pdx data dir and start from a blank slate
 
 ### Uninstall
 

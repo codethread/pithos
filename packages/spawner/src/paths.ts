@@ -3,13 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const candidates = [resolve(here, ".."), resolve(here, "../../spawner")];
-export const packageRoot = candidates.find((root) =>
-	existsSync(resolve(root, "templates/agents.json")),
-);
-if (packageRoot === undefined) {
-	throw new Error(`spawner templates not found from ${here}`);
+const repoRoot = resolve(here, "../../..");
+if (!existsSync(resolve(repoRoot, "templates/agents.json"))) {
+	throw new Error(`repo templates not found from ${here}`);
 }
-export const templatesDir = resolve(packageRoot, "templates");
-export const agentsPath = resolve(templatesDir, "agents.json");
-export const piExtensionDir = resolve(packageRoot, "pi-extension");
+
+export const bundledTemplatesDir = resolve(repoRoot, "templates");
+export const resolveTemplatesDir = (pdxDataDir: string | undefined): string =>
+	pdxDataDir === undefined ? bundledTemplatesDir : resolve(pdxDataDir, "templates");
+export const resolveAgentsPath = (pdxDataDir: string | undefined): string =>
+	resolve(resolveTemplatesDir(pdxDataDir), "agents.json");

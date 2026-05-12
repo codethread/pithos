@@ -4,12 +4,11 @@ import {
 	BUILTIN_AGENT_CLAIMS,
 	BUILTIN_AGENT_ENQUEUES,
 	BUILTIN_SPAWNABLE_AGENT_KINDS,
-	type Capability,
 	type SpawnableAgentKind,
 } from "@pdx/pithos/builtins";
 import { Either, ParseResult, Schema } from "effect";
 import { SpawnerError } from "./errors.js";
-import { agentsPath, templatesDir } from "./paths.js";
+import { resolveAgentsPath, resolveTemplatesDir } from "./paths.js";
 import { LiveSpawnerServices, type LaunchServices, type RenderServices } from "./services.js";
 
 export const AgentKindSchema = Schema.Literal(...BUILTIN_SPAWNABLE_AGENT_KINDS);
@@ -69,10 +68,6 @@ const HarnessSchema = Schema.Struct({
 const ManifestSchema = Schema.Struct({
 	agent: AgentKindSchema,
 	mode: ModeSchema,
-	claims: Schema.Array(Schema.Literal("triage", "design", "execute", "escalate")).pipe(
-		Schema.minItems(1),
-	),
-	enqueues: Schema.Array(Schema.Literal("triage", "design", "execute", "escalate")),
 	harness: HarnessSchema,
 	includes: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
 	template: Schema.NonEmptyString,
@@ -124,37 +119,26 @@ const readText = (path: string, services: RenderServices): string => {
 	}
 };
 
+const templateAssetPaths = (services: RenderServices) => {
+	const pdxDataDir = services.env("PDX_DATA_DIR");
+	return {
+		agentsPath: resolveAgentsPath(pdxDataDir),
+		templatesDir: resolveTemplatesDir(pdxDataDir),
+	};
+};
+
 const loadManifests = (services: RenderServices = LiveSpawnerServices): readonly Manifest[] => {
+	const paths = templateAssetPaths(services);
 	const parsed = decode(
 		Schema.parseJson(AgentsFileSchema),
-		readText(agentsPath, services),
-		agentsPath,
+		readText(paths.agentsPath, services),
+		paths.agentsPath,
 	);
 	for (const manifest of parsed.agents) validateManifestContract(manifest);
 	return parsed.agents;
 };
 
 const validateManifestContract = (manifest: Manifest): void => {
-	const expectedClaims = BUILTIN_AGENT_CLAIMS[manifest.agent];
-	const expectedEnqueues = BUILTIN_AGENT_ENQUEUES[manifest.agent];
-	if (manifest.claims.length !== 1) {
-		throw new SpawnerError({
-			code: "VALIDATION_ERROR",
-			message: `${manifest.agent}: MVP requires exactly one claim capability`,
-		});
-	}
-	if (!arrayEqual(manifest.claims, expectedClaims)) {
-		throw new SpawnerError({
-			code: "VALIDATION_ERROR",
-			message: `${manifest.agent}: manifest claims ${manifest.claims.join(",")} do not match built-in contract ${expectedClaims.join(",")}`,
-		});
-	}
-	if (!arrayEqual(manifest.enqueues, expectedEnqueues)) {
-		throw new SpawnerError({
-			code: "VALIDATION_ERROR",
-			message: `${manifest.agent}: manifest enqueues ${manifest.enqueues.join(",")} do not match built-in contract ${expectedEnqueues.join(",")}`,
-		});
-	}
 	for (const include of manifest.includes) {
 		if (basename(include) !== include) {
 			throw new SpawnerError({
@@ -172,8 +156,23 @@ const validateManifestContract = (manifest: Manifest): void => {
 	}
 };
 
-const arrayEqual = (left: readonly Capability[], right: readonly Capability[]): boolean =>
-	left.length === right.length && left.every((value, index) => value === right[index]);
+const claimForAgent = (agent: SpawnableAgentKind): string => {
+	const claims = BUILTIN_AGENT_CLAIMS[agent];
+	if (claims.length !== 1) {
+		throw new SpawnerError({
+			code: "VALIDATION_ERROR",
+			message: `${agent}: MVP requires exactly one claim capability`,
+		});
+	}
+	const claim = claims[0];
+	if (claim === undefined) {
+		throw new SpawnerError({
+			code: "VALIDATION_ERROR",
+			message: `${agent}: missing claim capability`,
+		});
+	}
+	return claim;
+};
 
 const renderTemplate = (template: string, ctx: Record<string, string>): string =>
 	template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key: string) => {
@@ -496,19 +495,20 @@ export const renderAgent = (
 			code: "VALIDATION_ERROR",
 			message: `${input.agent} manifest mode ${manifest.mode} does not match requested mode ${input.mode}`,
 		});
+	const paths = templateAssetPaths(services);
 	const config = loadConfig(services);
-	const claim = manifest.claims[0];
-	if (claim === undefined)
-		throw new SpawnerError({
-			code: "VALIDATION_ERROR",
-			message: `${input.agent}: missing claim capability`,
-		});
+	const claim = claimForAgent(input.agent);
+	const claims = BUILTIN_AGENT_CLAIMS[input.agent];
+	const enqueues = BUILTIN_AGENT_ENQUEUES[input.agent];
 	const includes = Object.fromEntries(
-		manifest.includes.map((include) => [include, readText(join(templatesDir, include), services)]),
+		manifest.includes.map((include) => [
+			include,
+			readText(join(paths.templatesDir, include), services),
+		]),
 	);
 	const claimCommand = `${config.pithosBin} task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
 	const commandCards = renderCommandCards(input.agent, config, services);
-	const prompt = renderTemplate(readText(join(templatesDir, manifest.template), services), {
+	const prompt = renderTemplate(readText(join(paths.templatesDir, manifest.template), services), {
 		...includes,
 		agent: input.agent,
 		run_id: input.runId,
@@ -517,8 +517,8 @@ export const renderAgent = (
 		cwd: input.cwd,
 		claim_command: claimCommand,
 		command_cards: commandCards,
-		claims: manifest.claims.join(", "),
-		enqueues: manifest.enqueues.join(", "),
+		claims: claims.join(", "),
+		enqueues: enqueues.join(", "),
 		model: manifest.harness.model,
 		tools_csv: manifest.harness.tools?.join(", ") ?? "",
 	});

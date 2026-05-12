@@ -677,7 +677,7 @@ const program = captureRuntimeInput.pipe(
 			if (handledHelpJson) return;
 			const cli = Command.run(command, {
 				name: "Pdx",
-				version: "0.1.0",
+				version: "0.1.1",
 				executable: "pdx",
 			});
 			yield* cli(process.argv).pipe(Effect.catchAll((error) => handleError(error)));

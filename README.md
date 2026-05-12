@@ -129,6 +129,7 @@ Pre-v1; expect breaking changes.
 - [ ] Promote/demote an Evil between AFK and HITL mid-session
 - [ ] Interactive pickers for kill/show/transcript so you don't copy ids by hand
 - [ ] Pluggable control-plane backends — swap tmux for Zellij, remote SSH, etc. (the architecture is already decoupled)
+- [ ] Dockerized control-plane smoke tests — encapsulate tmux/harness-adjacent runs for safer end-to-end validation
 
 See [open issues](https://github.com/codethread/pandoras-box/issues).
 

@@ -5,20 +5,20 @@
 - A run may hold at most one task at a time.
 - `PITHOS_BIN` points at the configured Pithos binary; `PITHOS_RUN_ID`, `PITHOS_SCOPE_ID`, and `PITHOS_DB` are set in the environment.
 - Claim succeeds with JSON like `{"ok":true,"task":{"id":"task_...","status":"claimed","token":1}}`; keep `task.id` and `task.token` for artifact, heartbeat, complete, and fail commands.
-- If claim returns `NO_CLAIMABLE_WORK`, do not invent work or poll in a loop. AFK agents should exit cleanly; HITL agents should wait for Adam or a control-plane wakeup.
+- If claim returns `NO_CLAIMABLE_WORK`, do not invent work or poll in a loop. AFK agents should exit cleanly; HITL agents should wait for the user or a control-plane wakeup.
 - Use the fencing token returned by claim when completing or failing held work. If you lost it, inspect with `--json` and recover the current token before writing.
 - Use your launch `scope_id` for normal same-scope follow-up work. Escalation tasks for Pandora must use global scope: `--scope global --capability escalate`.
 - Scopes partition work queues. Use `$PITHOS_BIN scope list` to discover existing scopes and `$PITHOS_BIN scope upsert --kind repo|worktree --path <path>` to create or reactivate a scope before enqueueing work there.
 - Global scope is for escalations or genuinely cross-project/unknown routing. Repo scope is good for project-level triage and design. Execution work should usually target a worktree scope so War can work in an isolated checkout.
 - Creating a worktree scope records the path in Pithos; if the worktree directory does not exist yet, create it first with git/filesystem commands, then upsert the worktree scope and use the returned scope id for execute tasks.
 - Pithos stores the full task graph; agents usually work the task chain reconstructed from it.
-- A task chain is the inspectable history Adam will review later: dependencies, source links, supersessions, artifacts, runs, and events together explain what happened.
+- A task chain is the inspectable history the user will review later: dependencies, source links, supersessions, artifacts, runs, and events together explain what happened.
 - Dependencies gate claimability; source links are non-blocking provenance.
 - Ordinary follow-up work should omit `--chain`: default auto keeps the held work chain connected.
 - Add manual `--depends-on <task-id>` only for extra prerequisites/fan-in; it combines with default auto.
 - Use `--chain none` for unrelated work, or `--chain none --depends-on <task-id>` for manual-only dependencies.
 - Prefer concise downstream task bodies that reference upstream task/artifact ids; do not copy approved briefs or large context into every child task.
-- Attach useful artifacts before completing substantial work so downstream agents and Adam can inspect the chain. Artifact `--kind` is a short category; use conventions such as `triage`, `design-brief`, `war-completion`, `decision`, or `evidence`.
+- Attach useful artifacts before completing substantial work so downstream agents and the user can inspect the chain. Artifact `--kind` is a short category; use conventions such as `triage`, `design-brief`, `war-completion`, `decision`, or `evidence`.
 - For any Pithos command using `--stdin`, send exactly one stdin document; prefer quoted heredocs (`<<'EOF'`) and do not stage temp files solely for payload upload.
 - Queue capabilities are `triage`, `design`, `execute`, and `escalate`; only enqueue capabilities listed in your launch context.
 - Escalation is a normal global-scope task claimed by Pandora.
@@ -74,6 +74,6 @@ Enqueue an escalation for Pandora while you still hold the current task:
 
 ```sh
 $PITHOS_BIN task enqueue --run $PITHOS_RUN_ID --scope global --capability escalate --title '<title>' --stdin <<'EOF'
-<what Adam/Pandora needs to know>
+<what the user/Pandora needs to know>
 EOF
 ```

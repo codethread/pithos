@@ -383,7 +383,7 @@ describe("bundled agent templates", () => {
 		expect(templateText).toContain("`task inspect` renders a Markdown handoff by default");
 		expect(templateText).toContain("Use the fencing token returned by claim");
 		expect(templateText).toContain(
-			"A task chain is the inspectable history Adam will review later",
+			"A task chain is the inspectable history the user will review later",
 		);
 		expect(templateText).toContain(
 			"Use Pithos for durable work state and pdx for live run/session transcripts",

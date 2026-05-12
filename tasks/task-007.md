@@ -14,7 +14,7 @@ Sequence:
 6. Retry kill once per reconcile tick if the process/session survives. Emit a structured supervisor log entry per failed attempt. No max retry, no escalation path in MVP.
 7. Remove the registry entry only after kill succeeds.
 
-`pdx restart` is intentionally not provided. Recovery is via Pandora/Adam plus graph repair.
+`pdx restart` is intentionally not provided. Recovery is via Pandora and the user plus graph repair.
 
 ## Test focus
 

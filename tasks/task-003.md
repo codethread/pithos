@@ -56,4 +56,4 @@ If the demo uncovers missing behavior from tasks 001a-001e or 002, make the smal
 - [ ] Demo uses only public CLI commands; no raw SQL or DB fixture mutation
 - [ ] Demo covers happy path, failure path, graph repair, lifecycle transitions, and read surfaces
 - [ ] Any discovered spec-conformance fixes are small, tested, and attributed to the owning Pithos area
-- [ ] Adam + agent walk through demo and confirm Pithos backbone behaves as specced; record confirmation as a task comment or in the demo doc
+- [ ] the user + agent walk through demo and confirm Pithos backbone behaves as specced; record confirmation as a task comment or in the demo doc

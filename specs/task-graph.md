@@ -27,14 +27,14 @@ Pithos tasks use a first-class dependency DAG plus a linear supersession history
 - Priority scheduling, critical-path scheduling, or any optimizer beyond FIFO among claimable tasks.
 - Performance work for large graphs or remote databases; correctness and clarity win.
 - Automatic downstream repair once work has already started from superseded input.
-- Inferring semantic relationships for unrelated operator/Pandora “Q” requests; those must stay intentionally flat unless Adam or Pandora names a source.
+- Inferring semantic relationships for unrelated operator/Pandora “Q” requests; those must stay intentionally flat unless the user or Pandora names a source.
 - Treating escalation source links as readiness gating. Escalations must remain immediately claimable even when they point at source work.
 
 ### Task graph vs task chain
 
 A **task graph** is the full durable relationship model Pithos stores and inspects. It includes tasks, blocking dependency edges, non-blocking source links, supersession history, artifacts, runs, and events. The graph is the interrogation substrate: it answers what exists, how work is related, why a task is blocked, what replaced what, and what evidence was attached.
 
-A **task chain** is the product-facing work thread Adam and agents discuss: the delegation path from initial triage through design, escalation/review, execution, result review, and repair. A chain is reconstructed from the task graph; it is not a separate persisted object and does not need to be strictly linear.
+A **task chain** is the product-facing work thread the user and agents discuss: the delegation path from initial triage through design, escalation/review, execution, result review, and repair. A chain is reconstructed from the task graph; it is not a separate persisted object and does not need to be strictly linear.
 
 A **dependency** is a blocking edge: downstream work waits for the upstream task to be `done`. A **source link** is non-blocking provenance: this task is about, or came from, a source task. Both help reconstruct the chain, but only dependencies affect claimability.
 
@@ -73,13 +73,13 @@ A **dependency** is a blocking edge: downstream work waits for the upstream task
   - **Rationale:** A dependency means “do not claim this task until the upstream task is `done`.” Escalations need to point at the work they are about without waiting for that work, so they need a source link rather than a `task_dependencies` row.
 
 - **Decision:** Make `--chain auto` the default, with explicit `none`, `held`, and `source` modes.
-  - **Rationale:** Normal agents should get lineage by omission. Pandora needs an obvious escape hatch for unrelated Adam “Q” requests. `held` and `source` remain fail-loud CLI modes for operators or advanced recipes, but routine agent prompts should teach default `auto` plus explicit `none`, not the whole mode matrix.
+  - **Rationale:** Normal agents should get lineage by omission. Pandora needs an obvious escape hatch for unrelated user “Q” requests. `held` and `source` remain fail-loud CLI modes for operators or advanced recipes, but routine agent prompts should teach default `auto` plus explicit `none`, not the whole mode matrix.
 
 - **Decision:** Manual `--depends-on` edges combine with implicit chain edges unless `--chain none` is selected.
   - **Rationale:** Fan-in is common: a follow-up can naturally depend on the held triage/design task and on additional named prerequisites. `--chain none --depends-on <task-id>` remains the manual-only form.
 
-- **Decision:** Pandora’s Adam-facing “Q” convention defaults to `--chain none`, while escalation-resolution handoffs rely on default `auto` when resolving a held escalation with a source.
-  - **Rationale:** Pandora is long-lived and may hold an escalation while Adam asks for unrelated work. Those operator-created tasks must not all inherit the same graph origin. When Pandora is actually resolving the held escalation, `auto` already uses the source link to choose the correct dependency target. `--chain source` remains available when a caller wants a fail-loud assertion that a source exists, but it should not be the default prompt recipe.
+- **Decision:** Pandora’s user-facing “Q” convention defaults to `--chain none`, while escalation-resolution handoffs rely on default `auto` when resolving a held escalation with a source.
+  - **Rationale:** Pandora is long-lived and may hold an escalation while the user asks for unrelated work. Those operator-created tasks must not all inherit the same graph origin. When Pandora is actually resolving the held escalation, `auto` already uses the source link to choose the correct dependency target. `--chain source` remains available when a caller wants a fail-loud assertion that a source exists, but it should not be the default prompt recipe.
 
 - **Decision:** Read-only context commands render agent-readable Markdown/text by default and require `--json` for full structured output.
   - **Rationale:** `task inspect`, `graph inspect`, and `briefing` are context surfaces agents paste into their reasoning loop. The default should be compact and readable while preserving task IDs for drill-down. Full objects remain available for scripts and tests through a single explicit format flag. Lifecycle/protocol commands such as `claim`, `enqueue`, and `complete` remain JSON-default because agents need stable IDs, tokens, and transition results.
@@ -335,7 +335,7 @@ E execute ──depends_on──▶ D design   # manual
 Manual-only or intentionally flat work:
 
 ```text
-Pandora/Adam queues unrelated work with --chain none
+Pandora and the user queue unrelated work with --chain none
 
 Q triage
 # no implicit dependency/source link
@@ -373,12 +373,12 @@ A escalate ─────────────source────────
 H triage / execute ─────depends_on──────────┘
 ```
 
-Pandora's Adam-facing Q convention:
+Pandora's user-facing Q convention:
 
 ```text
 Pandora holds A escalate ──source──▶ D design
 
-Adam: "Q this unrelated polish idea"
+the user: "Q this unrelated polish idea"
 Pandora enqueues P triage with --chain none
 
 P triage
@@ -390,10 +390,10 @@ Pandora has two distinct enqueue intents while holding an escalation:
 | Pandora intent                                                          | Required/default chain mode                                                                         | Result                                   |
 | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | Resolve the held escalation by routing approved source work onward      | default `--chain auto`; optional `--chain source` only when a fail-loud source assertion is desired | new task blocks on the source task       |
-| Adam says “Q this” without naming the held escalation/source as context | `--chain none` by Pandora prompt/Q convention                                                       | new task is intentionally flat           |
-| Adam says “Q this for task_X”                                           | `--chain none --depends-on task_X`                                                                  | manual dependency on the named task only |
+| user says “Q this” without naming the held escalation/source as context | `--chain none` by Pandora prompt/Q convention                                                       | new task is intentionally flat           |
+| user says “Q this for task_X”                                           | `--chain none --depends-on task_X`                                                                  | manual dependency on the named task only |
 
-The engine cannot infer Adam's conversational intent, so the Pandora prompt/Q convention must make unrelated Qs flat by default. Raw `task enqueue` keeps `--chain auto` as the universal default for agents; Pandora uses `--chain none` when acting as Adam's general queueing interface. Routine agent prompts should present this as a two-mode surface: omit `--chain` for ordinary chain continuation, use `--chain none` for intentionally unrelated work.
+The engine cannot infer the user's conversational intent, so the Pandora prompt/Q convention must make unrelated Qs flat by default. Raw `task enqueue` keeps `--chain auto` as the universal default for agents; Pandora uses `--chain none` when acting as the user's general queueing interface. Routine agent prompts should present this as a two-mode surface: omit `--chain` for ordinary chain continuation, use `--chain none` for intentionally unrelated work.
 
 ### `pithos task supersede <task-id>`
 
@@ -764,7 +764,7 @@ New/changed event contracts:
 | `packages/pithos/test/task-lifecycle.test.ts`                                                                                   | Modify/add: cover auto chaining, explicit/manual combinations, escalation source behavior, Pandora source handoff, and `--chain none`                |
 | `packages/pithos/test/cli.test.ts`                                                                                              | Modify: cover CLI flag parsing/help for `--chain` and enqueue output contract                                                                        |
 | `packages/spawner/templates/_common.md`                                                                                         | Modify: document automatic chain behavior and replace routine manual `--depends-on <held-task-id>` recipes                                           |
-| `packages/spawner/templates/pandora.md.tmpl`                                                                                    | Modify: distinguish escalation-resolution handoffs (default auto from held escalation source) from Adam-facing unrelated Qs (`--chain none`)         |
+| `packages/spawner/templates/pandora.md.tmpl`                                                                                    | Modify: distinguish escalation-resolution handoffs (default auto from held escalation source) from user-facing unrelated Qs (`--chain none`)         |
 | `packages/spawner/templates/toil.md.tmpl`, `packages/spawner/templates/greed.md.tmpl`, `packages/spawner/templates/war.md.tmpl` | Modify only if role-specific wording is needed; routine prompt surface should remain default auto plus explicit none for unrelated work              |
 | `packages/pithos/README.md`                                                                                                     | Modify: document `task enqueue --chain` and source-vs-dependency semantics                                                                           |
 

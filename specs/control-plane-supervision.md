@@ -13,7 +13,7 @@ Introduce `pdx` as the local supervisor for Pandora's Box. The system has three 
 2. **Spawner** owns harness launch details: templates, prompt rendering, harness argv/env, AFK foreground launch, HITL tmux launch, and launch metadata.
 3. **pdx** owns local supervision: reconcile loop, registry, caps, process/tmux ownership, immediate operator kill, and Pandora-facing control-plane status.
 
-Agents claim work themselves through Pithos. The daemon never injects task content into prompts. AFK agents terminate by subprocess exit; HITL agents are tmux-backed and may wait for Adam. Pandora is a long-lived HITL agent that claims `escalate` tasks.
+Agents claim work themselves through Pithos. The daemon never injects task content into prompts. AFK agents terminate by subprocess exit; HITL agents are tmux-backed and may wait for the user. Pandora is a long-lived HITL agent that claims `escalate` tasks.
 
 ### Goals
 
@@ -23,7 +23,7 @@ Agents claim work themselves through Pithos. The daemon never injects task conte
 - Replace transcript-scraping completion detection with lifecycle signals: AFK process exit, HITL tmux disappearance, and explicit Pithos task completion/failure.
 - Replace Envy/Worker/`implement` with War/`execute`.
 - Make human/Pandora checkpoints explicit queue nodes via the `escalate` capability.
-- Keep Adam's initial/human interface as direct chat with the live Pandora singleton; no bootstrap task is seeded.
+- Keep the user's initial/human interface as direct chat with the live Pandora singleton; no bootstrap task is seeded.
 - Remove duplicate lifecycle paths: no `pithos sweep`, no `pithos run end`, no `pithos run finish`, no spawner status/nudge/kill/message injection.
 - Make pdx the only owner of run finalization. Agents and harness hooks finalize tasks and exit; pdx observes death and finalizes runs.
 
@@ -53,7 +53,7 @@ This is a destructive pre-v1 rewrite.
   - **Rationale:** Status, kill, nudge, run upsert, and cleanup require Registry/DB policy that Spawner must not own. Spawner may expose dev/internal preview helpers for rendered prompts.
 
 - **Decision:** `pdx` exposes supervisor status and immediate kill, but no restart in MVP.
-  - **Rationale:** Restarting a bad task can loop. The safer workflow is kill → escalate → Pandora/Adam decide whether to supersede, cancel, or replan.
+  - **Rationale:** Restarting a bad task can loop. The safer workflow is kill → escalate → Pandora and the user decide whether to supersede, cancel, or replan.
 
 - **Decision:** `escalate` is a normal task capability consumed by Pandora.
   - **Rationale:** Artifacts record evidence/results; escalation tasks route attention. This gives Pandora an explicit queue-facing inbox without reintroducing prompt injection or long-running per-agent inbox files.
@@ -93,7 +93,7 @@ pdx open
        pithos run cleanup all active built-in-agent runs with reason `daemon_start`
   -> daemon upserts one long-lived `pdx` system run in global scope (`mode=afk`, `cwd=<pdx data-dir>`)
   -> daemon starts one long-lived Pandora HITL run in global scope regardless of queue state
-  -> Adam may chat directly with Pandora; Pandora records durable work by enqueueing tasks/artifacts
+  -> the user may chat directly with Pandora; Pandora records durable work by enqueueing tasks/artifacts
   -> Pandora claims `escalate` tasks when woken or when she checks the queue
 
 pdx reconcile loop (each tick settles lifecycle before spawning)
@@ -279,12 +279,12 @@ No new `blocked`/`escalated` status is added. Escalation is represented as a nor
 
 Capability-specific enqueue/supersede validation:
 
-| Capability | Required scope                                      | Body      | Notes                                 |
-| ---------- | --------------------------------------------------- | --------- | ------------------------------------- |
-| `triage`   | any                                                 | non-empty | decomposition/routing work            |
-| `design`   | any                                                 | non-empty | design/research/alignment work        |
-| `execute`  | `repo` or `worktree` with non-null `canonical_path` | non-empty | mutating or repo-local execution work |
-| `escalate` | `global`                                            | non-empty | Pandora/Adam attention checkpoint     |
+| Capability | Required scope                                      | Body      | Notes                                     |
+| ---------- | --------------------------------------------------- | --------- | ----------------------------------------- |
+| `triage`   | any                                                 | non-empty | decomposition/routing work                |
+| `design`   | any                                                 | non-empty | design/research/alignment work            |
+| `execute`  | `repo` or `worktree` with non-null `canonical_path` | non-empty | mutating or repo-local execution work     |
+| `escalate` | `global`                                            | non-empty | Pandora and the user attention checkpoint |
 
 `pithos task supersede` applies the same validation to the replacement task after overrides. Because `escalate` is global-only, all Checkpoint and Interruption escalation tasks live in global scope and reference original task/run/scope details in body or metadata.
 
@@ -572,7 +572,7 @@ System runs, missing session log files, unreadable files, unsupported `harness_k
 
 `pdx task show <task-id>` resolves the active holder run for that task from Pithos, then delegates to `pdx run show`. It fails loudly if the task has no active holder or if the holder run has no live tmux session.
 
-No `pdx restart` in MVP. Recovery is explicit through Pandora/Adam and graph repair.
+No `pdx restart` in MVP. Recovery is explicit through Pandora and the user and graph repair.
 
 On successful `pdx open`, the CLI prints `tmux attach -t pdx--pandora` and exits. It does not auto-attach.
 
@@ -789,9 +789,9 @@ Pithos invariant: a run may hold at most one active task at a time. After comple
 
 Per-agent roles and enqueue authority:
 
-- **Pandora** claims `escalate`, discusses with Adam, investigates with Pithos state plus `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`, and decides whether to supersede/cancel/replan/enqueue follow-up. When Adam asks to drain escalations, Pandora processes them sequentially because one run may hold only one task at a time. Routine Greed review nudges with an already-attached `design-brief` artifact count as approved design and may be completed without re-asking Adam. She may enqueue `triage`, `design`, and `escalate`, but not `execute`; execution goes through Toil.
+- **Pandora** claims `escalate`, discusses with the user, investigates with Pithos state plus `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`, and decides whether to supersede/cancel/replan/enqueue follow-up. When the user asks to drain escalations, Pandora processes them sequentially because one run may hold only one task at a time. Routine Greed review nudges with an already-attached `design-brief` artifact count as approved design and may be completed without re-asking the user. She may enqueue `triage`, `design`, and `escalate`, but not `execute`; execution goes through Toil.
 - **Toil** claims `triage`, decomposes and routes work, and may enqueue `triage`, `design`, `execute`, and checkpoint `escalate` tasks. Toil may supersede/cancel non-held tasks when repairing a broken chain.
-- **Greed** claims `design`, performs the interactive design review in a live HITL session, and first enqueues a global `escalate` task when ready for Adam review/sign-off. Greed attaches the final `design-brief` artifact only after Adam signs off directly or Pandora relays explicit sign-off, then completes the held task. Once that task clears, pdx reaps the non-Pandora HITL session. Greed may enqueue `design`, `triage`, and `escalate` when the design session branches or is ready for follow-up. Greed does not enqueue `execute` in MVP.
+- **Greed** claims `design`, performs the interactive design review in a live HITL session, and first enqueues a global `escalate` task when ready for the user to review/sign off. Greed attaches the final `design-brief` artifact only after the user signs off directly or Pandora relays explicit sign-off, then completes the held task. Once that task clears, pdx reaps the non-Pandora HITL session. Greed may enqueue `design`, `triage`, and `escalate` when the design session branches or is ready for follow-up. Greed does not enqueue `execute` in MVP.
 - **War** claims `execute`, performs repo/worktree execution, produces `war-completion` artifacts, and may enqueue `escalate` when attention is needed. War does not enqueue further `execute` tasks in MVP.
 
 ## 11. Event Vocabulary

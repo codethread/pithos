@@ -1,76 +1,224 @@
 # @pithos/pithos
 
-Durable Pithos state library and public `pithos` CLI.
+Developer documentation for the Pithos package: the durable state system for Pandora's Box.
 
-## Commands
+## Package role
 
-```sh
-pnpm --filter @pithos/pithos build
-pnpm --filter @pithos/pithos test
-pnpm --filter @pithos/pithos start --help
-```
+`@pithos/pithos` exposes the `pithos` binary and the typed library boundary used by `pdx`.
 
-After the root build links bins:
+For the generated CLI surface, use help instead of copying command lists here:
 
 ```sh
 pithos --help
 pithos --help-json
-pithos init --fresh
+pithos scope --help
+pithos run --help
+pithos task --help
+pithos graph --help
+pithos events --help
+pithos briefing --help
 ```
 
-## Scope
+`pithos --help-json` is consumed by Spawner when rendering role-filtered command cards for Agent run prompts.
 
-This package owns Pithos DB schema, seeded built-ins, task/run transitions, graph invariants, and the agent/operator CLI surface. `pdx` supervises live processes and reuses this package through its typed library boundary; Spawner only renders and launches harness sessions.
+## What Pithos is
 
-## Output modes
+Pithos is the durable source of truth for:
 
-`pithos --help` prints human-readable CLI help. `pithos --help-json` prints the machine-readable command tree used by Spawner prompt generation.
+- Scopes
+- Agent kinds and Capabilities
+- Tasks and Claims
+- Runs and Held tasks
+- Fencing tokens and Attempts
+- Dependencies, Source links, and Supersessions
+- Artifacts and Events
+- Task graph invariants and text/JSON inspection views
 
-Pithos separates protocol commands from context commands:
+## What Pithos is not
 
-- Lifecycle/protocol commands such as `task claim`, `task enqueue`, `task complete`, and `run upsert` return JSON by default because agents need stable ids, tokens, and transition results.
-- Read-only context commands such as `task inspect`, `graph inspect`, and `briefing` render readable Markdown/text by default. Pass `--json` for the full structured object.
+- Not the local supervisor. `pdx` owns Registry state, live process/tmux resources, Kill policy, Cleanup, Interrupt orchestration, and Wakeups.
+- Not a Harness launcher. Spawner renders prompts, builds Harness argv/env, launches Harness sessions, and parses Harness session logs.
+- Not a Control-plane backend. tmux is the current backend for HITL mode; Pithos only stores durable Run metadata.
+- Not a prompt/template system. Pithos exposes state transitions and inspection surfaces; Agent instructions live in Spawner templates.
 
-Examples:
+## Relation to other packages
+
+| Package                       | Pithos integration                                               | Boundary                                                            |
+| ----------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `@pithos/pdx`                 | imports `makeEngine` and `liveServices` through the package root | typed in-process durable state transitions; no subprocess parsing   |
+| `@pithos/spawner`             | imports `@pithos/pithos/builtins` and calls `pithos --help-json` | validates render config against built-ins and renders command cards |
+| Harness CLIs (`claude`, `pi`) | no direct integration                                            | Harness sessions are represented only by Run transcript metadata    |
+
+The composed behavior is specified in [`../../specs/control-plane-supervision.md`](../../specs/control-plane-supervision.md) and Task graph semantics in [`../../specs/task-graph.md`](../../specs/task-graph.md). Use [`../../UBIQUITOUS_LANGUAGE.md`](../../UBIQUITOUS_LANGUAGE.md) for terms.
+
+## Public package surface
+
+Exported from `@pithos/pithos`:
+
+- CLI helpers: `makePithosCommand`, `runPithosCli`, `renderPithosHelpJson`.
+- Engine boundary: `makeEngine`, `Engine`, render helpers for briefing/graph/task inspect text.
+- Schema/DB helpers: `migrate`, `openDb`, row schemas, decoded row helpers.
+- Chain helpers: chain-policy resolution and graph dependency utilities.
+- Config/services/errors: `loadConfig`, `liveServices`, `PithosError`.
+
+Exported from `@pithos/pithos/builtins`:
+
+- built-in Agent kinds
+- system actors
+- spawnable Agent kinds
+- Capabilities
+- claim/enqueue authorization contract
+
+Consumers should import from package roots, not sibling `src/*` internals.
+
+## Implemented module design
+
+### `src/main.ts` — process boundary
+
+Loads runtime config from environment, wires live services, and runs the CLI. Unexpected top-level failures are printed as tagged JSON errors.
+
+### `src/config.ts` — runtime config parsing
+
+Parses process environment into typed config:
+
+- `PITHOS_DB` — required database path
+- `PITHOS_RUN_ID` — optional default actor Run id for mutating Agent commands
+
+If both `PITHOS_RUN_ID` and `--run` are present for a command, Engine code fails loudly when they conflict.
+
+### `src/cli.ts` — CLI and output contract
+
+Defines the human CLI and machine-readable help tree with `@effect/cli`.
+
+Important details:
+
+- `--help-json` prints the command tree used by Spawner.
+- Protocol/state-transition commands return JSON by default for Agent consumption.
+- Context commands (`task inspect`, `graph inspect`, `briefing`) render readable text by default and expose `--json` for structured output.
+- Payload-bearing task mutations read redirected stdin only when `--stdin` is present and fail on empty/missing stdin.
+
+### `src/engine.ts` — durable state transitions
+
+Owns the Pithos domain API used by both the CLI and `pdx`:
+
+- scope upsert/list/archive
+- Run upsert/inspect/Cleanup/Interrupt/timeout
+- task enqueue/claim/heartbeat/complete/fail/cancel/supersede
+- artifact add
+- graph inspect
+- briefing
+- event tail
+- text renderers for task/graph/briefing views
+
+Engine code opens the SQLite DB, runs migrations, executes transition logic, and closes the DB per operation. Race-sensitive updates run inside SQLite transactions and use fenced preconditions so stale writes fail rather than drifting state.
+
+### `src/db.ts` — schema and seed data
+
+Defines the SQLite schema and migration entrypoint.
+
+Key tables:
+
+- `scopes`
+- `agent_kinds`, `capabilities`, `agent_claims`, `agent_enqueues`
+- `runs`
+- `tasks`
+- `task_dependencies`
+- `task_sources`
+- `task_supersessions`
+- `artifacts`
+- `events`
+
+`migrate` enables foreign keys, creates/updates schema, and seeds the built-in global scope, Agent kinds, Capabilities, claim rules, and enqueue rules.
+
+### `src/builtins.ts` — durable built-in contract
+
+Defines the pre-v1 built-in contract for Agent kinds and Capabilities. Spawner validates its manifest against this file, and Pithos seeds/enforces the same contract in SQLite.
+
+### `src/chain-policy.ts` — Task chain rules
+
+Pure helpers for Dependency, Source link, and Supersession behavior:
+
+- `--chain auto|none|held|source` resolution
+- implicit Dependency selection
+- Source link preservation for Escalation task handoff
+- dependency dedupe
+- acyclicity checks
+- graph closure and unresolved dependency helpers
+
+Use this file for chain semantics before editing Engine enqueue/supersede logic.
+
+### `src/rows.ts` — DB row parsing
+
+Schemas for rows crossing the SQLite boundary. Malformed rows fail with `INTERNAL_ERROR`; missing rows fail with `NOT_FOUND`.
+
+### `src/services.ts` — IO boundary
+
+Defines the service interface used by CLI/Engine code:
+
+- filesystem reads/removes
+- stdin reading
+- stdout/stderr writing
+- ID generation
+- clock
+
+`liveServices` is the Node implementation. Tests use deterministic service objects with real isolated SQLite DB files.
+
+### `src/errors.ts` — error contract
+
+Defines `PithosError` and exit-code mapping. Keep new runtime failures tagged with existing machine-readable codes unless a new code is intentionally added.
+
+## DB and invariant notes
+
+Pithos owns durable invariants, not live resource observation. Important rules to preserve:
+
+- A Run may hold at most one Held task (`runs.task_id`).
+- A Task has exactly one Capability.
+- Claim authorization is enforced by seeded `agent_claims`.
+- Enqueue authorization is enforced by seeded `agent_enqueues`.
+- Dependencies are satisfied only by upstream Tasks in `done`.
+- Source links are non-blocking provenance.
+- Supersessions preserve history while replacing work with a fresh Task.
+- Fencing tokens invalidate stale task writes.
+- Cleanup is for confirmed natural Run death; Interrupt is for deliberate Kill of a live Run; Cancel is for non-held Task abandonment.
+
+## Environment and runtime files
+
+Required for normal CLI execution:
 
 ```sh
-pithos task inspect <task-id>
-pithos task inspect <task-id> --json
-pithos graph inspect --scope <scope-id>
-pithos graph inspect --scope <scope-id> --json
-pithos briefing --agent war
-pithos briefing --agent war --json
+export PITHOS_DB=/path/to/pithos.sqlite
 ```
 
-## Task graph, chains, and source links
+Optional for Agent commands:
 
-`pithos task enqueue` accepts `--chain auto|none|held|source` and defaults to `auto`.
+```sh
+export PITHOS_RUN_ID=run_...
+```
 
-- Dependencies (`--depends-on <task-id>`) block claimability until upstream tasks are `done`.
-- Source links are non-blocking provenance; they connect related work without affecting claimability.
-- `--chain auto` preserves the current chain from the actor run. Ordinary held work becomes an implicit dependency; held escalations with a source route follow-up back to that source.
-- `--chain none` disables implicit chaining. Use it alone for unrelated work, or with `--depends-on <task-id>` for manual-only dependencies.
-- `--chain held` and `--chain source` are advanced fail-loud modes for callers that require a held task or held escalation source.
+Use isolated DBs for development and smoke tests:
 
-Enqueue JSON includes `chain` metadata with the selected policy, applied decision, held/source task ids, implicit dependencies, and final dependency ids.
+```sh
+export PDX_DATA_DIR="$(mktemp -d)/pdx"
+export PITHOS_DB="$PDX_DATA_DIR/pithos.sqlite"
+mkdir -p "$PDX_DATA_DIR"
+pnpm --filter @pithos/pithos start -- init --fresh
+```
 
-## Scope lifecycle
+## Development
 
-- `pithos scope list` shows active scopes; pass `--all` to include archived history.
-- `pithos scope archive <scope-id>` archives referenced repo/worktree scopes and physically deletes never-used ones.
-- Re-running `pithos scope upsert` for the same repo/worktree path reactivates an archived scope.
+```sh
+pnpm --filter @pithos/pithos typecheck
+pnpm --filter @pithos/pithos test
+pnpm --filter @pithos/pithos start -- --help
+pnpm --filter @pithos/pithos start -- --help-json
+```
 
-## Run transcript metadata
+Basic isolated CLI check:
 
-Every run record must include the transcript location needed for later inspection:
+```sh
+export PITHOS_DB="$(mktemp -d)/pithos.sqlite"
+pnpm --filter @pithos/pithos start -- init --fresh
+pnpm --filter @pithos/pithos start -- scope list
+```
 
-- `agent`
-- `mode` (`afk` or `hitl`)
-- `scope`
-- `cwd`
-- `sessionId`
-- `harnessKind` (`claude`, `pi`, or `system`)
-- `sessionLogPath`
-- optional `runId` for idempotent upsert
-
-CLI callers provide these fields via `pithos run upsert --agent ... --mode ... --scope ... --cwd ... --session-id ... --harness-kind ... --session-log-path ... [--run ...]`.
+Prefer real isolated SQLite fixtures for behavior tests. Do not replace DB invariant tests with broad mocks.

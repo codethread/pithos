@@ -1,7 +1,6 @@
 # Contributing
 
-Build, verify, and commit baseline. Engineering rules that are
-non-negotiable live in `AGENTS.md`.
+Build and verify baseline for human contributors. Engineering rules and agent workflow live in `AGENTS.md`.
 
 ## Prereqs
 
@@ -37,43 +36,16 @@ pnpm --filter @pithos/spawner start -- preview \
   --session-id 123e4567-e89b-12d3-a456-426614174000 --cwd "$PWD"
 ```
 
-## Commits
-
-- Atomic. One concern per commit.
-- Conventional-ish prefix: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
-- Message body summarises the **why**, not the what — `git diff` is the what.
-- Pass messages via heredoc:
-
-  ```sh
-  git commit -m "$(cat <<'EOF'
-  feat(spawner): tmux-wrap real claude harness
-
-  Detached tmux gives claude a TTY regardless of caller, and a positional
-  prompt arg makes the agent start working instead of sitting at the input.
-  EOF
-  )"
-  ```
-
 ## Package boundaries
 
-- **Pithos** owns durable DB invariants and run/task transitions.
-- **Spawner** is launcher-only glue: manifest validation, prompt rendering,
-  harness argv/env construction, and launch metadata. No status, no kill,
-  no DB writes.
-- **pdx** owns local supervision, Registry state, operator kill, daemon
-  status, and supervisor logs.
-
-Runtime process/filesystem/tmux operations go through pdx service
-interfaces. Domain/controller code should not import sibling package
-internals; consume package-root APIs such as `@pithos/pithos` and
-`@pithos/spawner`.
+See `UBIQUITOUS_LANGUAGE.md` for the control-plane vocabulary and `packages/*/README.md` for package-local developer boundaries. Design-level composition lives in `specs/README.md`.
 
 ## Doc map
 
 | When you want to…                                  | Read…                    |
 | -------------------------------------------------- | ------------------------ |
 | Understand the product and Evil model              | `README.md`              |
-| Engineering rules (fail loudly, etc.)              | `AGENTS.md`              |
+| Engineering rules and agent workflow               | `AGENTS.md`              |
 | Domain terms (task, claim, run, escalation, chain) | `UBIQUITOUS_LANGUAGE.md` |
 | Design specs                                       | `specs/README.md`        |
 | Per-package detail                                 | `packages/*/README.md`   |

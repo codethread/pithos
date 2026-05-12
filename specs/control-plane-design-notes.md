@@ -64,7 +64,7 @@ All `escalate` tasks live in global scope. Pandora's run is global-scoped, and s
 
 Use cases:
 
-- review a design artifact with Adam
+- review a design artifact with the user
 - review a completed PR/MR or execution result
 - investigate an interrupted/off-rails run
 - decide whether to supersede/cancel/replan a broken chain
@@ -225,7 +225,7 @@ pdx task kill <task-id> --reason <text>
 pdx task show <task-id>
 ```
 
-No restart command initially. Recovery is explicit: kill interrupts and escalates; Pandora/Adam decide whether to supersede, cancel, or replan. Normal death may still result in a fresh run after cleanup when reconcile sees claimable work. There is no same-run resurrection.
+No restart command initially. Recovery is explicit: kill interrupts and escalates; Pandora and the user decide whether to supersede, cancel, or replan. Normal death may still result in a fresh run after cleanup when reconcile sees claimable work. There is no same-run resurrection.
 
 Each pdx reconcile tick settles lifecycle before spawning: observe registry, cleanup entries whose execution is already gone, finish terminating kills, remove settled entries, write pdx-paced heartbeat for live HITL entries when due, then inspect claimable work and spawn. This preserves the invariant that old execution is gone before its work becomes claimable to a fresh run.
 

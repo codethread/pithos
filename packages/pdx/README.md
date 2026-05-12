@@ -1,41 +1,158 @@
 # @pithos/pdx
 
-Local supervisor for Pandora's Box. `pdx` reconciles durable Pithos state with live AFK processes and HITL tmux sessions.
+Developer documentation for the `pdx` package: the local supervisor component of Pandora's Box's control plane.
 
-## Public CLI
+## Package role
+
+`@pithos/pdx` exposes the `pdx` binary. In the user flow this is mostly opening and closing the box:
 
 ```sh
-pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>]
-pdx close [--data-dir <path>]
+pdx open
+pdx close
+```
 
-pdx daemon status [--data-dir <path>]
-pdx daemon logs [--data-dir <path>] [--limit <n> | --all] [--since <when>]
+For the full command surface, print the generated CLI help instead of copying it here:
 
-pdx run kill <run-id> --reason <text> [--data-dir <path>]
-pdx run transcript <run-id> [--data-dir <path>] [--limit <n>]
-pdx run show <run-id> [--data-dir <path>]
-
-pdx task kill <task-id> --reason <text> [--data-dir <path>]
-pdx task show <task-id> [--data-dir <path>]
-
+```sh
+pdx --help
+pdx daemon --help
+pdx run --help
+pdx task --help
 pdx --help-json
 ```
 
-`pdx --help-json` prints a machine-readable command tree used for Pandora prompt generation. Default `pdx --help` remains human-readable.
+`pdx --help-json` is the machine-readable command tree consumed by Spawner when rendering Pandora's prompt cards.
 
-`pdx daemon status` reports supervisor state: daemon liveness, registry entries, queue counts, and cap usage.
+## What pdx is
 
-`pdx daemon logs` prints pdx supervisor JSONL logs. These are control-plane logs, not agent harness transcripts.
+`pdx` is the local supervisor. It reconciles durable Pithos state with live control-plane resources:
 
-`pdx run transcript` reads the harness transcript for a Pithos run using the run's durable `harness_kind` and `session_log_path` metadata. System runs are not harness transcripts; use `pdx daemon logs` for the `pdx` system run.
+- one long-lived Pandora HITL Agent run
+- AFK mode Agent runs for Toil/War
+- HITL mode Agent runs for Greed
+- tmux as the current Control-plane backend
+- a local pdx daemon tmux session and Unix socket
+- the in-memory Registry of supervised Agent runs
+- Supervisor log JSONL and AFK pid/stdout/stderr files under the pdx data dir
 
-`pdx run show` switches the current tmux client to the supervised session for a run. `pdx task show` resolves the active holder run for a task, then switches to that tmux session. If a task is unclaimed or queued/done/failed already, `pdx task show` reports that status and exits non-zero.
+## What pdx is not
 
-`pdx run kill` and `pdx task kill` interrupt Pithos state first, then kill the live process/tmux resource. `pdx task kill <task-id>` means “kill the live run currently holding this task”; it is not task cancellation.
+- Not the durable source of truth. Pithos owns Tasks, Runs, Claims, Fencing tokens, Artifacts, Events, and Task graph invariants.
+- Not a harness/template system. Spawner owns prompt rendering, Harness argv/env, launch mechanics, and Harness session transcript parsing.
+- Not a task-content router. Agent runs claim their own Claimable tasks through Pithos; pdx never injects task bodies into prompts.
+- Not a distributed supervisor. Current implementation is local tmux/process supervision only.
 
-## Internal entrypoint
+## Relation to other packages
 
-`pdx daemon run` is used by `pdx open` inside the daemon tmux session. It is intentionally omitted from public help and should not be invoked manually outside supervisor startup/debugging.
+| Package                       | pdx integration                                                 | Boundary                                                                           |
+| ----------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `@pithos/pithos`              | imported as a library through `makeEngine` in `src/live.ts`     | typed in-process state transitions; pdx does **not** shell out to the `pithos` CLI |
+| `@pithos/spawner`             | imported as a library in `src/live.ts`                          | render Agent run plans, launch rendered plans, render Harness session transcripts  |
+| `tmux`                        | invoked through the injected `Process` service by `src/tmux.ts` | current Control-plane backend for HITL mode                                        |
+| Harness CLIs (`claude`, `pi`) | launched by Spawner live services                               | pdx only receives launch metadata and Harness session log paths                    |
+
+The specs describe the composed system. Start with [`../../specs/control-plane-supervision.md`](../../specs/control-plane-supervision.md) for intended cross-package behavior.
+
+## Implemented module design
+
+### `src/main.ts` — CLI boundary
+
+Defines the `pdx` command tree with `@effect/cli`, captures process boundary inputs, builds the Effect service layer, and dispatches to controller operations.
+
+Important details:
+
+- human help is generated by `@effect/cli`
+- `--help-json` walks the command descriptor tree and prints stable JSON for prompt generation
+- `daemon run` is parsed as an internal startup path before normal CLI dispatch and is intentionally omitted from public help
+- command failures are printed as tagged JSON errors on stderr
+
+### `src/config.ts` — runtime config parsing
+
+Parses IO-bound config into `PdxConfig`:
+
+- `dataDir`
+- `socketPath`
+- `logPath`
+- `runsDir`
+- `daemonEntrypoint`
+- `pithosDbPath`
+
+Default data dir is `$HOME/.pdx` unless `--data-dir` is provided. Missing required config fails loudly.
+
+### `src/services.ts` — service interfaces
+
+Central service boundary for domain code. Controller logic depends on these interfaces, not raw Node APIs:
+
+- `Process` — exec, liveness probes, kill
+- `FileSystem` — read/write/mkdir/remove
+- `Clock` — current ISO timestamp
+- `Ids` — run/session IDs
+- `Tmux` — session lifecycle and operator attach helpers
+- `PithosClient` — typed Pithos operations needed by supervision
+- `Spawner` — render/launch/Harness session transcript operations
+- `Registry` — in-memory view of launching, live, or terminating supervised Agent runs
+- `SupervisorLog` — structured JSONL Supervisor log writer
+- `LifecycleReporter` — ephemeral daemon-pane lifecycle pulses
+
+### `src/live.ts` — live service implementations
+
+Binds services to real implementations:
+
+- Node `fs`, `child_process`, `crypto`, and `process` are confined here for pdx runtime IO.
+- `PithosClient` wraps `@pithos/pithos` `makeEngine(...)`; this is the library boundary to durable state.
+- `Spawner` wraps `@pithos/spawner` render/launch/Harness session transcript APIs; pdx persists render metadata before launch.
+- AFK stdout/stderr files are created under `<data-dir>/runs` before Spawner launches detached work.
+
+### `src/controller.ts` — supervision policy
+
+Owns pdx behavior:
+
+- `openPdx` initializes Pithos, starts the pdx daemon tmux session, and waits for IPC readiness.
+- `runDaemon` settles startup orphans, upserts the `pdx` system Run, starts reconcile, and serves IPC.
+- `reconcileTick` performs Cleanup/settlement first, maintains Pandora, sends Wakeups for new Escalation tasks, and spawns at most one ready non-Pandora Agent run per tick.
+- `handleKillRequest` performs Interrupt in Pithos before killing the live resource and enqueues an Interruption escalation when a Held task was interrupted.
+- `statusPdx`, `logsShowPdx`, `runTranscriptPdx`, `runShowPdx`, and `taskShowPdx` implement operator/Pandora inspection helpers.
+
+The Registry is intentionally in-memory. Startup does not adopt old sessions; it kills deterministic `pdx--*` leftovers and cleans active built-in Runs through Pithos.
+
+### `src/ipc.ts` and `src/ipc-socket.ts` — daemon control channel
+
+`pdx open/close/status/kill` communicate with the daemon over a local Unix socket at `<data-dir>/pdx.sock`.
+
+- `ipc.ts` schemas parse request/response JSON at the boundary.
+- `ipc-socket.ts` owns Node `net` server/client wiring and maps failures to `PdxError`.
+- Public commands never mutate the daemon Registry directly; they ask the daemon over IPC when live control-plane state is needed.
+
+### `src/tmux.ts` — tmux adapter
+
+Implements `TmuxService` for the current Control-plane backend via `tmux` subprocess calls through `Process.execFile`.
+
+It owns tmux command construction and normalizes expected “missing session/server” cases into boolean absence where appropriate. Unexpected tmux failures remain hard failures.
+
+### `src/log.ts` and `src/lifecycle.ts` — observability
+
+- `SupervisorLog` writes structured JSONL Supervisor log records to `<data-dir>/pdx.jsonl`.
+- `pdx daemon logs` reads those raw JSONL lines for operators/Pandora.
+- `LifecycleReporter` prints concise human-readable daemon-pane pulses for spawn/remove/wakeup events. These are not durable Supervisor logs.
+
+### `src/errors.ts` — error contract
+
+Defines `PdxError` with machine-readable codes. Keep new pdx failures tagged; do not introduce unstructured thrown strings in runtime paths.
+
+## Data and runtime files
+
+For a data dir `<data-dir>` (`~/.pdx` by default):
+
+```text
+<data-dir>/pithos.sqlite      # Pithos DB used by pdx's PithosClient
+<data-dir>/pdx.sock           # daemon IPC socket
+<data-dir>/pdx.jsonl          # Supervisor log JSONL
+<data-dir>/runs/<run>.pid     # AFK mode pidfiles
+<data-dir>/runs/<run>.stdout.log
+<data-dir>/runs/<run>.stderr.log
+```
+
+HITL mode runtime state lives in tmux targets. Harness session transcripts live at harness-native session log paths returned by Spawner and stored on Pithos Runs.
 
 ## Development
 
@@ -43,8 +160,16 @@ pdx --help-json
 pnpm --filter @pithos/pdx typecheck
 pnpm --filter @pithos/pdx test
 pnpm --filter @pithos/pdx start --help
-pnpm --filter @pithos/pdx start -- daemon --help
-pnpm --filter @pithos/pdx start -- run --help
 ```
 
-Use injected Pithos/Spawner/Process/Tmux services in tests; do not require real model credentials or live harness binaries.
+Useful package-local help checks:
+
+```sh
+pnpm --filter @pithos/pdx start -- --help
+pnpm --filter @pithos/pdx start -- daemon --help
+pnpm --filter @pithos/pdx start -- run --help
+pnpm --filter @pithos/pdx start -- task --help
+pnpm --filter @pithos/pdx start -- --help-json
+```
+
+Use injected Pithos/Spawner/Process/Tmux services in tests. Do not require real model credentials, live harness binaries, or broad mocks when a deterministic service implementation covers the behavior.

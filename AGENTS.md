@@ -8,21 +8,77 @@ These rules are non-negotiable.
 pnpm install
 pnpm run build
 pithos --help
+pdx --help
+pandora-spawn --help
+```
+
+`pnpm run build` builds all workspace packages and links the `pithos`, `pdx`, and `pandora-spawn` bins onto the global PATH via `package.json#bin`. The package scripts use esbuild directly; no `tsx`.
+
+If global pnpm linking is unavailable, install local symlinks instead:
+
+```sh
+make local   # symlinks bins into ~/.local/bin; requires it on PATH
 ```
 
 Fast dev run without the full build/link pipeline:
 
 ```sh
-pnpm --filter @pithos/pithos start --help
+pnpm --filter @pithos/pithos start -- --help
+pnpm --filter @pithos/pdx start -- --help
+pnpm --filter @pithos/spawner start -- --help
 ```
 
-`pnpm run build` builds all workspace packages and links the `pithos`, `pdx`, and `pandora-spawn` bins onto the global PATH via `package.json#bin`. The package scripts use esbuild directly; no `tsx`.
+## Smoke-test environment
+
+Use an isolated temp data dir for manual smoke tests; never point smoke runs at a real `~/.pdx` or project DB.
+
+```sh
+export PDX_DATA_DIR="$(mktemp -d)/pdx"
+export PITHOS_DB="$PDX_DATA_DIR/pithos.sqlite"
+mkdir -p "$PDX_DATA_DIR"
+pnpm run build
+pithos init --fresh
+pdx open --data-dir "$PDX_DATA_DIR"
+pdx daemon status --data-dir "$PDX_DATA_DIR"
+pdx close --data-dir "$PDX_DATA_DIR"
+```
+
+Notes:
+
+- `PITHOS_DB` is required by the `pithos` CLI.
+- `PDX_DATA_DIR` is consumed by Spawner/templates and should be passed to `pdx` as `--data-dir "$PDX_DATA_DIR"`.
+- `PITHOS_BIN` and `PDX_BIN` are optional Spawner/template overrides; they default to `pithos` and `pdx`.
+- Spawner sets `PITHOS_RUN_ID`, `PITHOS_SESSION_ID`, and `PITHOS_SCOPE_ID` for launched Agent runs; do not invent them in supervisor code.
+- `pdx open` touches real tmux and real configured Harness CLIs; keep it isolated and always close it.
 
 ## 1. Checks pass between commits
 
 Typecheck, lint, tests, build — all green before every commit. No "leftover issues", no "next commit". If it's broken, you broke it, you fix it now.
 
+```sh
+pnpm verify   # lint + typecheck + test + build
+```
+
 Never `--no-verify`. Never disable a failing test to make the bar green.
+
+## Git workflow for agents
+
+- Inspect `git status --short` before editing and before committing.
+- Stage only intended files; never sweep unrelated user changes into a commit.
+- Commits are atomic: one concern per commit.
+- Use a conventional-ish prefix: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
+- Message body explains why; the diff shows what.
+- Pass multi-line messages via heredoc, not an interactive editor:
+
+```sh
+git commit -m "$(cat <<'EOF'
+docs(pdx): focus readme on package internals
+
+The package README is developer-facing, so point command details to generated
+help and document the implemented module boundaries instead.
+EOF
+)"
+```
 
 ## 2. Fail loudly
 
@@ -117,10 +173,24 @@ The runtime is headless. Agents have no debugger, no UI — only what the system
 
 ## Docs
 
-- `README.md`: project intro, agent model, delegation chain, and current architecture
-- `CONTRIBUTING.md`: build, verify, commit baseline, and doc map
-- `AGENTS.md`: non-negotiable rules beyond what can be enforced statically, injected transparently into agents
-- `packages/<package>/README.md`: package surface, internals, and package-level constraints (spawner harness/template guidance, pdx supervisor internals, pithos schema/CLI)
+Before substantial work, read the orientation docs in this order:
+
+1. `README.md` for the user-facing project shape.
+2. `UBIQUITOUS_LANGUAGE.md` for project terms and aliases to avoid.
+3. `specs/README.md` for the spec index.
+4. The specific specs relevant to the work.
+5. The nested `README.md` files for touched packages/directories.
+
+Reference map:
+
+- `README.md`: user-facing project intro and architecture overview
+- `UBIQUITOUS_LANGUAGE.md`: domain terms and aliases to avoid; do not duplicate it here
+- `specs/README.md`: index for system specs
+- `packages/<package>/README.md`: package-local developer docs
+- `CONTRIBUTING.md`: human-facing contribution overview; agents should rely on `AGENTS.md` for workflow rules
+
+Keep nested READMEs in sync with code changes. When package architecture, boundaries, services, runtime files, or developer workflow change, update the relevant package/directory README in the same work.
+
 - Non-Pandora HITL sessions are single-task: after they have claimed work and that task clears, `pdx` reaps the idle session instead of leaving it resident
 
 ## Testing

@@ -31,7 +31,7 @@ When Pandora holds an escalation with a source link and enqueues `triage` or `de
 - Agent prompt/documentation updates.
 - Multiple source links.
 - Allowing Pandora to enqueue `execute` beyond existing authorization.
-- Any semantic inference from Adam's natural-language Q requests.
+- Any semantic inference from the user's natural-language Q requests.
 
 ## References
 

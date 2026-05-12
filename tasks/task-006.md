@@ -23,13 +23,13 @@ Registry entry shape (minimum): `runId`, `agentKind`, `mode`, `scopeId`, `state`
 
 ## Demo gate
 
-Second demo gate. Adam + an agent walk through:
+Second demo gate. the user + an agent walk through:
 
 1. `pdx open` succeeds, prints attach command, daemon JSON log started.
-2. Adam runs `tmux attach -t pdx--pandora`, sees Pandora alive in a fresh harness session.
+2. the user runs `tmux attach -t pdx--pandora`, sees Pandora alive in a fresh harness session.
 3. Pandora can use `pithos` CLI from inside her session — e.g. `pithos task enqueue --capability triage ...` (the task sits queued; nothing claims it yet because slice 8 spawning isn't in).
 4. `pdx status --json` accurately reflects daemon up + Pandora registry entry + queue counts at each step.
-5. Adam runs `tmux kill-session -t pdx--pandora`. Within ~5s reconcile observes death, calls `run cleanup`, then spawns a fresh Pandora with a new run id. Adam re-attaches and confirms.
+5. the user runs `tmux kill-session -t pdx--pandora`. Within ~5s reconcile observes death, calls `run cleanup`, then spawns a fresh Pandora with a new run id. the user re-attaches and confirms.
 6. `pdx close` cleans up Pandora's session, then the daemon, then the pdx system run.
 
 Commit a replayable demo script (e.g. `docs/demos/pdx-pandora.md`).
@@ -67,4 +67,4 @@ Defer: tmux integration robustness beyond happy path; reconcile-tick scheduling 
 - [ ] Death of Pandora's tmux triggers `run cleanup` and a fresh respawn next tick
 - [ ] `pdx open` prints `tmux attach -t pdx--pandora` on success
 - [ ] `pdx close` tears down in spec §4 order
-- [ ] Demo script committed and Adam + agent successfully walk through (human-verified, not CI-checkable; record confirmation as a comment on this issue)
+- [ ] Demo script committed and the user + agent successfully walk through (human-verified, not CI-checkable; record confirmation as a comment on this issue)

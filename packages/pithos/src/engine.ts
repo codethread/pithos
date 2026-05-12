@@ -406,6 +406,7 @@ export interface BriefingOutput {
 	readonly ok: true;
 	readonly ready: readonly TaskSummaryOutput[];
 	readonly blocked: readonly BlockedTaskOutput[];
+	readonly recentlyCompleted: readonly TaskSummaryOutput[];
 }
 
 export interface ChainOutput {
@@ -1162,6 +1163,12 @@ export const renderBriefingText = (briefing: BriefingOutput): string => {
 			}
 		}
 	}
+	lines.push("", "## Recently Completed");
+	lines.push(
+		...(briefing.recentlyCompleted.length === 0
+			? ["- none"]
+			: briefing.recentlyCompleted.map(renderBriefingTaskBullet)),
+	);
 	return `${lines.join("\n")}\n`;
 };
 
@@ -2185,6 +2192,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				.map((row) => parseTaskSummary(row, "malformed queued task row"));
 			const visible =
 				caps === undefined ? queued : queued.filter((t) => caps.includes(t.capability));
+			const recentlyCompleted = db
+				.prepare(
+					`${taskSummarySelect} WHERE t.status='done' AND t.completed_at > datetime('now', '-1 hour') ORDER BY t.completed_at DESC`,
+				)
+				.all()
+				.map((row) => parseTaskSummary(row, "malformed recently completed task row"));
 			return {
 				ok: true,
 				ready: visible.filter((t) => isClaimable(db, t)),
@@ -2197,6 +2210,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						});
 						return { ...t, unresolved_dependency_ids: blockers.map((b) => b.id), blockers };
 					}),
+				recentlyCompleted,
 			};
 		}),
 	supersede: ({ taskId, runId, reason, title, body, bodyFile, scope, capability }) =>

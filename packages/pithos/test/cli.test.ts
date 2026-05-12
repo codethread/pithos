@@ -939,6 +939,9 @@ describe("pithos cli", () => {
 			## Blocked
 			- task_cli_N [triage] [blocked] Blocked triage
 			  - blocked by task_cli_N [queued] scope=global
+
+			## Recently Completed
+			- none
 			"
 		`);
 

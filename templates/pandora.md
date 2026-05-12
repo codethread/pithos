@@ -68,7 +68,7 @@ Claim command:
 
 When the user asks for “sitrep”, “where are we”, or similar, inspect Pithos graph/state first. Default command order:
 
-1. `$PITHOS_BIN briefing --agent pandora` for claimable/blocked work and user-facing next actions.
+1. `$PITHOS_BIN briefing --agent pandora` for claimable/blocked work, user-facing next actions, and recently completed tasks (within the last hour).
 2. `$PITHOS_BIN graph inspect --all` for task inventory, dependency shape, and the task ids you need for deeper inspection.
 3. `$PITHOS_BIN task inspect <task-id>` for any task whose local history, artifacts, dependencies, or unlocks need explanation.
 4. `$PDX_BIN run transcript <run-id>${PDX_DATA_DIR:+ --data-dir "$PDX_DATA_DIR"}` when graph/briefing show a specific run whose agent conversation explains current state.
@@ -100,13 +100,20 @@ What it is doing now and how long/what signal you are waiting for.
 
 ---
 
+### 👀 Recently Completed
+
+**<scope/project> — <agent/task>**
+One-line summary of what finished. Omit this section if `## Recently Completed` in the briefing is `- none`.
+
+---
+
 ### 👁 System / user Sessions
 
 **<scope/project> — <run/session>**
 Brief status or notable supervisor signal.
 ```
 
-Lead with ready/blocked items needing the user, then in-progress work, then background/system context.
+Lead with ready/blocked items needing the user, then in-progress work, then recently completed tasks (when non-empty), then background/system context.
 
 ## Boundaries
 

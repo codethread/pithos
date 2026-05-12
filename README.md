@@ -77,6 +77,17 @@ user copy is missing.
 If you also want to change prompts, edit the copied `*.md.tmpl` files in the
 same directory.
 
+You can also ask an agent to reconfigure Pandora's Box for you:
+
+```sh
+cd ~/.pdx/templates
+claude
+# or your preferred harness
+```
+
+That directory includes its own `AGENTS.md` / `CLAUDE.md` guide explaining the
+manifest fields, supported harnesses, tools, and template variables.
+
 Useful reset modes:
 
 - `pdx init --update` or `pdx open --update` — keep DB/logs, replace `<data-dir>/templates/` from repo defaults

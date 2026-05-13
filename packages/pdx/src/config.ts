@@ -4,6 +4,7 @@ import { PdxError } from "./errors.js";
 
 export const RawPdxConfigSchema = Schema.Struct({
 	dataDir: Schema.optional(Schema.NonEmptyString),
+	envDataDir: Schema.optional(Schema.NonEmptyString),
 	envHome: Schema.optional(Schema.NonEmptyString),
 	daemonEntrypoint: Schema.NonEmptyString,
 });
@@ -27,15 +28,19 @@ export const parsePdxConfig = (input: unknown): Effect.Effect<PdxConfig, PdxErro
 				}),
 		),
 		Effect.flatMap((decoded) => {
-			if (decoded.dataDir === undefined && decoded.envHome === undefined) {
+			if (
+				decoded.dataDir === undefined &&
+				decoded.envDataDir === undefined &&
+				decoded.envHome === undefined
+			) {
 				return Effect.fail(
 					new PdxError({
 						code: "CONFIG_ERROR",
-						message: "missing required data dir (provide --data-dir or HOME env)",
+						message: "missing required data dir (provide --data-dir, PDX_DATA_DIR, or HOME env)",
 					}),
 				);
 			}
-			const dataDir = resolve(decoded.dataDir ?? `${decoded.envHome}/.pdx`);
+			const dataDir = resolve(decoded.dataDir ?? decoded.envDataDir ?? `${decoded.envHome}/.pdx`);
 			return Effect.succeed({
 				dataDir,
 				socketPath: `${dataDir}/pdx.sock`,

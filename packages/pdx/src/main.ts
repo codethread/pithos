@@ -43,6 +43,7 @@ import {
 import { makeTmux } from "./tmux.js";
 
 interface RuntimeInput {
+	readonly envDataDir: string | undefined;
 	readonly envHome: string | undefined;
 	readonly daemonEntrypoint: string | undefined;
 }
@@ -127,6 +128,7 @@ const parsePositiveInt = (value: number, name: string): Effect.Effect<number, Pd
 };
 
 const captureRuntimeInput = Effect.sync<RuntimeInput>(() => ({
+	envDataDir: process.env.PDX_DATA_DIR,
 	envHome: process.env.HOME,
 	daemonEntrypoint: process.argv[1],
 }));
@@ -142,6 +144,7 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 	Effect.gen(function* () {
 		const config = yield* parsePdxConfig({
 			dataDir: input.dataDir,
+			envDataDir: runtime.envDataDir,
 			envHome: runtime.envHome,
 			daemonEntrypoint: runtime.daemonEntrypoint,
 		});

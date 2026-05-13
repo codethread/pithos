@@ -122,4 +122,4 @@ Rendered Harness env includes:
 - `PITHOS_SCOPE_ID`
 - `PITHOS_BIN`
 - `PDX_BIN`
-- `PDX_DATA_DIR` when provided
+- `PDX_DATA_DIR` when provided; `pdx` commands use it as their data-dir default unless `--data-dir` is passed

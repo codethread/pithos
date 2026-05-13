@@ -104,8 +104,13 @@ exit 64
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.runPromise(effect as Effect.Effect<A, E, never>);
 
-const configInput = (dataDir: string | undefined, envHome: string | undefined) => ({
+const configInput = (
+	dataDir: string | undefined,
+	envHome: string | undefined,
+	envDataDir?: string,
+) => ({
 	dataDir,
+	envDataDir,
 	envHome,
 	daemonEntrypoint: "/tmp/pdx-dev",
 });
@@ -477,6 +482,20 @@ describe("pdx substrate", () => {
 	it("uses explicit --data-dir without HOME env", async () => {
 		const config = await run(parsePdxConfig(configInput("/tmp/pdx-home", undefined)));
 		expect(config.dataDir).toBe("/tmp/pdx-home");
+	});
+
+	it("uses PDX_DATA_DIR env before HOME default", async () => {
+		const config = await run(
+			parsePdxConfig(configInput(undefined, "/tmp/user-home", "/tmp/pdx-env")),
+		);
+		expect(config.dataDir).toBe("/tmp/pdx-env");
+	});
+
+	it("lets explicit --data-dir override PDX_DATA_DIR env", async () => {
+		const config = await run(
+			parsePdxConfig(configInput("/tmp/pdx-explicit", "/tmp/user-home", "/tmp/pdx-env")),
+		);
+		expect(config.dataDir).toBe("/tmp/pdx-explicit");
 	});
 
 	it("fails config parse when --data-dir and HOME env are both missing", async () => {

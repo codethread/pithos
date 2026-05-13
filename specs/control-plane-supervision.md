@@ -1,7 +1,7 @@
 # Control Plane Supervision
 
 **Status:** Planned
-**Last Updated:** 2026-05-11
+**Last Updated:** 2026-05-13
 
 ## 1. Overview
 
@@ -81,6 +81,9 @@ This is a destructive pre-v1 rewrite.
 
 - **Decision:** `pdx` integrates with Pithos through the `@pdx/pithos` library, not by spawning the `pithos` CLI.
   - **Rationale:** CLI argv/stdout handling is the agent/operator contract. The supervisor needs typed in-process reuse of the same Pithos semantics so queue inspection and durable state transitions stay fast, testable, and schema-shaped without subprocess parsing or env plumbing.
+
+- **Decision:** `pdx` resolves its data dir from `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/.pdx`.
+  - **Rationale:** Agents launched by the control plane receive the relevant harness environment, including `PDX_DATA_DIR`. Letting `pdx` honor that environment keeps Pandora's inspection commands simple while preserving explicit `--data-dir` as the highest-precedence operator override.
 
 - **Decision:** Pithos seeds and enforces built-in agents/capabilities.
   - **Rationale:** Claim authorization is a durable invariant, not a template convention. Pre-v1 roster changes can be clean-break schema/seed updates.
@@ -599,6 +602,8 @@ pdx task kill <task-id> --reason <text> [--data-dir <path>]
 pdx task show <task-id> [--data-dir <path>]
 ```
 
+All `pdx` commands resolve the data dir with precedence `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/.pdx`. The environment fallback lets spawned agents run `$PDX_BIN run transcript`, `$PDX_BIN run show`, or `$PDX_BIN task show` against the same control-plane data dir without spelling `--data-dir`; explicit `--data-dir` remains the operator override.
+
 The internal daemon process entrypoint is `pdx daemon run`; it is used by `pdx open` inside tmux and is intentionally omitted from public help/API docs. `pdx daemon` is the public daemon namespace only.
 
 `pdx daemon status` must have JSON output. The exact shape is intentionally loose for MVP; Pandora can consume and adapt to the available fields. It must include top-level keys `daemon`, `registry`, `queue`, and `caps`. It should include at least:
@@ -686,7 +691,7 @@ renderSessionTranscript(input): string
 
 The package root also exports the public service interfaces and intended live implementation used by consumers. Consumers must import `@pdx/spawner`, not sibling package `src/*` internals.
 
-`renderAgent` is pure render/preview: no Pithos mutation, no process launch, no tmux creation. It loads and validates manifest/templates, validates supplied mode against manifest mode, renders the prompt, builds harness argv/env, and generates `claim_command`. When `PDX_DATA_DIR` is set, manifest/templates are loaded from `<data-dir>/templates/`; otherwise the bundled repo-root `templates/` directory is used.
+`renderAgent` is pure render/preview: no Pithos mutation, no process launch, no tmux creation. It loads and validates manifest/templates, validates supplied mode against manifest mode, renders the prompt, builds harness argv/env, and generates `claim_command`. When `PDX_DATA_DIR` is set, manifest/templates are loaded from `<data-dir>/templates/`; otherwise the bundled repo-root `templates/` directory is used. `pdx` passes its resolved data dir into Spawner, so rendered Harness env includes the same `PDX_DATA_DIR` whenever a control-plane data dir is in use.
 
 `launchRenderedAgent` launches an already rendered plan and returns runtime launch metadata. `launchAgent` is a convenience wrapper that calls `renderAgent` then `launchRenderedAgent`; `pdx` uses `renderAgent` before run upsert, persists non-null transcript metadata, then calls `launchRenderedAgent` so the launched process exactly matches the persisted render plan.
 

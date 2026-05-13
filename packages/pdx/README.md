@@ -78,7 +78,7 @@ Parses IO-bound config into `PdxConfig`:
 - `daemonEntrypoint`
 - `pithosDbPath`
 
-Default data dir is `$HOME/.pdx` unless `--data-dir` is provided. Missing required config fails loudly.
+Default data dir is `$HOME/.pdx`. `PDX_DATA_DIR` overrides that default, and explicit `--data-dir` overrides both. Missing required config fails loudly.
 
 ### `src/services.ts` — service interfaces
 

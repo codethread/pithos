@@ -33,12 +33,17 @@ Only Toil may enqueue `execute` tasks. War may only enqueue `escalate`; Pandora 
 **Best case — Toil authors merge and cleanup together.** When Toil creates the merge execute task, immediately enqueue the cleanup with an explicit `--depends-on` on the merge task. Both tasks are authored from the same held triage context:
 
 ```sh
+# 0. Upsert the feature worktree scope (create the worktree dir first if it does not exist)
+#    and capture the returned scope id — $PITHOS_SCOPE_ID is Toil's triage scope, not this.
+pithos scope upsert --kind worktree --path /path/to/feat/my-feature
+# returns {"scope":{"id":"<worktree-scope-id>",...}}
+
 # 1. Enqueue the merge task in the feature worktree scope so War runs inside it
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
+pithos task enqueue --run $PITHOS_RUN_ID --scope <worktree-scope-id> --capability execute \
   --title 'Merge feat/my-feature' --stdin <<'EOF'
 ...
 EOF
-# merge returns e.g. {"task":{"id":"task_XYZ",...}}
+# returns e.g. {"task":{"id":"task_XYZ",...}}
 
 # 2. Enqueue cleanup in the REPO scope (not the worktree scope) so War does not
 #    run inside the directory it is about to delete. Add --depends-on task_XYZ

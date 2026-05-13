@@ -1531,7 +1531,13 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				const nextTaskStatus = task.attempts < task.max_attempts ? "queued" : "dead_letter";
 				const taskUpdate = db
 					.prepare(
-						sql`
+						nextTaskStatus === "dead_letter"
+							? sql`
+						UPDATE tasks
+						SET status=?, fencing_token=fencing_token + 1, completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+						WHERE id=? AND status=? AND fencing_token=?
+					`
+							: sql`
 						UPDATE tasks
 						SET status=?, fencing_token=fencing_token + 1, updated_at=CURRENT_TIMESTAMP
 						WHERE id=? AND status=? AND fencing_token=?
@@ -2057,7 +2063,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				}
 				const result = db
 					.prepare(
-						sql`UPDATE tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?`,
+						sql`UPDATE tasks SET status='cancelled', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?`,
 					)
 					.run(taskId, task.status);
 				if (result.changes === 0) fail("STALE_TOKEN_RACE", "task changed before cancel");
@@ -2224,7 +2230,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				).run(taskId, replacementId, actorRunId, nonEmptyReason);
 				if (old.status === "queued") {
 					db.prepare(
-						sql`UPDATE tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+						sql`UPDATE tasks SET status='cancelled', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 					).run(taskId);
 					event(ctx, db, "task.cancelled", {
 						task_id: taskId,
@@ -2327,7 +2333,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				}
 				const cancelUpdate = db
 					.prepare(
-						sql`UPDATE tasks SET status='cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`,
+						sql`UPDATE tasks SET status='cancelled', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`,
 					)
 					.run(expectedTaskId);
 				if (cancelUpdate.changes === 0) {

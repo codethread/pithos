@@ -1296,6 +1296,196 @@ describe("task lifecycle", () => {
 		db.close();
 	});
 
+	it("sets completed_at on task complete, dead_letter, and cancel terminal transitions", () => {
+		const { dbPath, engine, repo } = setup();
+		const db = new Database(dbPath);
+
+		// complete sets completed_at
+		const completeTask = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "complete me",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(completeTask),
+		).toBeNull();
+		engine.complete({ taskId: completeTask, runId: "run_war", token: 1, resultJson: "{}" });
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(completeTask),
+		).toBeTruthy();
+
+		// dead_letter via runCleanup sets completed_at
+		engine.runUpsert({
+			agent: "war",
+			mode: "afk",
+			scope: repo,
+			cwd: "/tmp/pithos-repo",
+			sessionId: "s_war_dl",
+			harnessKind: "pi",
+			sessionLogPath: "/tmp/s_war_dl.jsonl",
+			runId: "run_war_dl",
+		});
+		const dlTask = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "dead letter me",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		engine.claim({ runId: "run_war_dl", scope: repo, capability: "execute" });
+		db.prepare("UPDATE tasks SET attempts=max_attempts WHERE id=?").run(dlTask);
+		expect(db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(dlTask)).toBeNull();
+		engine.runCleanup({ runId: "run_war_dl", reason: "process exited" });
+		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(dlTask)).toBe(
+			"dead_letter",
+		);
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(dlTask),
+		).toBeTruthy();
+
+		// reclaim (not yet dead_letter) leaves completed_at null
+		engine.runUpsert({
+			agent: "war",
+			mode: "afk",
+			scope: repo,
+			cwd: "/tmp/pithos-repo",
+			sessionId: "s_war_rc",
+			harnessKind: "pi",
+			sessionLogPath: "/tmp/s_war_rc.jsonl",
+			runId: "run_war_rc",
+		});
+		const reclaimTask = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "reclaim me",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		engine.claim({ runId: "run_war_rc", scope: repo, capability: "execute" });
+		engine.runCleanup({ runId: "run_war_rc", reason: "process exited" });
+		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(reclaimTask)).toBe(
+			"queued",
+		);
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(reclaimTask),
+		).toBeNull();
+
+		// cancel of queued task sets completed_at
+		const cancelTask = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "cancel me",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(cancelTask),
+		).toBeNull();
+		engine.cancel({ taskId: cancelTask, runId: "run_toil", reason: "not needed" });
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(cancelTask),
+		).toBeTruthy();
+
+		// cancel of dead_letter preserves original completed_at
+		const dlCompletedAt = db
+			.prepare("SELECT completed_at FROM tasks WHERE id=?")
+			.pluck()
+			.get(dlTask) as string;
+		engine.cancel({ taskId: dlTask, runId: "run_toil", reason: "cleaning up" });
+		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(dlTask)).toBe("cancelled");
+		expect(db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(dlTask)).toBe(
+			dlCompletedAt,
+		);
+
+		db.close();
+	});
+
+	it("sets completed_at when supersede cancels the queued original", () => {
+		const { dbPath, engine, repo } = setup();
+		const original = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "original",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		const db = new Database(dbPath);
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(original),
+		).toBeNull();
+		engine.supersede({
+			taskId: original,
+			runId: "run_toil",
+			reason: "redesign",
+			title: "replacement",
+			body: "body",
+			bodyFile: undefined,
+			scope: undefined,
+			capability: undefined,
+		});
+		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(original)).toBe(
+			"cancelled",
+		);
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(original),
+		).toBeTruthy();
+		db.close();
+	});
+
+	it("sets completed_at when escalateLaunchPrecondition cancels the queued task", () => {
+		const { dbPath, engine, repo } = setup();
+		const original = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "unlaunchable",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "auto",
+		}).task.id;
+		const db = new Database(dbPath);
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(original),
+		).toBeNull();
+		engine.escalateLaunchPrecondition({
+			runId: "run_pdx",
+			expectedTaskId: original,
+			expectedScopeId: repo,
+			expectedCapability: "execute",
+			canonicalPath: "/tmp/pithos-repo",
+			agentKind: "war",
+			reason: "scope_cwd_missing_at_launch",
+			escalationTitle: "Launch precondition failed",
+			escalationBody: "The repo cwd was missing before launch.",
+		});
+		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(original)).toBe(
+			"cancelled",
+		);
+		expect(
+			db.prepare("SELECT completed_at FROM tasks WHERE id=?").pluck().get(original),
+		).toBeTruthy();
+		db.close();
+	});
+
 	it("rolls back launch-precondition repair when expected task preconditions changed", () => {
 		const { dbPath, engine, repo } = setup();
 		const original = engine.enqueue({

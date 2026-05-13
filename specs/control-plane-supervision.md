@@ -788,7 +788,7 @@ Manifest entries declare agent mode plus harness runtime tuning. Claim/enqueue a
 		"tools": ["Bash", "Read", "Edit", "Write"]
 	},
 	"includes": ["_common.md"],
-	"template": "war.md.tmpl"
+	"template": "war.md"
 }
 ```
 
@@ -797,7 +797,7 @@ Harness config rules:
 - `model` is required and rendered as `--model <model>` for both Claude and Pi.
 - `system_prompt_mode` is required. `replace` renders `--system-prompt <prompt>`; `append` renders `--append-system-prompt <prompt>`.
 - `tools` is optional. If omitted, no `--tools` flag is rendered and the harness default applies. If present, it must be non-empty and renders as one comma-separated `--tools <a,b,c>` argument. Tool names are not validated by Spawner; they are harness-owned strings and may change without code changes.
-- `includes` is optional. Include names must be unique template basenames. Each listed include is loaded as raw text from the templates directory and becomes a template variable keyed by filename, for example `{{_common.md}}`. Includes are not recursively rendered. Unknown template variables fail loudly.
+- `includes` is optional. Include paths must be unique. Relative paths are loaded from the templates directory; absolute paths are loaded directly; `~/` paths expand to the current user's home directory. Each listed include is loaded as raw text and becomes a template variable keyed by the exact manifest string, for example `{{_common.md}}`, `{{snippets/common.md}}`, or `{{~/agent/common.md}}`. Includes are not recursively rendered. Unknown template variables fail loudly.
 
 Responsibilities:
 

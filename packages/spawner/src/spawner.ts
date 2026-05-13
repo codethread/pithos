@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import {
 	BUILTIN_AGENT_CLAIMS,
 	BUILTIN_AGENT_ENQUEUES,
@@ -144,19 +144,11 @@ const loadManifests = (services: RenderServices = LiveSpawnerServices): readonly
 };
 
 const validateManifestContract = (manifest: Manifest): void => {
-	for (const include of manifest.includes) {
-		if (basename(include) !== include) {
-			throw new SpawnerError({
-				code: "VALIDATION_ERROR",
-				message: `${manifest.agent}: include must be a template basename: ${include}`,
-			});
-		}
-	}
 	const includeSet = new Set(manifest.includes);
 	if (includeSet.size !== manifest.includes.length) {
 		throw new SpawnerError({
 			code: "VALIDATION_ERROR",
-			message: `${manifest.agent}: includes must be unique template basenames`,
+			message: `${manifest.agent}: includes must be unique template paths`,
 		});
 	}
 };
@@ -180,11 +172,18 @@ const claimForAgent = (agent: SpawnableAgentKind): string => {
 };
 
 const renderTemplate = (template: string, ctx: Record<string, string>): string =>
-	template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key: string) => {
+	template.replace(/\{\{\s*([^{}\s]+)\s*\}\}/g, (_match, key: string) => {
 		if (!(key in ctx))
 			throw new SpawnerError({ code: "TEMPLATE_ERROR", message: `Unknown template var: ${key}` });
 		return ctx[key] ?? "";
 	});
+
+const resolveTemplateReference = (templatesDir: string, path: string): string => {
+	if (path === "~") return homedir();
+	if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+	if (path.startsWith("/")) return path;
+	return join(templatesDir, path);
+};
 
 const SpawnerConfigSchema = Schema.Struct({
 	pithosBin: Schema.NonEmptyString,
@@ -513,25 +512,28 @@ export const renderAgent = (
 	const includes = Object.fromEntries(
 		manifest.includes.map((include) => [
 			include,
-			readText(join(paths.templatesDir, include), services),
+			readText(resolveTemplateReference(paths.templatesDir, include), services),
 		]),
 	);
 	const claimCommand = `${config.pithosBin} task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
 	const commandCards = renderCommandCards(input.agent, config, services);
-	const prompt = renderTemplate(readText(join(paths.templatesDir, manifest.template), services), {
-		...includes,
-		agent: input.agent,
-		run_id: input.runId,
-		session_id: input.sessionId,
-		scope_id: input.scopeId,
-		cwd: input.cwd,
-		claim_command: claimCommand,
-		command_cards: commandCards,
-		claims: claims.join(", "),
-		enqueues: enqueues.join(", "),
-		model: manifest.harness.model,
-		tools_csv: manifest.harness.tools?.join(", ") ?? "",
-	});
+	const prompt = renderTemplate(
+		readText(resolveTemplateReference(paths.templatesDir, manifest.template), services),
+		{
+			...includes,
+			agent: input.agent,
+			run_id: input.runId,
+			session_id: input.sessionId,
+			scope_id: input.scopeId,
+			cwd: input.cwd,
+			claim_command: claimCommand,
+			command_cards: commandCards,
+			claims: claims.join(", "),
+			enqueues: enqueues.join(", "),
+			model: manifest.harness.model,
+			tools_csv: manifest.harness.tools?.join(", ") ?? "",
+		},
+	);
 	const env = {
 		PITHOS_DB: config.pithosDb,
 		PITHOS_RUN_ID: input.runId,

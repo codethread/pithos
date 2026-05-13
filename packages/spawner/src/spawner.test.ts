@@ -263,6 +263,7 @@ const agentsFile = (input: {
 	model?: string;
 	harnessMode?: "replace" | "append";
 	includes?: readonly string[];
+	template?: string;
 }): string => {
 	const {
 		agent,
@@ -272,6 +273,7 @@ const agentsFile = (input: {
 		model = "model_test",
 		harnessMode = "append",
 		includes = ["_common.md"],
+		template = `${agent}.md`,
 	} = input;
 	return JSON.stringify({
 		agents: [
@@ -285,7 +287,7 @@ const agentsFile = (input: {
 					...(tools === undefined ? {} : { tools }),
 				},
 				includes,
-				template: `${agent}.md.tmpl`,
+				template,
 			},
 		],
 	});
@@ -306,10 +308,10 @@ const fakeRenderServices = (
 		readText: (path: string) => {
 			if (path.endsWith("agents.json")) return agentsJson;
 			if (path.endsWith("_common.md")) return "COMMON";
-			if (path.endsWith("war.md.tmpl")) {
+			if (path.endsWith("war.md")) {
 				return "{{_common.md}} {{model}} {{tools_csv}} {{claims}} {{enqueues}} {{claim_command}}\n{{command_cards}}";
 			}
-			if (path.endsWith("pandora.md.tmpl")) return "{{claim_command}}\n{{command_cards}}";
+			if (path.endsWith("pandora.md")) return "{{claim_command}}\n{{command_cards}}";
 			return "{{claim_command}}\n{{command_cards}}";
 		},
 		env: (key: string) => (key === "PDX_DATA_DIR" ? "/tmp/pdx-data" : undefined),
@@ -371,7 +373,10 @@ const makeLaunchServices = (
 describe("bundled agent templates", () => {
 	it("document the stdin payload contract", () => {
 		const templateText = readdirSync(templateDir)
-			.filter((entry) => entry === "_common.md" || entry.endsWith(".tmpl"))
+			.filter(
+				(entry) =>
+					entry === "_common.md" || ["pandora.md", "toil.md", "greed.md", "war.md"].includes(entry),
+			)
 			.map((entry) => readFileSync(join(templateDir, entry), "utf8"))
 			.join("\n");
 
@@ -473,8 +478,7 @@ describe("renderAgent", () => {
 						});
 					}
 					if (path === `${templatesDir}/_common.md`) return "DATA_DIR_COMMON";
-					if (path === `${templatesDir}/war.md.tmpl`)
-						return "{{_common.md}} {{model}} {{tools_csv}}";
+					if (path === `${templatesDir}/war.md`) return "{{_common.md}} {{model}} {{tools_csv}}";
 					throw new Error(`unexpected readText call: ${path}`);
 				},
 				env: (key: string) => {
@@ -637,21 +641,51 @@ describe("renderAgent", () => {
 		).toThrow("sessionId must be a UUID");
 	});
 
-	it("validates include semantics", () => {
-		expect(() =>
-			renderAgent(
-				{ ...base, agent: "war", mode: "afk" },
-				fakeRenderServices(
-					agentsFile({
-						agent: "war",
-						mode: "afk",
-						harnessKind: "pi",
-						includes: ["sub/evil.md"],
-					}),
-				),
-			),
-		).toThrow("include must be a template basename");
+	it("loads relative include and template paths using manifest paths as template variables", () => {
+		const dataDir = "/tmp/pdx-custom";
+		const templatesDir = `${dataDir}/templates`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			{
+				readText: (path: string) => {
+					if (path === `${templatesDir}/agents.json`) {
+						return agentsFile({
+							agent: "war",
+							mode: "afk",
+							harnessKind: "pi",
+							includes: [
+								"snippets/common.md",
+								"../../instruction-files/shared.md",
+								"~/agent/common.md",
+							],
+							template: "/tmp/instruction-files/war.md",
+						});
+					}
+					if (path === `${templatesDir}/snippets/common.md`) return "NESTED_COMMON";
+					if (path === "/tmp/instruction-files/shared.md") return "OUTSIDE_COMMON";
+					if (path === `${homedir()}/agent/common.md`) return "HOME_COMMON";
+					if (path === "/tmp/instruction-files/war.md") {
+						return "{{snippets/common.md}} {{../../instruction-files/shared.md}} {{~/agent/common.md}} {{claim_command}}";
+					}
+					throw new Error(`unexpected readText call: ${path}`);
+				},
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: (file: string, args: readonly string[]) => {
+					if (file === "pithos" && args.length === 1 && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		expect(rendered.prompt).toContain("NESTED_COMMON OUTSIDE_COMMON HOME_COMMON");
+	});
 
+	it("validates include semantics", () => {
 		expect(() =>
 			renderAgent(
 				{ ...base, agent: "war", mode: "afk" },

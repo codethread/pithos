@@ -10,7 +10,7 @@ prompt wording.
 ## Files
 
 - `agents.json` — render manifest for each agent kind.
-- `*.md.tmpl` — prompt template for an agent kind.
+- `*.md` — prompt template for an agent kind.
 - `_common.md` — shared include text used by templates.
 - `README.md` — operator-facing contract reference.
 - `AGENTS.md` / `CLAUDE.md` — this guide for direct config-editing agents.
@@ -30,7 +30,7 @@ Each `agents.json` entry has this shape:
 		"tools": ["bash", "read"]
 	},
 	"includes": ["_common.md"],
-	"template": "war.md.tmpl"
+	"template": "war.md"
 }
 ```
 
@@ -45,9 +45,11 @@ Fields:
   - `append` renders as the harness `--append-system-prompt` style flag.
 - `harness.tools`: optional non-empty array; rendered into the harness `--tools`
   argv value as a comma-separated list.
-- `includes`: optional list of template basenames. No paths. No recursive
-  include rendering.
-- `template`: template basename in this directory.
+- `includes`: optional list of template paths. Relative paths resolve from this
+  directory; absolute paths and `~/` paths are allowed. No recursive include
+  rendering.
+- `template`: template path. Relative paths resolve from this directory;
+  absolute paths and `~/` paths are allowed.
 
 The manifest controls render configuration only. Durable authorization is still
 owned by Pithos built-ins. If you invent new agent kinds or capabilities, this
@@ -94,7 +96,8 @@ Available variables:
 - `enqueues`
 - `model`
 - `tools_csv`
-- one variable per include filename, for example `{{_common.md}}`
+- one variable per include path exactly as listed, for example `{{_common.md}}`,
+  `{{snippets/common.md}}`, or `{{~/agent/common.md}}`
 
 Templates receive launch/self-claim context only. They do not receive task
 bodies.
@@ -102,8 +105,12 @@ bodies.
 ## Safe editing checklist
 
 1. Keep `agents.json` valid JSON.
-2. Keep every referenced `template` and `includes` file present in this directory.
-3. Keep include names as basenames only, not paths.
+2. Keep every referenced `template` and `includes` path readable. Relative paths
+   are resolved from this directory; absolute paths and `~/` can point at files
+   outside `<data-dir>/templates/` for workflows that keep prompt files in a
+   separate version-controlled directory.
+3. When using nested or external includes, reference them in templates with the
+   exact manifest string, for example `{{snippets/common.md}}`.
 4. Choose harness `kind`, `model`, and `tools` from the real harness CLI docs/help.
 5. Do not remove required launch/self-claim instructions from prompts unless you
    are intentionally changing runtime behavior.

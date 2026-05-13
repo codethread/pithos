@@ -785,18 +785,18 @@ New/changed event contracts:
 
 ## 7. Code Locations
 
-| File                                                                         | Change                                                                                                                                               |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---- | ------------------------------------------------------- |
-| `packages/pithos/src/engine.ts`                                              | Modify: resolve chain policy, persist source links, include chain metadata in enqueue output/events, and include source links in inspect/graph reads |
-| `packages/pithos/src/cli.ts`                                                 | Modify: add `--chain auto                                                                                                                            | none | held | source`to`task enqueue` and thread it into engine input |
-| `packages/pithos/src/db.ts`                                                  | Modify: add non-blocking source-link table in the clean-break schema                                                                                 |
-| `packages/pithos/src/rows.ts`                                                | Modify: add source-link row decoder if source rows are parsed outside engine-local query shapes                                                      |
-| `packages/pithos/test/task-lifecycle.test.ts`                                | Modify/add: cover auto chaining, explicit/manual combinations, escalation source behavior, Pandora source handoff, and `--chain none`                |
-| `packages/pithos/test/cli.test.ts`                                           | Modify: cover CLI flag parsing/help for `--chain` and enqueue output contract                                                                        |
-| `templates/_common.md`                                                       | Modify: document automatic chain behavior and replace routine manual `--depends-on <held-task-id>` recipes                                           |
-| `templates/pandora.md.tmpl`                                                  | Modify: distinguish escalation-resolution handoffs (default auto from held escalation source) from user-facing unrelated Qs (`--chain none`)         |
-| `templates/toil.md.tmpl`, `templates/greed.md.tmpl`, `templates/war.md.tmpl` | Modify only if role-specific wording is needed; routine prompt surface should remain default auto plus explicit none for unrelated work              |
-| `packages/pithos/README.md`                                                  | Modify: document `task enqueue --chain` and source-vs-dependency semantics                                                                           |
+| File                                                          | Change                                                                                                                                               |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ---- | ------------------------------------------------------- |
+| `packages/pithos/src/engine.ts`                               | Modify: resolve chain policy, persist source links, include chain metadata in enqueue output/events, and include source links in inspect/graph reads |
+| `packages/pithos/src/cli.ts`                                  | Modify: add `--chain auto                                                                                                                            | none | held | source`to`task enqueue` and thread it into engine input |
+| `packages/pithos/src/db.ts`                                   | Modify: add non-blocking source-link table in the clean-break schema                                                                                 |
+| `packages/pithos/src/rows.ts`                                 | Modify: add source-link row decoder if source rows are parsed outside engine-local query shapes                                                      |
+| `packages/pithos/test/task-lifecycle.test.ts`                 | Modify/add: cover auto chaining, explicit/manual combinations, escalation source behavior, Pandora source handoff, and `--chain none`                |
+| `packages/pithos/test/cli.test.ts`                            | Modify: cover CLI flag parsing/help for `--chain` and enqueue output contract                                                                        |
+| `templates/_common.md`                                        | Modify: document automatic chain behavior and replace routine manual `--depends-on <held-task-id>` recipes                                           |
+| `templates/pandora.md`                                        | Modify: distinguish escalation-resolution handoffs (default auto from held escalation source) from user-facing unrelated Qs (`--chain none`)         |
+| `templates/toil.md`, `templates/greed.md`, `templates/war.md` | Modify only if role-specific wording is needed; routine prompt surface should remain default auto plus explicit none for unrelated work              |
+| `packages/pithos/README.md`                                   | Modify: document `task enqueue --chain` and source-vs-dependency semantics                                                                           |
 
 ## 8. Open Questions
 

@@ -643,7 +643,7 @@ describe("pdx substrate", () => {
 		expect(await readFile(join(dataDir, "templates", "agents.json"), "utf8")).toContain(
 			'"agent": "pandora"',
 		);
-		expect(await readFile(join(dataDir, "templates", "war.md.tmpl"), "utf8")).not.toHaveLength(0);
+		expect(await readFile(join(dataDir, "templates", "war.md"), "utf8")).not.toHaveLength(0);
 		expect(await readlink(join(dataDir, "templates", "CLAUDE.md"))).toBe("AGENTS.md");
 	});
 
@@ -3075,7 +3075,7 @@ describe("pdx substrate", () => {
 
 	it("Pandora template documents wakeup marker recognition", async () => {
 		const template = await readFile(
-			new URL("../../../templates/pandora.md.tmpl", import.meta.url),
+			new URL("../../../templates/pandora.md", import.meta.url),
 			"utf8",
 		);
 		expect(template).toContain("# wakeup: claimable escalate");

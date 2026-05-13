@@ -157,7 +157,7 @@ For a data dir `<data-dir>` (`~/.pdx` by default):
 <data-dir>/pdx.jsonl              # Supervisor log JSONL
 <data-dir>/templates/README.md    # copied operator-facing template/config docs
 <data-dir>/templates/agents.json  # user-owned Spawner manifest seeded from bundled defaults
-<data-dir>/templates/*.md.tmpl    # user-owned prompt templates seeded from bundled defaults
+<data-dir>/templates/*.md         # user-owned prompt templates seeded from bundled defaults
 <data-dir>/templates/_common.md   # user-owned shared prompt include
 <data-dir>/runs/<run>.pid         # AFK mode pidfiles
 <data-dir>/runs/<run>.stdout.log

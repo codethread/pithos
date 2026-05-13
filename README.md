@@ -74,7 +74,7 @@ harness/model/tools each agent runs with.
 `pdx open` also reuses the existing data dir and seeds templates only when the
 user copy is missing.
 
-If you also want to change prompts, edit the copied `*.md.tmpl` files in the
+If you also want to change prompts, edit the copied agent `.md` files in the
 same directory.
 
 You can also ask an agent to reconfigure Pandora's Box for you:

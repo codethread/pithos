@@ -15,7 +15,7 @@ Normal user editing happens in `<data-dir>/templates/`, not here.
 ## Files
 
 - `agents.json` — agent manifest: mode, harness kind/model/tools, include list, template file
-- `*.md.tmpl` — prompt templates per agent kind
+- `*.md` — prompt templates per agent kind
 - `_common.md` — shared include
 - `AGENTS.md` — config-editing guide for direct agent sessions in this directory
 - `CLAUDE.md` — symlink to `AGENTS.md` for Claude Code
@@ -39,23 +39,23 @@ Top-level shape:
 				"tools": ["bash", "read"]
 			},
 			"includes": ["_common.md"],
-			"template": "war.md.tmpl"
+			"template": "war.md"
 		}
 	]
 }
 ```
 
-| Field                        | Required | Contract                                                                  |
-| ---------------------------- | -------- | ------------------------------------------------------------------------- |
-| `agents`                     | yes      | array of manifest entries                                                 |
-| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`                                  |
-| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                       |
-| `harness.kind`               | yes      | `claude` or `pi`                                                          |
-| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                          |
-| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`      |
-| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value |
-| `includes`                   | optional | unique template basenames only; no paths, no recursive rendering          |
-| `template`                   | yes      | template basename under this directory                                    |
+| Field                        | Required | Contract                                                                                                                       |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `agents`                     | yes      | array of manifest entries                                                                                                      |
+| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`                                                                                       |
+| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                                                                            |
+| `harness.kind`               | yes      | `claude` or `pi`                                                                                                               |
+| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                                                               |
+| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`                                                           |
+| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value                                                      |
+| `includes`                   | optional | unique template paths; relative paths resolve from this directory; absolute and `~/` paths are allowed; no recursive rendering |
+| `template`                   | yes      | template path; relative paths resolve from this directory; absolute and `~/` paths are allowed                                 |
 
 Current built-in claim/enqueue contract:
 
@@ -72,6 +72,14 @@ Built-in claim/enqueue authorization stays in Pithos. If you change Agent kinds 
 
 Templates are simple `{{variable}}` substitutions. Unknown variables fail loudly. Includes are inserted as raw text and are not recursively rendered.
 
+Template and include paths support three forms:
+
+- `snippets/common.md` — resolved relative to this templates directory
+- `/absolute/path/common.md` — loaded directly
+- `~/instruction-files/common.md` — `~` expands to the current user's home directory
+
+External paths make it possible to keep prompt files outside `<data-dir>/templates/`, for example in a separate version-controlled instruction repo.
+
 Available template variables:
 
 - `agent`
@@ -85,7 +93,7 @@ Available template variables:
 - `enqueues` (derived from built-in Pithos authorization)
 - `model`
 - `tools_csv`
-- one variable per include filename, for example `_common.md`
+- one variable per include path exactly as listed, for example `{{_common.md}}`, `{{snippets/common.md}}`, or `{{~/agent/common.md}}`
 
 Templates receive launch/self-claim context only. They do not receive task bodies.
 

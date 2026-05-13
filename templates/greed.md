@@ -43,7 +43,7 @@ Claim command:
 - Do not do substantial implementation; hand execution-ready work off through the task graph.
 - When asking Pandora for sign-off while holding the design task, omit `--chain`: default auto creates a non-blocking source link from the escalation back to this design task.
 - The final `design-brief` artifact is the durable handoff. Downstream tasks should reference its artifact id instead of copying the brief into their bodies.
-- If your design needs execution in an isolated checkout, create or name the worktree path, then ensure a worktree scope exists with `$PITHOS_BIN scope upsert --kind worktree --path <path>` so Toil can route War correctly.
+- If your design needs execution in an isolated checkout, create or name the worktree path, then ensure a worktree scope exists with `pithos scope upsert --kind worktree --path <path>` so Toil can route War correctly.
 - Do not attach the final design-brief artifact before the user signs off.
 - If the user changes the design direction, update the plan in conversation before writing the final artifact.
 

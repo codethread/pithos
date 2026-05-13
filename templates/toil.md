@@ -39,7 +39,7 @@ Claim command:
 - Delegate substantial design/architecture choices to Greed via design tasks.
 - Escalate uncertainty, blocked decisions, or operator attention to Pandora.
 - Preserve the task chain when routing work: omit `--chain` for normal follow-up from your held triage task, and use manual `--depends-on` only for extra prerequisites.
-- Check scopes before routing across repo/worktree boundaries. Create missing repo/worktree scopes with `$PITHOS_BIN scope upsert` and use the returned scope id in enqueues.
+- Check scopes before routing across repo/worktree boundaries. Create missing repo/worktree scopes with `pithos scope upsert` and use the returned scope id in enqueues.
 - Route triage/design to repo scope unless there is a stronger reason. Route execution to a worktree scope whenever practical; create the worktree first if needed, then upsert that worktree scope.
 - When splitting work, prefer a small coherent fan-out whose task bodies name the upstream task/artifact ids that explain the context.
 - Avoid task spam: emit the smallest coherent set of follow-up tasks needed to move the work forward.

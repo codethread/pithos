@@ -110,10 +110,11 @@ Template loading keys off `PDX_DATA_DIR`:
 - when `PDX_DATA_DIR` is set, load manifest/templates from `$PDX_DATA_DIR/templates/`
 - when `PDX_DATA_DIR` is unset, load the bundled repo-root `templates/` defaults
 
-Optional command overrides:
+Agent bin directory:
 
-- `PITHOS_BIN` defaults to `pithos`
-- `PDX_BIN` defaults to `pdx`
+- `PDX_BIN_DIR` defaults to `$PDX_DATA_DIR/bin`; add it to PATH in your shell rc so agents resolve `pithos` and `pdx` directly.
+- Bootstrap: `fish_add_path $PDX_DATA_DIR/bin` (fish) or `export PATH="$PDX_DATA_DIR/bin:$PATH"` (zsh/bash).
+- Populate with `make install` from the repo root (defaults `PDX_DATA_DIR` to `~/.pdx`); for a custom data dir run `make install PDX_DATA_DIR=/path/to/data-dir` or `make install PDX_BIN_DIR=/path/to/bin`.
 
 Rendered Harness env includes:
 
@@ -121,6 +122,4 @@ Rendered Harness env includes:
 - `PITHOS_RUN_ID`
 - `PITHOS_SESSION_ID`
 - `PITHOS_SCOPE_ID`
-- `PITHOS_BIN`
-- `PDX_BIN`
 - `PDX_DATA_DIR` when provided; `pdx` commands use it as their data-dir default unless `--data-dir` is passed

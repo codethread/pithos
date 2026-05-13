@@ -319,14 +319,15 @@ const fakeRenderServices = (
 		},
 		env: (key: string) => (key === "PDX_DATA_DIR" ? "/tmp/pdx-data" : undefined),
 		execFile: (file: string, args: readonly string[]) => {
-			if (file === "pithos" && args.length === 1 && args[0] === "--help-json") {
+			const basename = file.split("/").at(-1);
+			if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
 				return {
 					status: options.pithosStatus ?? 0,
 					stdout: options.pithosStdout ?? pithosHelpJson,
 					stderr: options.pithosStderr ?? "",
 				};
 			}
-			if (file === "pdx" && args.length === 1 && args[0] === "--help-json") {
+			if (basename === "pdx" && args.length === 1 && args[0] === "--help-json") {
 				return {
 					status: options.pdxStatus ?? 0,
 					stdout: options.pdxStdout ?? pdxHelpJson,
@@ -400,7 +401,9 @@ describe("bundled agent templates", () => {
 		expect(templateText).toContain(
 			"Use Pithos for durable work state and pdx for live run/session transcripts",
 		);
-		expect(templateText).toContain("Use `$PITHOS_BIN scope list` to discover existing scopes");
+		expect(templateText).toContain("Use `pithos scope list` to discover existing scopes");
+		expect(templateText).not.toContain("$PITHOS_BIN");
+		expect(templateText).not.toContain("$PDX_BIN");
 		expect(templateText).toContain("Execution work should usually target a worktree scope");
 		expect(templateText).toContain("use `pdx run show <run-id>` if you know the run");
 		expect(templateText).not.toContain("--depends-on <held-task-id>");
@@ -445,6 +448,10 @@ describe("renderAgent", () => {
 		);
 		expect(rendered.harness.argv).toContain("--tools");
 		expect(rendered.harness.argv).toContain("bash,read");
+		expect(rendered.harness.env).not.toHaveProperty("PITHOS_BIN");
+		expect(rendered.harness.env).not.toHaveProperty("PDX_BIN");
+		expect(rendered.harness.env).toHaveProperty("PATH");
+		expect(rendered.harness.env.PATH).toContain("/tmp/pdx-data/bin");
 	});
 
 	it.each(["pi", "claude"] as const)(
@@ -523,7 +530,11 @@ describe("renderAgent", () => {
 					return undefined;
 				},
 				execFile: (file: string, args: readonly string[]) => {
-					if (file === "pithos" && args.length === 1 && args[0] === "--help-json") {
+					if (
+						file.split("/").at(-1) === "pithos" &&
+						args.length === 1 &&
+						args[0] === "--help-json"
+					) {
 						return { status: 0, stdout: pithosHelpJson, stderr: "" };
 					}
 					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
@@ -711,7 +722,11 @@ describe("renderAgent", () => {
 					return undefined;
 				},
 				execFile: (file: string, args: readonly string[]) => {
-					if (file === "pithos" && args.length === 1 && args[0] === "--help-json") {
+					if (
+						file.split("/").at(-1) === "pithos" &&
+						args.length === 1 &&
+						args[0] === "--help-json"
+					) {
 						return { status: 0, stdout: pithosHelpJson, stderr: "" };
 					}
 					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };

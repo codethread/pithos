@@ -187,9 +187,7 @@ const resolveTemplateReference = (templatesDir: string, path: string): string =>
 };
 
 const SpawnerConfigSchema = Schema.Struct({
-	pithosBin: Schema.NonEmptyString,
 	pithosDb: Schema.NonEmptyString,
-	pdxBin: Schema.NonEmptyString,
 	pdxDataDir: Schema.optional(Schema.NonEmptyString),
 });
 
@@ -211,9 +209,7 @@ const loadConfig = (services: RenderServices): SpawnerConfig => {
 	return decode(
 		SpawnerConfigSchema,
 		{
-			pithosBin: services.env("PITHOS_BIN") ?? "pithos",
 			pithosDb,
-			pdxBin: services.env("PDX_BIN") ?? "pdx",
 			pdxDataDir: services.env("PDX_DATA_DIR"),
 		},
 		"SpawnerConfig",
@@ -293,23 +289,28 @@ const parseCommandHelpTree = (raw: string, source: string): CommandHelpCard => {
 	return parseCommandHelpCard(parsed, source);
 };
 
-const pithosHelpTree = (config: SpawnerConfig, services: RenderServices): CommandHelpCard => {
-	const result = services.execFile(config.pithosBin, ["--help-json"]);
+const pithosHelpTree = (
+	pdxBinDir: string | undefined,
+	services: RenderServices,
+): CommandHelpCard => {
+	const bin = pdxBinDir !== undefined ? `${pdxBinDir}/pithos` : "pithos";
+	const result = services.execFile(bin, ["--help-json"]);
 	if (result.status !== 0) {
 		throw new SpawnerError({
 			code: "TEMPLATE_ERROR",
-			message: `${config.pithosBin} --help-json failed: ${result.stderr}`,
+			message: `pithos --help-json failed: ${result.stderr}`,
 		});
 	}
 	return parseCommandHelpTree(result.stdout, "pithos help");
 };
 
-const pdxHelpTree = (config: SpawnerConfig, services: RenderServices): CommandHelpCard => {
-	const result = services.execFile(config.pdxBin, ["--help-json"]);
+const pdxHelpTree = (pdxBinDir: string | undefined, services: RenderServices): CommandHelpCard => {
+	const bin = pdxBinDir !== undefined ? `${pdxBinDir}/pdx` : "pdx";
+	const result = services.execFile(bin, ["--help-json"]);
 	if (result.status !== 0) {
 		throw new SpawnerError({
 			code: "TEMPLATE_ERROR",
-			message: `${config.pdxBin} --help-json failed: ${result.stderr}`,
+			message: `pdx --help-json failed: ${result.stderr}`,
 		});
 	}
 	return parseCommandHelpTree(result.stdout, "pdx help");
@@ -362,11 +363,11 @@ const renderCommandHelpJson = (value: unknown): string => JSON.stringify(value, 
 
 const renderCommandCards = (
 	agent: SpawnableAgentKind,
-	config: SpawnerConfig,
+	pdxBinDir: string | undefined,
 	services: RenderServices,
 ): string => {
 	const pithosHelp = filteredHelpTree(
-		pithosHelpTree(config, services),
+		pithosHelpTree(pdxBinDir, services),
 		PITHOS_TOP_LEVEL_PATHS[agent],
 		"pithos help",
 	);
@@ -383,7 +384,7 @@ const renderCommandCards = (
 	];
 	if (agent === "pandora") {
 		const pdxHelp = filteredHelpTree(
-			pdxHelpTree(config, services),
+			pdxHelpTree(pdxBinDir, services),
 			PANDORA_PDX_COMMAND_PATHS,
 			"pdx help",
 		);
@@ -546,8 +547,9 @@ export const renderAgent = (
 			readText(resolveTemplateReference(paths.templatesDir, include), services),
 		]),
 	);
-	const claimCommand = `${config.pithosBin} task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
-	const commandCards = renderCommandCards(input.agent, config, services);
+	const pdxBinDir = config.pdxDataDir !== undefined ? `${config.pdxDataDir}/bin` : undefined;
+	const claimCommand = `pithos task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
+	const commandCards = renderCommandCards(input.agent, pdxBinDir, services);
 	const prompt = renderTemplate(
 		readText(resolveTemplateReference(paths.templatesDir, manifest.template), services),
 		{
@@ -565,14 +567,16 @@ export const renderAgent = (
 			tools_csv: manifest.harness.tools?.join(", ") ?? "",
 		},
 	);
+	const parentPath = services.env("PATH");
 	const env = {
 		PITHOS_DB: config.pithosDb,
 		PITHOS_RUN_ID: input.runId,
 		PITHOS_SESSION_ID: input.sessionId,
 		PITHOS_SCOPE_ID: input.scopeId,
-		PITHOS_BIN: config.pithosBin,
-		PDX_BIN: config.pdxBin,
 		...(config.pdxDataDir === undefined ? {} : { PDX_DATA_DIR: config.pdxDataDir }),
+		...(pdxBinDir === undefined
+			? {}
+			: { PATH: parentPath !== undefined ? `${pdxBinDir}:${parentPath}` : pdxBinDir }),
 	};
 	const sessionLogPath = sessionLogPathFor(input, manifest.harness.kind);
 	return {

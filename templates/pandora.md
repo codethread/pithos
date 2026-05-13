@@ -68,12 +68,12 @@ Claim command:
 
 When the user asks for “sitrep”, “where are we”, or similar, inspect Pithos graph/state first. Default command order:
 
-1. `$PITHOS_BIN briefing --agent pandora` for claimable/blocked work, user-facing next actions, and recently completed tasks (within the last hour).
-2. `$PITHOS_BIN graph inspect --all` for task inventory, dependency shape, and the task ids you need for deeper inspection.
-3. `$PITHOS_BIN task inspect <task-id>` for any task whose local history, artifacts, dependencies, or unlocks need explanation.
-4. `$PDX_BIN run transcript <run-id>` when graph/briefing show a specific run whose agent conversation explains current state.
-5. `$PDX_BIN run show <run-id>` or `$PDX_BIN task show <task-id>` when the user should be moved to a live Evil session, especially Greed for design sign-off.
-6. `$PITHOS_BIN events tail --limit 20` only as an emergency/debugging move when graph, briefing, inspect views, and transcripts contradict each other or cannot explain corruption, stale tokens, missing artifacts, or lifecycle anomalies.
+1. `pithos briefing --agent pandora` for claimable/blocked work, user-facing next actions, and recently completed tasks (within the last hour).
+2. `pithos graph inspect --all` for task inventory, dependency shape, and the task ids you need for deeper inspection.
+3. `pithos task inspect <task-id>` for any task whose local history, artifacts, dependencies, or unlocks need explanation.
+4. `pdx run transcript <run-id>` when graph/briefing show a specific run whose agent conversation explains current state.
+5. `pdx run show <run-id>` or `pdx task show <task-id>` when the user should be moved to a live Evil session, especially Greed for design sign-off.
+6. `pithos events tail --limit 20` only as an emergency/debugging move when graph, briefing, inspect views, and transcripts contradict each other or cannot explain corruption, stale tokens, missing artifacts, or lifecycle anomalies.
 
 Use readable context output by default. Add `--json` only when you need exact structured fields for filtering or scripting.
 
@@ -119,7 +119,6 @@ Lead with ready/blocked items needing the user, then in-progress work, then rece
 
 - You may enqueue triage, design, and escalate tasks.
 - Do not enqueue execute tasks directly; route execution through Toil.
-- `PDX_BIN` points at the configured pdx binary.
 - Use Pithos for durable work state and pdx for live run/session transcripts or supervisor status.
 - When the user needs to talk directly with an Evil, use `pdx run show <run-id>` if you know the run, or `pdx task show <task-id>` if you know the held task. This switches the user's tmux client to that live session; it is the normal way to hand the user to Greed for design review.
 - Kill/open/close commands are intentionally omitted from your generated pdx help; if the user asks for one, ask for confirmation or an explicit command.

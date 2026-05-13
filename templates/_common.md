@@ -33,29 +33,30 @@ Only Toil may enqueue `execute` tasks. War may only enqueue `escalate`; Pandora 
 **Best case — Toil authors merge and cleanup together.** When Toil creates the merge execute task, immediately enqueue the cleanup with an explicit `--depends-on` on the merge task. Both tasks are authored from the same held triage context:
 
 ```sh
-# 1. Enqueue the merge task; note the returned task id (e.g. task_XYZ)
+# 1. Enqueue the merge task in the feature worktree scope so War runs inside it
 pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
   --title 'Merge feat/my-feature' --stdin <<'EOF'
 ...
 EOF
+# merge returns e.g. {"task":{"id":"task_XYZ",...}}
 
-# 2. Enqueue cleanup with an explicit dependency on the merge task
-#    Default auto chaining connects both to the triage source;
-#    --depends-on task_XYZ is the blocking gate that prevents cleanup
-#    from being claimed before the merge finishes.
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
+# 2. Enqueue cleanup in the REPO scope (not the worktree scope) so War does not
+#    run inside the directory it is about to delete. Add --depends-on task_XYZ
+#    as the blocking gate; default auto chaining connects both to the triage source.
+pithos task enqueue --run $PITHOS_RUN_ID --scope <repo-scope-id> --capability execute \
   --title 'Remove worktree: feat/my-feature' --stdin \
   --depends-on task_XYZ <<'EOF'
 Remove the worktree and local branch for feat/my-feature once task_XYZ (merge) has completed.
 EOF
 ```
 
-**If Toil must create cleanup from a later idle context** (e.g. a sweep triggered by a new triage task), use `--chain none` and add explicit `--depends-on` for every outstanding merge task whose branch or worktree the sweep could remove:
+**If Toil must create cleanup from a later idle context** (e.g. a sweep triggered by a new triage task), use `--chain none` and add explicit `--depends-on` for every outstanding merge task whose branch or worktree the sweep could remove. Always target the repo scope — cleanup should not run inside a worktree it may be deleting:
 
 ```sh
 # --chain none: no held task to auto-chain from
 # --depends-on: blocks cleanup until each listed merge task completes
-pithos task enqueue --run $PITHOS_RUN_ID --scope <worktree-scope-id> --capability execute \
+# --scope <repo-scope-id>: cleanup runs from the repo root, not inside a worktree
+pithos task enqueue --run $PITHOS_RUN_ID --scope <repo-scope-id> --capability execute \
   --title 'Sweep merged worktrees' --stdin --chain none \
   --depends-on <merge-task-id-1> --depends-on <merge-task-id-2> <<'EOF'
 Remove worktrees and local branches for PRs that have already merged.

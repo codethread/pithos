@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 import { parsePdxConfig } from "../src/config.js";
 import { PdxError } from "../src/errors.js";
 import { parseIpcRequest } from "../src/ipc.js";
@@ -44,6 +44,7 @@ import {
 	PDX_SYSTEM_RUN_ID,
 	handleKillRequest,
 	isAfkAlive,
+	loggedReconcileTick,
 	reconcileTick,
 	runDaemon,
 	runShowPdx,
@@ -1979,6 +1980,193 @@ describe("pdx substrate", () => {
 		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);
 		expect(logs).toContain("pdx.kill.retry");
 		expect(logs).toContain("pdx.kill");
+	});
+
+	it("kill retry escalates to Pandora at kill threshold", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_kill",
+				agent: "war",
+				scopeId: "scope_wt",
+				mode: "afk",
+				state: "terminating",
+				logicalName: "pdx--war",
+				pid: 456,
+				killAttempts: 2,
+				interruptedTaskId: "task_held",
+				killReason: "operator stop",
+			}),
+		);
+		const taskEnqueueCalls: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
+		const pithos = makePithos([], [], {
+			taskEnqueue: (input) =>
+				Effect.sync(() => {
+					taskEnqueueCalls.push(input);
+				}),
+		});
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
+		});
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_unused"),
+			nextSessionId: Effect.succeed("session_unused"),
+		});
+		const spawner = makeSpawner({
+			launchAgent: () =>
+				Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected launch" })),
+		});
+		await run(
+			reconcileTick(await parseConfig(dataDir)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+				Effect.provideService(Process, process),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+			),
+		);
+		expect(taskEnqueueCalls).toHaveLength(1);
+		expect(taskEnqueueCalls[0]).toMatchObject({
+			scope: "global",
+			capability: "escalate",
+			runId: PDX_SYSTEM_RUN_ID,
+		});
+		expect(taskEnqueueCalls[0]?.title).toContain("run_kill");
+		expect(taskEnqueueCalls[0]?.body).toContain("Run: run_kill");
+		expect(taskEnqueueCalls[0]?.body).toContain("PID: 456");
+		expect(taskEnqueueCalls[0]?.body).toContain("Interrupted task: task_held");
+		expect(taskEnqueueCalls[0]?.body).toContain("Kill reason: operator stop");
+		expect(await run(registry.list)).toContainEqual(
+			expect.objectContaining({ runId: "run_kill", state: "terminating", killAttempts: 3 }),
+		);
+	});
+
+	it("kill retry does not re-escalate after successful escalation", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		await run(
+			registry.upsert({
+				runId: "run_kill",
+				agent: "war",
+				scopeId: "scope_wt",
+				mode: "afk",
+				state: "terminating",
+				logicalName: "pdx--war",
+				pid: 456,
+				killAttempts: 3,
+				killEscalated: true,
+			}),
+		);
+		const taskEnqueueCalls: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
+		const pithos = makePithos([], [], {
+			taskEnqueue: (input) =>
+				Effect.sync(() => {
+					taskEnqueueCalls.push(input);
+				}),
+		});
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_unused"),
+			nextSessionId: Effect.succeed("session_unused"),
+		});
+		const spawner = makeSpawner({
+			launchAgent: () =>
+				Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected launch" })),
+		});
+		await run(
+			reconcileTick(await parseConfig(dataDir)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+				Effect.provideService(Process, alwaysLiveProcess),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+			),
+		);
+		expect(taskEnqueueCalls.filter((c) => c.capability === "escalate")).toHaveLength(0);
+		expect(await run(registry.list)).toContainEqual(
+			expect.objectContaining({ runId: "run_kill", killAttempts: 4 }),
+		);
+	});
+
+	it("loggedReconcileTick enqueues escalation when stopping due to kill-confirm failure", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		// afk entry past no-claim timeout; process refuses to die after kill → "still alive after kill"
+		await run(
+			registry.upsert({
+				runId: "run_stuck",
+				agent: "war",
+				scopeId: "scope_wt",
+				mode: "afk",
+				state: "live",
+				logicalName: "pdx--war",
+				pid: 789,
+				launchedAt: "2026-05-09T00:00:00.000Z",
+				everClaimed: false,
+			}),
+		);
+		const taskEnqueueCalls: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
+		const pithos = makePithos([], [], {
+			taskEnqueue: (input) =>
+				Effect.sync(() => {
+					taskEnqueueCalls.push(input);
+				}),
+			runTimeout: () => Effect.void,
+		});
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
+		});
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_unused"),
+			nextSessionId: Effect.succeed("session_unused"),
+		});
+		const spawner = makeSpawner({
+			launchAgent: () =>
+				Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected launch" })),
+		});
+		const config = await parseConfig(dataDir);
+		const consecutiveFailures = await run(Ref.make(0));
+		const runTick = () =>
+			run(
+				loggedReconcileTick(config, 4, consecutiveFailures).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(Ids, ids),
+					Effect.provideService(Spawner, spawner),
+					Effect.provideService(Tmux, alwaysLiveTmux),
+					Effect.provideService(Process, process),
+					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, testClock),
+				),
+			);
+		// First two ticks fail but do not stop the reconciler.
+		await runTick();
+		await runTick();
+		// Third tick reaches max — reconciler stops and enqueues the kill-confirm escalation.
+		await expect(runTick()).rejects.toThrow("still alive after kill");
+		const escalation = taskEnqueueCalls.find((c) => c.capability === "escalate");
+		expect(escalation).toBeDefined();
+		expect(escalation?.title).toBe("pdx reconciler stopped: kill confirmation failed");
+		expect(escalation?.body).toContain("still alive after kill");
 	});
 
 	it("reconcile spawns one non-Pandora agent in seeded order without pre-claiming", async () => {

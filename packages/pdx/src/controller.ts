@@ -23,6 +23,7 @@ export const PANDORA_TARGET = "pdx--pandora";
 export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
 const NO_CLAIM_TIMEOUT_MILLIS = 30_000;
 const MAX_CONSECUTIVE_RECONCILE_FAILURES = 3;
+const MAX_KILL_ATTEMPTS_BEFORE_ESCALATION = 3;
 
 const pidfilePath = (config: PdxConfig, runId: string): string => `${config.runsDir}/${runId}.pid`;
 const afkStdoutPath = (config: PdxConfig, runId: string): string =>
@@ -1084,7 +1085,30 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 							}),
 						),
 					);
-					yield* registry.upsert({ ...entry, killAttempts: attempts });
+					if (attempts >= MAX_KILL_ATTEMPTS_BEFORE_ESCALATION && !entry.killEscalated) {
+						const enqueueResult = yield* pithos
+							.taskEnqueue({
+								scope: "global",
+								capability: "escalate",
+								runId: PDX_SYSTEM_RUN_ID,
+								title: killFailureEscalationTitle(entry.runId),
+								body: killFailureEscalationBody(entry, { attempts, signal }),
+							})
+							.pipe(Effect.either);
+						if (Either.isRight(enqueueResult)) {
+							yield* registry.upsert({ ...entry, killAttempts: attempts, killEscalated: true });
+						} else {
+							yield* registry.upsert({ ...entry, killAttempts: attempts });
+							yield* log.write({
+								level: "error",
+								span: "pdx.kill",
+								msg: "failed to enqueue kill-failure escalation",
+								data: { run_id: entry.runId, error: enqueueResult.left.message },
+							});
+						}
+					} else {
+						yield* registry.upsert({ ...entry, killAttempts: attempts });
+					}
 				}
 			} else if (!alive) {
 				let stdout: string | null = null;
@@ -1248,6 +1272,29 @@ const escalationBody = (input: {
 }) =>
 	`pdx kill interrupted a live run.\n\nRun: ${input.runId}\nTask: ${input.taskId}\nScope: ${input.scopeId}\nReason: ${input.reason}\n\nSuggested next steps: inspect the failed task and artifacts, decide whether to supersede, cancel, or replan the broken chain, then enqueue follow-up work if needed.`;
 
+const killFailureEscalationTitle = (runId: string): string => `Investigate stuck kill: ${runId}`;
+
+const killFailureEscalationBody = (
+	entry: RegistryEntry,
+	opts: { readonly attempts: number; readonly signal: string },
+): string => {
+	const lines = [
+		`pdx failed to kill a run after ${opts.attempts} attempts.`,
+		"",
+		`Run: ${entry.runId}`,
+		`Agent: ${entry.agent}`,
+		`Scope: ${entry.scopeId}`,
+		`Signal: ${opts.signal}`,
+	];
+	if (entry.pid !== undefined) lines.push(`PID: ${entry.pid}`);
+	if (entry.tmuxTarget !== undefined) lines.push(`Tmux target: ${entry.tmuxTarget}`);
+	if (entry.interruptedTaskId !== undefined)
+		lines.push(`Interrupted task: ${entry.interruptedTaskId}`);
+	if (entry.killReason !== undefined) lines.push(`Kill reason: ${entry.killReason}`);
+	lines.push("", "The process may be stuck. Inspect the run and consider killing it manually.");
+	return lines.join("\n");
+};
+
 export const handleKillRequest = (input: {
 	readonly run: string | undefined;
 	readonly task: string | undefined;
@@ -1339,7 +1386,15 @@ export const handleKillRequest = (input: {
 				}),
 			});
 		}
-		yield* registry.upsert({ ...entry, state: "terminating", killAttempts: 1 });
+		yield* registry.upsert({
+			...entry,
+			state: "terminating",
+			killAttempts: 1,
+			...(interruptResult.interruptedTask !== null
+				? { interruptedTaskId: interruptResult.interruptedTask.id }
+				: {}),
+			killReason: input.reason,
+		});
 		yield* killEntryResource(entry, "SIGTERM");
 		return {
 			ok: true,
@@ -1347,7 +1402,7 @@ export const handleKillRequest = (input: {
 		} as const;
 	});
 
-const loggedReconcileTick = (
+export const loggedReconcileTick = (
 	config: PdxConfig,
 	maxAfk: number,
 	consecutiveFailures: Ref.Ref<number>,
@@ -1385,6 +1440,39 @@ const loggedReconcileTick = (
 						msg: "reconcile loop stopped after consecutive failures",
 						data: { max_attempts: MAX_CONSECUTIVE_RECONCILE_FAILURES },
 					});
+					if (
+						error.message.includes("still alive after kill") ||
+						error.message.includes("still exists after kill")
+					) {
+						const pithos = yield* PithosClient;
+						const registryService = yield* Registry;
+						const stuckEntries = yield* registryService.list;
+						const entryLines = stuckEntries
+							.filter((e) => e.agent !== "pandora")
+							.map(
+								(e) =>
+									`Run: ${e.runId}  Agent: ${e.agent}  Scope: ${e.scopeId}  State: ${e.state}${e.pid !== undefined ? `  PID: ${e.pid}` : ""}${e.tmuxTarget !== undefined ? `  Tmux: ${e.tmuxTarget}` : ""}${e.interruptedTaskId !== undefined ? `  Task: ${e.interruptedTaskId}` : ""}${e.killReason !== undefined ? `  Kill reason: ${e.killReason}` : ""}`,
+							)
+							.join("\n");
+						yield* pithos
+							.taskEnqueue({
+								scope: "global",
+								capability: "escalate",
+								runId: PDX_SYSTEM_RUN_ID,
+								title: "pdx reconciler stopped: kill confirmation failed",
+								body: `The pdx reconciler stopped after ${MAX_CONSECUTIVE_RECONCILE_FAILURES} consecutive failures due to a kill confirmation error.\n\nError: ${error.message}\n\nSupervised entries at time of stop:\n${entryLines || "(none)"}\n\nInspect the daemon logs and manually kill the stuck resource.`,
+							})
+							.pipe(
+								Effect.catchAll((enqueueError) =>
+									log.write({
+										level: "error",
+										span: "pdx.reconcile",
+										msg: "failed to enqueue kill-confirm escalation",
+										data: { error: enqueueError.message },
+									}),
+								),
+							);
+					}
 					return yield* Effect.fail(error);
 				}
 			}),

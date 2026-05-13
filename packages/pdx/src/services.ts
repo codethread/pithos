@@ -218,6 +218,9 @@ export interface RegistryEntry {
 	readonly launchedAt?: string;
 	readonly everClaimed?: boolean;
 	readonly killAttempts?: number;
+	readonly killEscalated?: boolean;
+	readonly interruptedTaskId?: string;
+	readonly killReason?: string;
 	readonly pid?: number;
 	readonly tmuxTarget?: string;
 }

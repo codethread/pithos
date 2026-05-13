@@ -28,7 +28,7 @@
 
 Cleanup or removal tasks that can delete worktrees or local branches are destructive and irreversible. Never author them as flat (dependency-free) tasks when merge or land work targeting the same branches or worktrees may still be outstanding. Pithos only enforces ordering you encode — no dependency edge means immediately claimable.
 
-War (execute) may only enqueue escalate tasks, so cleanup execute tasks must always be authored by Toil or Pandora — never by the agent running the merge itself.
+Only Toil may enqueue `execute` tasks. War may only enqueue `escalate`; Pandora may only enqueue `triage`, `design`, and `escalate`. Cleanup execute tasks must therefore always be authored by Toil — never by the agent running the merge or by Pandora directly.
 
 **Best case — Toil authors merge and cleanup together.** When Toil creates the merge execute task, immediately enqueue the cleanup with an explicit `--depends-on` on the merge task. Both tasks are authored from the same held triage context:
 
@@ -50,18 +50,20 @@ Remove the worktree and local branch for feat/my-feature once task_XYZ (merge) h
 EOF
 ```
 
-**If queued from an idle or manual context** (no held task — e.g. a Pandora-initiated sweep), enumerate every outstanding merge task whose worktree or branch the cleanup could remove and add explicit `--depends-on` for each:
+**If Toil must create cleanup from a later idle context** (e.g. a sweep triggered by a new triage task), use `--chain none` and add explicit `--depends-on` for every outstanding merge task whose branch or worktree the sweep could remove:
 
 ```sh
 # --chain none: no held task to auto-chain from
 # --depends-on: blocks cleanup until each listed merge task completes
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
+pithos task enqueue --run $PITHOS_RUN_ID --scope <worktree-scope-id> --capability execute \
   --title 'Sweep merged worktrees' --stdin --chain none \
   --depends-on <merge-task-id-1> --depends-on <merge-task-id-2> <<'EOF'
 Remove worktrees and local branches for PRs that have already merged.
 Depends on <merge-task-id-1> and <merge-task-id-2> to ensure in-flight merges finish first.
 EOF
 ```
+
+**If Pandora (or any agent that cannot enqueue execute) needs to schedule cleanup:** enqueue a Toil triage task with explicit instructions naming the outstanding merge tasks to depend on. Toil then wires up the correct `--depends-on` edges when it creates the execute task.
 
 For a **repo-wide sweep** (removes any merged worktree it finds), depend on _all_ outstanding merge tasks for the repo — not just the ones you expect to touch. A sweep can race work it was never explicitly linked to. If no merge tasks are currently in-flight for any candidate branch, you may omit `--depends-on`, but verify before skipping.
 

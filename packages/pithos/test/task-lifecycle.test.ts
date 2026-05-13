@@ -440,6 +440,7 @@ describe("task lifecycle", () => {
 				taskId: undefined,
 				scope: repo,
 				all: false,
+				hideTerminal: false,
 			}),
 		);
 
@@ -482,7 +483,7 @@ describe("task lifecycle", () => {
 		}).task.id;
 
 		const graphText = renderGraphInspectText(
-			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
+			engine.graphInspect({ taskId: undefined, scope: repo, all: false, hideTerminal: false }),
 		);
 
 		expect(graphText).toBe(
@@ -542,7 +543,7 @@ describe("task lifecycle", () => {
 		}).task.id;
 
 		const graphText = renderGraphInspectText(
-			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
+			engine.graphInspect({ taskId: undefined, scope: repo, all: false, hideTerminal: false }),
 		);
 
 		// parent (done) is visible because original (recently failed, within 1 hour) is a visible child.
@@ -822,6 +823,7 @@ describe("task lifecycle", () => {
 			taskId: escalation.task.id,
 			scope: undefined,
 			all: false,
+			hideTerminal: false,
 		}) as ReturnType<Engine["graphInspect"]> & {
 			graph: {
 				nodes: readonly { id: string; source_task_id: string | null; source_kind: string | null }[];
@@ -1477,6 +1479,7 @@ describe("task lifecycle", () => {
 			taskId: result.escalation.id,
 			scope: undefined,
 			all: false,
+			hideTerminal: false,
 		});
 		expect(graph.graph.edges).toContainEqual({
 			kind: "source",
@@ -1989,6 +1992,7 @@ describe("task lifecycle", () => {
 			taskId: downstream,
 			scope: undefined,
 			all: false,
+			hideTerminal: false,
 		}) as {
 			ok: true;
 			graph: {

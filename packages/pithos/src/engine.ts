@@ -155,6 +155,7 @@ export interface Engine {
 		readonly taskId: string | undefined;
 		readonly scope: string | undefined;
 		readonly all: boolean;
+		readonly hideTerminal: boolean;
 	}) => GraphInspectOutput;
 	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
 	readonly supersede: (input: {
@@ -1532,6 +1533,52 @@ const graphForIds = (
 	return { ok: true as const, graph: { selector, nodes, edges } };
 };
 
+const terminalLeafStatuses = new Set(["done", "failed", "dead_letter", "cancelled"]);
+
+const filterTerminalLeaves = (
+	graph: GraphInspectOutput["graph"],
+	pinnedTaskId: string | undefined,
+): GraphInspectOutput["graph"] => {
+	const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+	// dependents[parent] = tasks that depend on parent (depends_on: from=child, to=parent)
+	const dependents = new Map<string, string[]>();
+	// successorsOf[superseded] = successors (supersedes: from=successor, to=superseded)
+	const successorsOf = new Map<string, string[]>();
+	for (const edge of graph.edges) {
+		if (edge.kind === "depends_on") {
+			dependents.set(edge.to_task_id, [
+				...(dependents.get(edge.to_task_id) ?? []),
+				edge.from_task_id,
+			]);
+		} else if (edge.kind === "supersedes") {
+			successorsOf.set(edge.to_task_id, [
+				...(successorsOf.get(edge.to_task_id) ?? []),
+				edge.from_task_id,
+			]);
+		}
+	}
+	const hidden = new Set<string>();
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const node of graph.nodes) {
+			if (hidden.has(node.id) || node.id === pinnedTaskId) continue;
+			if (!terminalLeafStatuses.has(node.status)) continue;
+			const downstream = [...(dependents.get(node.id) ?? []), ...(successorsOf.get(node.id) ?? [])];
+			if (downstream.every((id) => hidden.has(id) || !byId.has(id))) {
+				hidden.add(node.id);
+				changed = true;
+			}
+		}
+	}
+	if (hidden.size === 0) return graph;
+	return {
+		...graph,
+		nodes: graph.nodes.filter((n) => !hidden.has(n.id)),
+		edges: graph.edges.filter((e) => !hidden.has(e.from_task_id) && !hidden.has(e.to_task_id)),
+	};
+};
+
 export const makeEngine = (ctx: EngineContext): Engine => ({
 	init: ({ fresh }) => {
 		if (fresh) Effect.runSync(ctx.services.fs.removeFile(ctx.config.dbPath));
@@ -2379,19 +2426,19 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				repair_alert_kind: repairAlertKind,
 			};
 		}),
-	graphInspect: ({ taskId, scope, all }) =>
+	graphInspect: ({ taskId, scope, all, hideTerminal }) =>
 		withDb(ctx, (db) => {
 			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
 				(v) => v !== undefined,
 			).length;
 			if (selectorCount !== 1) fail("VALIDATION_ERROR", "provide exactly one graph selector");
+			let result: GraphInspectOutput;
 			if (taskId !== undefined) {
-				return graphForIds(db, { kind: "task", value: taskId }, [taskSummary(db, taskId).id]);
-			}
-			if (scope !== undefined) {
+				result = graphForIds(db, { kind: "task", value: taskId }, [taskSummary(db, taskId).id]);
+			} else if (scope !== undefined) {
 				const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id=?`).get(scope);
 				if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
-				return graphForIds(
+				result = graphForIds(
 					db,
 					{ kind: "scope", value: scope },
 					(
@@ -2405,22 +2452,23 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							.all(scope) as { id: string }[]
 					).map((r) => r.id),
 				);
+			} else {
+				result = graphForIds(
+					db,
+					{ kind: "all" },
+					(
+						db
+							.prepare(sql`
+								SELECT id
+								FROM tasks
+								WHERE status <> 'cancelled' OR completed_at > datetime('now', '-1 hour')
+							`)
+							.all() as { id: string }[]
+					).map((r) => r.id),
+				);
 			}
-			return graphForIds(
-				db,
-				{ kind: "all" },
-				(
-					db
-						.prepare(sql`
-							SELECT id
-							FROM tasks
-							WHERE status <> 'cancelled' OR completed_at > datetime('now', '-1 hour')
-						`)
-						.all() as {
-						id: string;
-					}[]
-				).map((r) => r.id),
-			);
+			if (!hideTerminal) return result;
+			return { ...result, graph: filterTerminalLeaves(result.graph, taskId) };
 		}),
 	briefing: ({ agent }) =>
 		withDb(ctx, (db) => {

@@ -995,6 +995,168 @@ describe("pithos cli", () => {
 		});
 	});
 
+	describe("graph inspect --hide-terminal", () => {
+		const claimGlobal = async (dbPath: string, runId: string) => {
+			const result = await runCli(
+				["task", "claim", "--run", runId, "--scope", "global", "--capability", "triage"],
+				dbPath,
+			);
+			return JSON.parse(result.stdout[0] ?? "") as { task: { id: string; token: number } };
+		};
+
+		it("hides failed and done leaf tasks from --all readable and JSON output", async () => {
+			const dbPath = tempDb();
+			await runCli(["init", "--fresh"], dbPath);
+			await upsertRun(dbPath, "run_toil");
+
+			const failedLeaf = await enqueueGlobalTriage(
+				dbPath,
+				"run_toil",
+				"Dead-end failed task",
+				"body",
+			);
+			const active = await enqueueGlobalTriage(dbPath, "run_toil", "Active queued task", "body");
+
+			// Claim and fail the first task so it becomes a failed leaf
+			const claimed = await claimGlobal(dbPath, "run_toil");
+			expect(claimed.task.id).toBe(failedLeaf);
+			await runCli(
+				[
+					"task",
+					"fail",
+					"--run",
+					"run_toil",
+					"--token",
+					String(claimed.task.token),
+					"--reason",
+					"abandoned",
+					failedLeaf,
+				],
+				dbPath,
+			);
+
+			// Without --hide-terminal: both tasks appear
+			const allText = await runCli(["graph", "inspect", "--all"], dbPath);
+			expect(normalizeGeneratedIds(allText.stdout[0] ?? "")).toContain("Dead-end failed task");
+			expect(normalizeGeneratedIds(allText.stdout[0] ?? "")).toContain("Active queued task");
+
+			// With --hide-terminal: failed leaf is hidden, active task remains
+			const hiddenText = await runCli(["graph", "inspect", "--all", "--hide-terminal"], dbPath);
+			expect(hiddenText.stdout[0] ?? "").not.toContain("Dead-end failed task");
+			expect(hiddenText.stdout[0] ?? "").toContain("Active queued task");
+
+			// JSON output is also filtered
+			const hiddenJson = await runCli(
+				["graph", "inspect", "--all", "--hide-terminal", "--json"],
+				dbPath,
+			);
+			const parsed = JSON.parse(hiddenJson.stdout[0] ?? "") as {
+				ok: boolean;
+				graph: { nodes: { id: string }[] };
+			};
+			expect(parsed.graph.nodes.map((n) => n.id)).not.toContain(failedLeaf);
+			expect(parsed.graph.nodes.map((n) => n.id)).toContain(active);
+		});
+
+		it("retains a done task that has an active dependent", async () => {
+			const dbPath = tempDb();
+			await runCli(["init", "--fresh"], dbPath);
+			await upsertRun(dbPath, "run_toil");
+
+			// Enqueue and complete a triage task so it becomes done
+			const done = await enqueueGlobalTriage(dbPath, "run_toil", "Done parent task", "body");
+			const claimed = await claimGlobal(dbPath, "run_toil");
+			expect(claimed.task.id).toBe(done);
+			await runCli(
+				["task", "complete", "--run", "run_toil", "--token", String(claimed.task.token), done],
+				dbPath,
+			);
+
+			// Enqueue a dependent that blocks on the done task
+			const dependent = await runCli(
+				[
+					"task",
+					"enqueue",
+					"--scope",
+					"global",
+					"--capability",
+					"triage",
+					"--title",
+					"Dependent task",
+					"--stdin",
+					"--run",
+					"run_toil",
+					"--chain",
+					"none",
+					"--depends-on",
+					done,
+				],
+				dbPath,
+				{ _tag: "RedirectedText", text: "body" },
+			).then((r) => (JSON.parse(r.stdout[0] ?? "") as { task: { id: string } }).task.id);
+
+			// With --hide-terminal: done parent is retained because it has a dependent
+			const hiddenText = await runCli(["graph", "inspect", "--all", "--hide-terminal"], dbPath);
+			expect(hiddenText.stdout[0] ?? "").toContain("Done parent task");
+			expect(hiddenText.stdout[0] ?? "").toContain("Dependent task");
+
+			const hiddenJson = await runCli(
+				["graph", "inspect", "--all", "--hide-terminal", "--json"],
+				dbPath,
+			);
+			const parsed = JSON.parse(hiddenJson.stdout[0] ?? "") as {
+				ok: boolean;
+				graph: { nodes: { id: string }[] };
+			};
+			expect(parsed.graph.nodes.map((n) => n.id)).toContain(done);
+			expect(parsed.graph.nodes.map((n) => n.id)).toContain(dependent);
+		});
+
+		it("retains the task-rooted task even when it is terminal", async () => {
+			const dbPath = tempDb();
+			await runCli(["init", "--fresh"], dbPath);
+			await upsertRun(dbPath, "run_toil");
+
+			const failedRoot = await enqueueGlobalTriage(
+				dbPath,
+				"run_toil",
+				"Terminal root task",
+				"body",
+			);
+			const claimed = await claimGlobal(dbPath, "run_toil");
+			await runCli(
+				[
+					"task",
+					"fail",
+					"--run",
+					"run_toil",
+					"--token",
+					String(claimed.task.token),
+					"--reason",
+					"abandoned",
+					failedRoot,
+				],
+				dbPath,
+			);
+
+			const result = await runCli(
+				["graph", "inspect", "--task", failedRoot, "--hide-terminal"],
+				dbPath,
+			);
+			expect(result.stdout[0] ?? "").toContain("Terminal root task");
+
+			const jsonResult = await runCli(
+				["graph", "inspect", "--task", failedRoot, "--hide-terminal", "--json"],
+				dbPath,
+			);
+			const parsed = JSON.parse(jsonResult.stdout[0] ?? "") as {
+				ok: boolean;
+				graph: { nodes: { id: string }[] };
+			};
+			expect(parsed.graph.nodes.map((n) => n.id)).toContain(failedRoot);
+		});
+	});
+
 	it("supersedes with explicit stdin replacement body", async () => {
 		const dbPath = tempDb();
 		await runCli(["init", "--fresh"], dbPath);

@@ -28,17 +28,29 @@
 
 Cleanup or removal tasks that can delete worktrees or local branches are destructive and irreversible. Never author them as flat (dependency-free) tasks when merge or land work targeting the same branches or worktrees may still be outstanding. Pithos only enforces ordering you encode — no dependency edge means immediately claimable.
 
-**Best case — enqueue cleanup from inside the merge/land task.** Default auto chaining adds the held task as a blocking dependency, so the cleanup task cannot be claimed before the merge completes:
+War (execute) may only enqueue escalate tasks, so cleanup execute tasks must always be authored by Toil or Pandora — never by the agent running the merge itself.
+
+**Best case — Toil authors merge and cleanup together.** When Toil creates the merge execute task, immediately enqueue the cleanup with an explicit `--depends-on` on the merge task. Both tasks are authored from the same held triage context:
 
 ```sh
-# Held merge task becomes the auto-chain parent; no --chain flag needed
+# 1. Enqueue the merge task; note the returned task id (e.g. task_XYZ)
 pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
-  --title 'Remove worktree: feat/my-feature' --stdin <<'EOF'
-Remove the worktree and local branch for feat/my-feature now that <merge-task-id> has completed.
+  --title 'Merge feat/my-feature' --stdin <<'EOF'
+...
+EOF
+
+# 2. Enqueue cleanup with an explicit dependency on the merge task
+#    Default auto chaining connects both to the triage source;
+#    --depends-on task_XYZ is the blocking gate that prevents cleanup
+#    from being claimed before the merge finishes.
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
+  --title 'Remove worktree: feat/my-feature' --stdin \
+  --depends-on task_XYZ <<'EOF'
+Remove the worktree and local branch for feat/my-feature once task_XYZ (merge) has completed.
 EOF
 ```
 
-**If queued from an idle or manual context** (no held task, so auto chaining adds nothing), enumerate every outstanding merge task whose worktree or branch the cleanup could remove and add explicit `--depends-on` for each:
+**If queued from an idle or manual context** (no held task — e.g. a Pandora-initiated sweep), enumerate every outstanding merge task whose worktree or branch the cleanup could remove and add explicit `--depends-on` for each:
 
 ```sh
 # --chain none: no held task to auto-chain from

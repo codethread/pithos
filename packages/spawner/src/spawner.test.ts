@@ -450,8 +450,7 @@ describe("renderAgent", () => {
 		expect(rendered.harness.argv).toContain("bash,read");
 		expect(rendered.harness.env).not.toHaveProperty("PITHOS_BIN");
 		expect(rendered.harness.env).not.toHaveProperty("PDX_BIN");
-		expect(rendered.harness.env).toHaveProperty("PATH");
-		expect(rendered.harness.env.PATH).toContain("/tmp/pdx-data/bin");
+		expect(rendered.harness.env).not.toHaveProperty("PATH");
 	});
 
 	it.each(["pi", "claude"] as const)(
@@ -656,6 +655,12 @@ describe("renderAgent", () => {
 				),
 			),
 		).toThrow("pithos --help-json failed: missing pithos");
+	});
+
+	it("reports live command spawn failures as stderr", () => {
+		const result = LiveSpawnerServices.execFile("/tmp/pdx-missing-command", ["--help-json"]);
+		expect(result.status).toBeNull();
+		expect(result.stderr).toContain("ENOENT");
 	});
 
 	it("validates mode mismatch", () => {

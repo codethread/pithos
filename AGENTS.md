@@ -52,7 +52,7 @@ Notes:
 - `pdx init` seeds `$PDX_DATA_DIR/templates` from the repo-root defaults without starting tmux/Harness sessions; use `pdx init --update --data-dir "$PDX_DATA_DIR"` to replace only the templates copy.
 - `pdx open` also seeds missing templates before starting the daemon/Pandora.
 - `TMUX_TMPDIR` isolates the tmux server for smoke runs; otherwise `pdx open` can fail with `pdx--daemon already exists` even when `PDX_DATA_DIR` is isolated.
-- Spawner prepends `$PDX_DATA_DIR/bin` to PATH in the launched harness env so agents resolve `pithos` and `pdx` directly; populate the bin dir with `make install` (or `make install PDX_DATA_DIR=<path>` for a custom data dir).
+- Agents resolve `pithos` and `pdx` as bare commands from PATH. Use `make local` or `make install` once to symlink stable global bins into `~/.local/bin`; smoke-test data dirs do not need their own bin copies.
 - Spawner sets `PITHOS_RUN_ID`, `PITHOS_SESSION_ID`, and `PITHOS_SCOPE_ID` for launched Agent runs; do not invent them in supervisor code.
 - `pdx open` touches real tmux and real configured Harness CLIs; keep it isolated and always close it.
 

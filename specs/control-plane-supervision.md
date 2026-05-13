@@ -824,7 +824,7 @@ Dev/internal CLI may expose:
 pandora-spawn preview --agent <name> --mode <afk|hitl> --scope <scope-id> --run <run-id> --session-id <session-id> --cwd <path>
 ```
 
-Preview output is JSON `RenderedAgent`, including prompt and harness argv/env. Preview performs manifest/template validation only; it does not validate Pithos run/scope state. Because preview renders the exact harness environment, it requires DB context: either `PITHOS_DB` or `PDX_DATA_DIR` from which Spawner derives `<data-dir>/pithos.sqlite`. When `PDX_DATA_DIR` is supplied, preview also reads manifest/templates from `<data-dir>/templates/`; otherwise it reads the bundled repo-root `templates/` defaults. Help-JSON probes use bare `pithos`/`pdx` from the spawner's PATH; launched harness env has `$PDX_DATA_DIR/bin` prepended to PATH when `PDX_DATA_DIR` is set.
+Preview output is JSON `RenderedAgent`, including prompt and harness argv/env. Preview performs manifest/template validation only; it does not validate Pithos run/scope state. Because preview renders the exact harness environment, it requires DB context: either `PITHOS_DB` or `PDX_DATA_DIR` from which Spawner derives `<data-dir>/pithos.sqlite`. When `PDX_DATA_DIR` is supplied, preview also reads manifest/templates from `<data-dir>/templates/`; otherwise it reads the bundled repo-root `templates/` defaults. Help-JSON probes and launched agents resolve bare `pithos`/`pdx` from PATH; `PDX_DATA_DIR` controls data/templates, not CLI binary location.
 
 Spawner error codes:
 

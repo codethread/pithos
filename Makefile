@@ -1,6 +1,5 @@
 HOME_BIN := $(HOME)/.local/bin
-PDX_DATA_DIR ?= $(HOME)/.pdx
-PDX_BIN_DIR ?= $(PDX_DATA_DIR)/bin
+PDX_BIN_DIR ?= $(HOME_BIN)
 
 .PHONY: local
 local:
@@ -16,5 +15,6 @@ install:
 	pnpm install
 	pnpm build
 	mkdir -p $(PDX_BIN_DIR)
-	cp packages/pithos/bin/pithos $(PDX_BIN_DIR)/pithos
-	cp packages/pdx/bin/pdx $(PDX_BIN_DIR)/pdx
+	ln -sf $(abspath packages/pithos/bin/pithos) $(PDX_BIN_DIR)/pithos
+	ln -sf $(abspath packages/pdx/bin/pdx) $(PDX_BIN_DIR)/pdx
+	ln -sf $(abspath packages/spawner/bin/pandora-spawn) $(PDX_BIN_DIR)/pandora-spawn

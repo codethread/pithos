@@ -58,6 +58,9 @@ export const makeFakeSpawnerServices = (input: FakeSpawnerServicesInput): Launch
 	execFile: () => input.commandResult ?? { status: 0, stdout: "1", stderr: "" },
 });
 
+const formatSpawnSyncError = (error: unknown): string =>
+	error instanceof Error ? error.message : String(error);
+
 export const LiveSpawnerServices: LaunchServices = {
 	readText: (path) => readFileSync(path, "utf8"),
 	env: (key) => process.env[key],
@@ -76,5 +79,13 @@ export const LiveSpawnerServices: LaunchServices = {
 		writeFileSync(path, content, { encoding: "utf8", flag: "wx" });
 		return path;
 	},
-	execFile: (file, args) => spawnSync(file, args, { encoding: "utf8" }),
+	execFile: (file, args) => {
+		const result = spawnSync(file, args, { encoding: "utf8" });
+		return {
+			status: result.status,
+			stdout: result.stdout ?? "",
+			stderr:
+				result.stderr ?? (result.error === undefined ? "" : formatSpawnSyncError(result.error)),
+		};
+	},
 };

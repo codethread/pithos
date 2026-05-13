@@ -110,11 +110,11 @@ Template loading keys off `PDX_DATA_DIR`:
 - when `PDX_DATA_DIR` is set, load manifest/templates from `$PDX_DATA_DIR/templates/`
 - when `PDX_DATA_DIR` is unset, load the bundled repo-root `templates/` defaults
 
-Agent bin directory:
+Agent command resolution:
 
-- `PDX_BIN_DIR` defaults to `$PDX_DATA_DIR/bin`; add it to PATH in your shell rc so agents resolve `pithos` and `pdx` directly.
-- Bootstrap: `fish_add_path $PDX_DATA_DIR/bin` (fish) or `export PATH="$PDX_DATA_DIR/bin:$PATH"` (zsh/bash).
-- Populate with `make install` from the repo root (defaults `PDX_DATA_DIR` to `~/.pdx`); for a custom data dir run `make install PDX_DATA_DIR=/path/to/data-dir` or `make install PDX_BIN_DIR=/path/to/bin`.
+- Templates and generated prompt snippets refer to `pithos` and `pdx` as bare commands.
+- Put one stable bin directory on PATH in your shell rc, for example `fish_add_path ~/.local/bin` or `export PATH="$HOME/.local/bin:$PATH"`.
+- Populate it once from the repo root with `make local` or `make install`; override the install target with `make install PDX_BIN_DIR=/path/to/bin` only when you intentionally use a different global bin directory.
 
 Rendered Harness env includes:
 

@@ -289,12 +289,8 @@ const parseCommandHelpTree = (raw: string, source: string): CommandHelpCard => {
 	return parseCommandHelpCard(parsed, source);
 };
 
-const pithosHelpTree = (
-	pdxBinDir: string | undefined,
-	services: RenderServices,
-): CommandHelpCard => {
-	const bin = pdxBinDir !== undefined ? `${pdxBinDir}/pithos` : "pithos";
-	const result = services.execFile(bin, ["--help-json"]);
+const pithosHelpTree = (services: RenderServices): CommandHelpCard => {
+	const result = services.execFile("pithos", ["--help-json"]);
 	if (result.status !== 0) {
 		throw new SpawnerError({
 			code: "TEMPLATE_ERROR",
@@ -304,9 +300,8 @@ const pithosHelpTree = (
 	return parseCommandHelpTree(result.stdout, "pithos help");
 };
 
-const pdxHelpTree = (pdxBinDir: string | undefined, services: RenderServices): CommandHelpCard => {
-	const bin = pdxBinDir !== undefined ? `${pdxBinDir}/pdx` : "pdx";
-	const result = services.execFile(bin, ["--help-json"]);
+const pdxHelpTree = (services: RenderServices): CommandHelpCard => {
+	const result = services.execFile("pdx", ["--help-json"]);
 	if (result.status !== 0) {
 		throw new SpawnerError({
 			code: "TEMPLATE_ERROR",
@@ -361,13 +356,9 @@ const filteredHelpTree = (
 
 const renderCommandHelpJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
-const renderCommandCards = (
-	agent: SpawnableAgentKind,
-	pdxBinDir: string | undefined,
-	services: RenderServices,
-): string => {
+const renderCommandCards = (agent: SpawnableAgentKind, services: RenderServices): string => {
 	const pithosHelp = filteredHelpTree(
-		pithosHelpTree(pdxBinDir, services),
+		pithosHelpTree(services),
 		PITHOS_TOP_LEVEL_PATHS[agent],
 		"pithos help",
 	);
@@ -383,11 +374,7 @@ const renderCommandCards = (
 		].join("\n"),
 	];
 	if (agent === "pandora") {
-		const pdxHelp = filteredHelpTree(
-			pdxHelpTree(pdxBinDir, services),
-			PANDORA_PDX_COMMAND_PATHS,
-			"pdx help",
-		);
+		const pdxHelp = filteredHelpTree(pdxHelpTree(services), PANDORA_PDX_COMMAND_PATHS, "pdx help");
 		sections.push(
 			["### pdx inspection help JSON", "```json", renderCommandHelpJson(pdxHelp), "```"].join("\n"),
 		);
@@ -547,9 +534,8 @@ export const renderAgent = (
 			readText(resolveTemplateReference(paths.templatesDir, include), services),
 		]),
 	);
-	const pdxBinDir = config.pdxDataDir !== undefined ? `${config.pdxDataDir}/bin` : undefined;
 	const claimCommand = `pithos task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
-	const commandCards = renderCommandCards(input.agent, pdxBinDir, services);
+	const commandCards = renderCommandCards(input.agent, services);
 	const prompt = renderTemplate(
 		readText(resolveTemplateReference(paths.templatesDir, manifest.template), services),
 		{
@@ -567,16 +553,12 @@ export const renderAgent = (
 			tools_csv: manifest.harness.tools?.join(", ") ?? "",
 		},
 	);
-	const parentPath = services.env("PATH");
 	const env = {
 		PITHOS_DB: config.pithosDb,
 		PITHOS_RUN_ID: input.runId,
 		PITHOS_SESSION_ID: input.sessionId,
 		PITHOS_SCOPE_ID: input.scopeId,
 		...(config.pdxDataDir === undefined ? {} : { PDX_DATA_DIR: config.pdxDataDir }),
-		...(pdxBinDir === undefined
-			? {}
-			: { PATH: parentPath !== undefined ? `${pdxBinDir}:${parentPath}` : pdxBinDir }),
 	};
 	const sessionLogPath = sessionLogPathFor(input, manifest.harness.kind);
 	return {

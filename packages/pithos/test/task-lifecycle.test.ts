@@ -859,6 +859,32 @@ describe("task lifecycle", () => {
 		expect(eventPayload.chain.source_kind).toBe("chain_source");
 	});
 
+	it("--hide-terminal retains a terminal task that is the source of an active escalation", () => {
+		const { engine } = setup();
+		upsertPandoraRun(engine);
+		const source = enqueueTask(engine, { title: "held source" }).task.id;
+		engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+
+		const escalation = enqueueTask(engine, {
+			title: "needs attention",
+			capability: "escalate",
+			runId: "run_toil",
+		}).task.id;
+
+		// Fail the source task; escalation still holds a source link to it
+		engine.failTask({ taskId: source, runId: "run_toil", token: 1, reason: "abandoned" });
+
+		const graph = engine.graphInspect({
+			taskId: undefined,
+			scope: undefined,
+			all: true,
+			hideTerminal: true,
+		});
+		const nodeIds = graph.graph.nodes.map((n) => n.id);
+		expect(nodeIds).toContain(source);
+		expect(nodeIds).toContain(escalation);
+	});
+
 	it("routes Pandora follow-up from held escalation to its source task", () => {
 		const { dbPath, engine } = setup();
 		const { source, escalation } = claimSourcedEscalationWithPandora(engine);

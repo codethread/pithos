@@ -1544,6 +1544,8 @@ const filterTerminalLeaves = (
 	const dependents = new Map<string, string[]>();
 	// successorsOf[superseded] = successors (supersedes: from=successor, to=superseded)
 	const successorsOf = new Map<string, string[]>();
+	// sourceConsumers[source] = tasks that reference source via chain/repair source link (source: from=consumer, to=source)
+	const sourceConsumers = new Map<string, string[]>();
 	for (const edge of graph.edges) {
 		if (edge.kind === "depends_on") {
 			dependents.set(edge.to_task_id, [
@@ -1555,6 +1557,11 @@ const filterTerminalLeaves = (
 				...(successorsOf.get(edge.to_task_id) ?? []),
 				edge.from_task_id,
 			]);
+		} else if (edge.kind === "source") {
+			sourceConsumers.set(edge.to_task_id, [
+				...(sourceConsumers.get(edge.to_task_id) ?? []),
+				edge.from_task_id,
+			]);
 		}
 	}
 	const hidden = new Set<string>();
@@ -1564,7 +1571,11 @@ const filterTerminalLeaves = (
 		for (const node of graph.nodes) {
 			if (hidden.has(node.id) || node.id === pinnedTaskId) continue;
 			if (!terminalLeafStatuses.has(node.status)) continue;
-			const downstream = [...(dependents.get(node.id) ?? []), ...(successorsOf.get(node.id) ?? [])];
+			const downstream = [
+				...(dependents.get(node.id) ?? []),
+				...(successorsOf.get(node.id) ?? []),
+				...(sourceConsumers.get(node.id) ?? []),
+			];
 			if (downstream.every((id) => hidden.has(id) || !byId.has(id))) {
 				hidden.add(node.id);
 				changed = true;

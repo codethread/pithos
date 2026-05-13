@@ -393,10 +393,36 @@ const renderCommandCards = (
 	return `${sections.join("\n\n")}\n`;
 };
 
+const stripHomePrefix = (path: string): string => {
+	const currentHome = homedir().replace(/\/+$/, "");
+	if (path === currentHome) return "";
+	if (path.startsWith(`${currentHome}/`)) return path.slice(currentHome.length + 1);
+	return path
+		.replace(/^\/Users\/[^/]+(?=\/|$)/, "")
+		.replace(/^\/home\/[^/]+(?=\/|$)/, "")
+		.replace(/^\/+/, "");
+};
+
+const slugify = (value: string): string =>
+	value.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+const scopeSlug = (input: RenderAgentInput): string => {
+	if (input.scopeId === "global") return "global";
+	const pathScope = /^(repo|worktree):(.*)$/.exec(input.scopeId);
+	if (pathScope !== null) {
+		const kind = pathScope[1];
+		const rawPath = pathScope[2] ?? "";
+		const path = rawPath === "" ? input.cwd : rawPath;
+		const slug = slugify(stripHomePrefix(path));
+		return `${kind}-${slug === "" ? "home" : slug}`;
+	}
+	return slugify(input.scopeId);
+};
+
 const logicalName = (input: RenderAgentInput): string =>
 	input.agent === "pandora"
 		? "pdx--pandora"
-		: `pdx--${input.agent}__${input.scopeId.replace(/[^a-zA-Z0-9]+/g, "-")}--${input.sessionId.slice(0, 8)}`;
+		: `pdx--${input.agent}__${scopeSlug(input)}--${input.sessionId.slice(0, 8)}`;
 
 const claudeProjectSlug = (cwd: string): string => cwd.replace(/[/:\\]/g, "-");
 

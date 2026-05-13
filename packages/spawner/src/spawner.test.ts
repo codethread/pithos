@@ -457,9 +457,42 @@ describe("renderAgent", () => {
 					}),
 				),
 			);
+			expect(rendered.logicalName).toBe("pdx--pandora");
 			expect(rendered.harness.argv.at(-1)).toBe("begin");
 		},
 	);
+
+	it("strips the home prefix from repo scope session names", () => {
+		const cwd = `${homedir()}/dev/pandoras-box`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk", scopeId: `repo:${cwd}`, cwd },
+			fakeRenderServices(
+				agentsFile({
+					agent: "war",
+					mode: "afk",
+					harnessKind: "pi",
+				}),
+			),
+		);
+		expect(rendered.logicalName).toBe("pdx--war__repo-dev-pandoras-box--123e4567");
+	});
+
+	it("keeps worktree scope kind while stripping the home prefix", () => {
+		const cwd = `${homedir()}/dev/pandoras-box__fix--session-names`;
+		const rendered = renderAgent(
+			{ ...base, agent: "greed", mode: "hitl", scopeId: `worktree:${cwd}`, cwd },
+			fakeRenderServices(
+				agentsFile({
+					agent: "greed",
+					mode: "hitl",
+					harnessKind: "pi",
+				}),
+			),
+		);
+		expect(rendered.logicalName).toBe(
+			"pdx--greed__worktree-dev-pandoras-box-fix-session-names--123e4567",
+		);
+	});
 
 	it("loads manifest and templates from $PDX_DATA_DIR/templates when set", () => {
 		const dataDir = "/tmp/pdx-custom";

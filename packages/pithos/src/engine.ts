@@ -1130,6 +1130,10 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 		const node = byId.get(id);
 		if (node === undefined || !visible(id)) return;
 		const prefix = supersessionChild ? "~> " : "- ";
+		if (written.has(id)) {
+			lines.push(`${"  ".repeat(depth)}${prefix}↑ ${id} already shown`);
+			return;
+		}
 		lines.push(`${"  ".repeat(depth)}${prefix}${taskTitleLine(node)}`);
 		written.add(id);
 		for (const childId of childrenByParent.get(id) ?? []) writeNode(childId, depth + 1);

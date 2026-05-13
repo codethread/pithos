@@ -445,6 +445,109 @@ describe("task lifecycle", () => {
 		);
 	});
 
+	it("deduplicates shared nodes in readable graph view for fan-in (diamond) dependencies", () => {
+		const { engine, repo } = setup();
+		const root = enqueueTask(engine, { title: "root task", capability: "triage", scope: repo }).task
+			.id;
+		const branchAlpha = enqueueTask(engine, {
+			title: "alpha branch",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [root],
+			chain: "none",
+		}).task.id;
+		const branchBeta = enqueueTask(engine, {
+			title: "beta branch",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [root],
+			chain: "none",
+		}).task.id;
+		const shared = enqueueTask(engine, {
+			title: "shared leaf",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [branchAlpha, branchBeta],
+			chain: "none",
+		}).task.id;
+
+		const graphText = renderGraphInspectText(
+			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
+		);
+
+		expect(graphText).toBe(
+			[
+				`- ${root} [triage] [queued] root task`,
+				`  - ${branchAlpha} [execute] [blocked] alpha branch`,
+				`    - ${shared} [execute] [blocked] shared leaf`,
+				`  - ${branchBeta} [execute] [blocked] beta branch`,
+				`    - ↑ ${shared} already shown`,
+				"",
+			].join("\n"),
+		);
+	});
+
+	it("deduplicates successor nodes in readable graph view when they appear in both supersession and dependency positions", () => {
+		const { engine, repo } = setup();
+		// parent is a shared upstream; original and its successor both inherit this dependency
+		const parent = enqueueTask(engine, {
+			title: "alpha parent",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const original = enqueueTask(engine, {
+			title: "alpha original",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [parent],
+			chain: "none",
+		}).task.id;
+		// complete parent so original becomes claimable
+		const parentClaim = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		engine.complete({
+			taskId: parentClaim.task.id,
+			runId: "run_war",
+			token: parentClaim.task.token,
+			resultJson: "{}",
+		});
+		// claim and fail original so it is non-terminal (failed) and remains visible after supersession
+		const originalClaim = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		engine.failTask({
+			taskId: originalClaim.task.id,
+			runId: "run_war",
+			token: originalClaim.task.token,
+			reason: "needs redesign",
+		});
+		// supersede original; successor inherits the dependency on parent
+		const successor = engine.supersede({
+			taskId: original,
+			runId: "run_toil",
+			reason: "replanning",
+			title: "beta successor",
+			body: "body",
+			bodyFile: undefined,
+			scope: repo,
+			capability: "execute",
+		}).task.id;
+
+		const graphText = renderGraphInspectText(
+			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
+		);
+
+		// parent (done) is visible because original (failed, non-terminal) is a visible child.
+		// successor appears under original via ~> AND as a direct dependency child of parent.
+		expect(graphText).toBe(
+			[
+				`- ${parent} [execute] [done] alpha parent`,
+				`  - ${original} [execute] [failed] alpha original`,
+				`    ~> ${successor} [execute] [queued] beta successor`,
+				`  - ↑ ${successor} already shown`,
+				"",
+			].join("\n"),
+		);
+	});
+
 	it("auto-chains ordinary follow-up to the actor run's held task", () => {
 		const { dbPath, engine } = setup();
 		const upstream = enqueueTask(engine, { title: "triage upstream" }).task.id;

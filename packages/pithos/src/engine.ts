@@ -325,15 +325,20 @@ export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string =>
 	if (inspect.source !== null) {
 		currentParts.push("Source link:", renderSourceBullet(inspect.source));
 	}
-	return (
-		[
-			`# ${taskTitleLine(inspect.task)}`,
-			"## Recent history",
-			recentHistory.length === 0 ? "No upstream history." : recentHistory.join("\n\n"),
-			"## Current task",
-			currentParts.join("\n\n"),
-		].join("\n\n") + "\n"
+	const sections = [`# ${taskTitleLine(inspect.task)}`];
+	if (inspect.superseded_by !== null) {
+		sections.push(`> ⚠️ This task has been superseded by ${inspect.superseded_by}`);
+	}
+	if (inspect.supersedes !== null) {
+		sections.push(`> This task supersedes ${inspect.supersedes}`);
+	}
+	sections.push(
+		"## Recent history",
+		recentHistory.length === 0 ? "No upstream history." : recentHistory.join("\n\n"),
+		"## Current task",
+		currentParts.join("\n\n"),
 	);
+	return sections.join("\n\n") + "\n";
 };
 
 export interface ArtifactOutput {
@@ -1076,12 +1081,36 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 		]);
 		childIds.add(edge.from_task_id);
 	}
+	// supersedes edge: from=successor (new), to=superseded (old)
+	const successorBySuperseded = new Map<string, string>();
+	const successorIds = new Set<string>();
+	for (const edge of graph.edges) {
+		if (edge.kind !== "supersedes") continue;
+		if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
+		successorBySuperseded.set(edge.to_task_id, edge.from_task_id);
+		successorIds.add(edge.from_task_id);
+	}
 	const isTerminal = (status: string): boolean => status === "done" || status === "cancelled";
+	// Transitively mark successor nodes as visible when their superseded predecessor is non-terminal.
+	// This makes completed supersession chains visible even though all their nodes are terminal.
+	const supersessionVisible = new Set<string>();
+	for (const [supersededId, successorId] of successorBySuperseded.entries()) {
+		const superseded = byId.get(supersededId);
+		if (superseded !== undefined && !isTerminal(superseded.status)) {
+			const queue = [successorId];
+			while (queue.length > 0) {
+				const id = queue.shift()!;
+				if (supersessionVisible.has(id) || !byId.has(id)) continue;
+				supersessionVisible.add(id);
+				for (const childId of childrenByParent.get(id) ?? []) queue.push(childId);
+			}
+		}
+	}
 	const visible = (id: string): boolean => {
 		const node = byId.get(id);
 		if (node === undefined) return false;
 		if (!isTerminal(node.status)) return true;
-		return (childrenByParent.get(id) ?? []).some(visible);
+		return (childrenByParent.get(id) ?? []).some(visible) || supersessionVisible.has(id);
 	};
 	for (const [parentId, childIds] of childrenByParent.entries()) {
 		childrenByParent.set(
@@ -1096,15 +1125,18 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 	}
 	const lines: string[] = [];
 	const written = new Set<string>();
-	const writeNode = (id: string, depth: number): void => {
+	const writeNode = (id: string, depth: number, supersessionChild = false): void => {
 		const node = byId.get(id);
 		if (node === undefined || !visible(id)) return;
-		lines.push(`${"  ".repeat(depth)}- ${taskTitleLine(node)}`);
+		const prefix = supersessionChild ? "~> " : "- ";
+		lines.push(`${"  ".repeat(depth)}${prefix}${taskTitleLine(node)}`);
 		written.add(id);
 		for (const childId of childrenByParent.get(id) ?? []) writeNode(childId, depth + 1);
+		const successorId = successorBySuperseded.get(id);
+		if (successorId !== undefined) writeNode(successorId, depth + 1, true);
 	};
 	for (const node of graph.nodes) {
-		if (!childIds.has(node.id)) writeNode(node.id, 0);
+		if (!childIds.has(node.id) && !successorIds.has(node.id)) writeNode(node.id, 0);
 	}
 	for (const node of graph.nodes) {
 		if (!written.has(node.id)) writeNode(node.id, 0);

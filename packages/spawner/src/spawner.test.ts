@@ -260,6 +260,7 @@ const agentsFile = (input: {
 	mode: string;
 	harnessKind: "claude" | "pi";
 	tools?: readonly string[];
+	argv?: readonly string[];
 	model?: string;
 	harnessMode?: "replace" | "append";
 	includes?: readonly string[];
@@ -270,6 +271,7 @@ const agentsFile = (input: {
 		mode,
 		harnessKind,
 		tools,
+		argv,
 		model = "model_test",
 		harnessMode = "append",
 		includes = ["_common.md"],
@@ -285,6 +287,7 @@ const agentsFile = (input: {
 					model,
 					system_prompt_mode: harnessMode,
 					...(tools === undefined ? {} : { tools }),
+					...(argv === undefined ? {} : { argv }),
 				},
 				includes,
 				template,
@@ -752,6 +755,134 @@ describe("renderAgent", () => {
 			),
 		).toThrow("PITHOS_DB or PDX_DATA_DIR is required for spawner render/preview");
 	});
+
+	it.each(["pi", "claude"] as const)(
+		"inserts user argv after binary name and before Spawner flags for %s afk",
+		(harnessKind) => {
+			const rendered = renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "war",
+						mode: "afk",
+						harnessKind,
+						argv: ["--plugin-dir", "/tmp/my-plug"],
+					}),
+				),
+			);
+			const argv = rendered.harness.argv;
+			expect(argv[0]).toBe(harnessKind);
+			expect(argv[1]).toBe("--plugin-dir");
+			expect(argv[2]).toBe("/tmp/my-plug");
+			expect(argv[3]).toBe(
+				harnessKind === "claude" ? "--dangerously-skip-permissions" : "--session",
+			);
+			expect(argv).toContain("--model");
+			expect(argv).toContain("--print");
+			expect(argv.at(-1)).toBe("Claim and process one task, then exit.");
+		},
+	);
+
+	it.each(["pi", "claude"] as const)(
+		"inserts user argv after binary name and before Spawner flags for %s hitl",
+		(harnessKind) => {
+			const rendered = renderAgent(
+				{ ...base, agent: "pandora", mode: "hitl" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "pandora",
+						mode: "hitl",
+						harnessKind,
+						argv: ["--plugin-dir", "/tmp/my-plug"],
+					}),
+				),
+			);
+			const argv = rendered.harness.argv;
+			expect(argv[0]).toBe(harnessKind);
+			expect(argv[1]).toBe("--plugin-dir");
+			expect(argv[2]).toBe("/tmp/my-plug");
+			expect(argv[3]).toBe(
+				harnessKind === "claude" ? "--dangerously-skip-permissions" : "--session",
+			);
+			expect(argv.at(-1)).toBe("begin");
+		},
+	);
+
+	it("user argv appears before tools args in rendered argv", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			fakeRenderServices(
+				agentsFile({
+					agent: "war",
+					mode: "afk",
+					harnessKind: "claude",
+					argv: ["--plugin-dir", "/tmp/my-plug"],
+					tools: ["bash", "read"],
+				}),
+			),
+		);
+		const argv = rendered.harness.argv;
+		const pluginIndex = argv.indexOf("--plugin-dir");
+		const toolsIndex = argv.indexOf("--tools");
+		expect(pluginIndex).toBeGreaterThan(0);
+		expect(toolsIndex).toBeGreaterThan(pluginIndex);
+	});
+
+	it("afk argv preserves shell metacharacters verbatim", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			fakeRenderServices(
+				agentsFile({
+					agent: "war",
+					mode: "afk",
+					harnessKind: "pi",
+					argv: ["--flag=a'b", "''"],
+				}),
+			),
+		);
+		expect(rendered.harness.argv).toContain("--flag=a'b");
+		expect(rendered.harness.argv).toContain("''");
+	});
+
+	it("manifest without argv field renders byte-identically to manifest with argv absent", () => {
+		const withoutArgvField = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			fakeRenderServices(agentsFile({ agent: "war", mode: "afk", harnessKind: "claude" })),
+		);
+		const withExplicitEmptyArgv = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			fakeRenderServices(
+				agentsFile({ agent: "war", mode: "afk", harnessKind: "claude", argv: [] }),
+			),
+		);
+		expect(withoutArgvField.harness.argv).toEqual(withExplicitEmptyArgv.harness.argv);
+	});
+
+	it("rejects empty string elements in harness.argv at manifest decode time", () => {
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				fakeRenderServices(
+					JSON.stringify({
+						agents: [
+							{
+								agent: "war",
+								mode: "afk",
+								harness: {
+									kind: "pi",
+									model: "model_test",
+									system_prompt_mode: "append",
+									argv: ["--flag", ""],
+								},
+								includes: ["_common.md"],
+								template: "war.md",
+							},
+						],
+					}),
+				),
+			),
+		).toThrow("invalid manifest");
+	});
 });
 
 describe("launchRenderedAgent", () => {
@@ -834,6 +965,65 @@ describe("launchRenderedAgent", () => {
 			expect(tmuxNewSessionArgs.join("\0")).toContain("$(cat '/tmp/pithos-spawner-prompt-");
 		},
 	);
+
+	it("user argv containing --append-system-prompt does not hijack HITL prompt delivery", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "hitl" },
+			fakeRenderServices(
+				agentsFile({
+					agent: "war",
+					mode: "hitl",
+					harnessKind: "claude",
+					argv: ["--append-system-prompt", "FAKE_PROMPT"],
+					harnessMode: "append",
+				}),
+			),
+		);
+		let tmuxNewSessionArgs: readonly string[] = [];
+		launchRenderedAgent(
+			rendered,
+			makeLaunchServices("", {
+				exitCode: 0,
+				panePid: 5678,
+				onTmuxNewSession: (args) => {
+					tmuxNewSessionArgs = args;
+				},
+			}),
+		);
+		// Spawner's rendered prompt must go through the temp file, not inline
+		expect(tmuxNewSessionArgs.join("\0")).not.toContain(rendered.prompt);
+		expect(tmuxNewSessionArgs.join("\0")).toContain("$(cat '/tmp/pithos-spawner-prompt-");
+		// User argv's fake --append-system-prompt appears literally in the beforePrompt section
+		expect(tmuxNewSessionArgs.join("\0")).toContain("'--append-system-prompt' 'FAKE_PROMPT'");
+	});
+
+	it("shell metacharacters in user argv are safely quoted in HITL sh -c script", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "hitl" },
+			fakeRenderServices(
+				agentsFile({
+					agent: "war",
+					mode: "hitl",
+					harnessKind: "pi",
+					argv: ["--flag=a'b"],
+					harnessMode: "append",
+				}),
+			),
+		);
+		let tmuxNewSessionArgs: readonly string[] = [];
+		launchRenderedAgent(
+			rendered,
+			makeLaunchServices("", {
+				exitCode: 0,
+				panePid: 5678,
+				onTmuxNewSession: (args) => {
+					tmuxNewSessionArgs = args;
+				},
+			}),
+		);
+		// shellQuote("--flag=a'b") = "'--flag=a'\"'\"'b'"
+		expect(tmuxNewSessionArgs.join("\0")).toContain("'--flag=a'\"'\"'b'");
+	});
 });
 
 describe("renderSessionTranscript", () => {

@@ -27,7 +27,8 @@ Each `agents.json` entry has this shape:
 		"kind": "pi",
 		"model": "openai-codex/gpt-5.4",
 		"system_prompt_mode": "append",
-		"tools": ["bash", "read"]
+		"tools": ["bash", "read"],
+		"argv": ["--plugin-dir", "~/my-plugins"]
 	},
 	"includes": ["_common.md"],
 	"template": "war.md"
@@ -45,6 +46,11 @@ Fields:
   - `append` renders as the harness `--append-system-prompt` style flag.
 - `harness.tools`: optional non-empty array; rendered into the harness `--tools`
   argv value as a comma-separated list.
+- `harness.argv`: optional string array; each element is inserted verbatim into
+  the harness command line after the binary name and before all Spawner-managed
+  flags. Use for harness features not modeled by other fields, such as
+  `["--plugin-dir", "~/my-plugins"]` for Claude Code plugins. Elements must be
+  non-empty; no tilde expansion or env substitution is applied.
 - `includes`: optional list of template paths. Relative paths resolve from this
   directory; absolute paths and `~/` paths are allowed. No recursive include
   rendering.

@@ -96,6 +96,7 @@ Use that doc for:
 
 Read `src/spawner.ts` for exact argv construction. Stable behavior worth knowing before editing:
 
+- `harness.argv` in `agents.json` is an optional escape hatch: tokens are inserted verbatim after the binary name and before all Spawner-managed flags. See [`templates/README.md`](../../templates/README.md) for the full contract.
 - AFK mode uses Harness print mode with the message `Claim and process one task, then exit.`
 - HITL mode launches under tmux.
 - HITL prompt delivery uses a temp-file shell wrapper for every Harness to keep rendered prompts out of the `tmux new-session` argv.

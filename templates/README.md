@@ -45,17 +45,18 @@ Top-level shape:
 }
 ```
 
-| Field                        | Required | Contract                                                                                                                       |
-| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `agents`                     | yes      | array of manifest entries                                                                                                      |
-| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`                                                                                       |
-| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                                                                            |
-| `harness.kind`               | yes      | `claude` or `pi`                                                                                                               |
-| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                                                               |
-| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`                                                           |
-| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value                                                      |
-| `includes`                   | optional | unique template paths; relative paths resolve from this directory; absolute and `~/` paths are allowed; no recursive rendering |
-| `template`                   | yes      | template path; relative paths resolve from this directory; absolute and `~/` paths are allowed                                 |
+| Field                        | Required | Contract                                                                                                                                                                                                                                                     |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agents`                     | yes      | array of manifest entries                                                                                                                                                                                                                                    |
+| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`                                                                                                                                                                                                                     |
+| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                                                                                                                                                                                                          |
+| `harness.kind`               | yes      | `claude` or `pi`                                                                                                                                                                                                                                             |
+| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                                                                                                                                                                                             |
+| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`                                                                                                                                                                                         |
+| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value                                                                                                                                                                                    |
+| `harness.argv`               | optional | verbatim string array; tokens are inserted after the binary name and before all Spawner-managed flags; each element must be non-empty; use for harness features not modeled by other fields, e.g. `["--plugin-dir", "~/my-plugins"]` for Claude Code plugins |
+| `includes`                   | optional | unique template paths; relative paths resolve from this directory; absolute and `~/` paths are allowed; no recursive rendering                                                                                                                               |
+| `template`                   | yes      | template path; relative paths resolve from this directory; absolute and `~/` paths are allowed                                                                                                                                                               |
 
 Current built-in claim/enqueue contract:
 

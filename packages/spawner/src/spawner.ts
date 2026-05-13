@@ -68,6 +68,7 @@ const HarnessSchema = Schema.Struct({
 	model: Schema.NonEmptyString,
 	system_prompt_mode: Schema.Literal("replace", "append"),
 	tools: Schema.optional(NonEmptyStringArray),
+	argv: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
 });
 
 const ManifestSchema = Schema.Struct({
@@ -445,7 +446,9 @@ const launchErrorMessage = (context: string, error: unknown): string => {
 };
 
 const promptArgIndex = (rendered: RenderedAgent): number => {
-	const index = rendered.harness.argv.findIndex(
+	// findLastIndex so user argv containing --system-prompt/--append-system-prompt does not
+	// shadow the Spawner-managed prompt, which is always placed after user argv.
+	const index = rendered.harness.argv.findLastIndex(
 		(arg) => arg === "--system-prompt" || arg === "--append-system-prompt",
 	);
 	if (index === -1 || rendered.harness.argv[index + 1] === undefined) {
@@ -489,6 +492,7 @@ const harnessArgv = (
 	if (manifest.harness.kind === "claude") {
 		const base = [
 			"claude",
+			...manifest.harness.argv,
 			"--dangerously-skip-permissions",
 			"--session-id",
 			input.sessionId,
@@ -504,6 +508,7 @@ const harnessArgv = (
 	}
 	const base = [
 		"pi",
+		...manifest.harness.argv,
 		"--session",
 		sessionLogPath,
 		"--model",

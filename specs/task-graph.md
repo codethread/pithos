@@ -631,6 +631,8 @@ Output flags:
 
 Default readable graph output renders dependency edges as an indented tree, includes each task's capability and effective status, and labels queued tasks with unresolved dependencies as `[blocked]`. `--all` is selection, not output format; scripts use `--json`.
 
+Terminal tasks are suppressed from readable output to reduce noise: `done` and `cancelled` tasks are always hidden unless they have visible descendants or are part of an active supersession chain. `failed` and `dead_letter` tasks that completed more than 1 hour ago are treated the same way; recently-failed tasks (within the hour) remain visible. The `--json` output always includes every node in the closed graph regardless of age.
+
 Graph closure requirement:
 
 - every `from_task_id`, `to_task_id`, `source_task_id`, `supersedes_task_id`, and `superseded_by_task_id` emitted in the response must refer to a node present in `graph.nodes`

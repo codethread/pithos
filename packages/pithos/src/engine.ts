@@ -199,6 +199,7 @@ export interface TaskSummaryOutput {
 	readonly status: TaskStatus;
 	readonly title: string;
 	readonly created_at: string;
+	readonly completed_at: string | null;
 }
 
 export interface TaskDetailOutput extends TaskSummaryOutput {
@@ -756,6 +757,7 @@ const TaskSummaryRowSchema = Schema.extend(
 	Schema.Struct({
 		scope_kind: Schema.Literal("global", "repo", "worktree"),
 		canonical_path: Schema.NullOr(Schema.String),
+		completed_at: Schema.NullOr(Schema.String),
 	}),
 );
 type TaskSummaryRow = typeof TaskSummaryRowSchema.Type;
@@ -775,7 +777,7 @@ const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
 	).map((r) => r.id);
 
 const taskSummarySelect = sql`
-SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at
+SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at, t.completed_at
 FROM tasks t
 JOIN scopes s ON s.id = t.scope_id
 `;
@@ -789,6 +791,7 @@ const toTaskSummary = (row: TaskSummaryRow): TaskSummary => ({
 	status: row.status,
 	title: row.title,
 	created_at: row.created_at,
+	completed_at: row.completed_at,
 });
 
 const parseTaskSummary = (value: unknown, message: string): TaskSummary =>
@@ -1091,13 +1094,23 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 		successorBySuperseded.set(edge.to_task_id, edge.from_task_id);
 		successorIds.add(edge.from_task_id);
 	}
-	const isTerminal = (status: string): boolean => status === "done" || status === "cancelled";
+	const ONE_HOUR_MS = 60 * 60 * 1000;
+	const now = Date.now();
+	// SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" with no timezone suffix; treat as UTC.
+	const parseSqliteUtcMs = (s: string): number => Date.parse(`${s.replace(" ", "T")}Z`);
+	const isTerminal = (node: GraphNodeOutput): boolean => {
+		if (node.status === "done" || node.status === "cancelled") return true;
+		if ((node.status === "failed" || node.status === "dead_letter") && node.completed_at !== null) {
+			return now - parseSqliteUtcMs(node.completed_at) >= ONE_HOUR_MS;
+		}
+		return false;
+	};
 	// Transitively mark successor nodes as visible when their superseded predecessor is non-terminal.
 	// This makes completed supersession chains visible even though all their nodes are terminal.
 	const supersessionVisible = new Set<string>();
 	for (const [supersededId, successorId] of successorBySuperseded.entries()) {
 		const superseded = byId.get(supersededId);
-		if (superseded !== undefined && !isTerminal(superseded.status)) {
+		if (superseded !== undefined && !isTerminal(superseded)) {
 			const queue = [successorId];
 			while (queue.length > 0) {
 				const id = queue.shift()!;
@@ -1107,11 +1120,19 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 			}
 		}
 	}
+	const selectedTaskId = graph.selector.kind === "task" ? graph.selector.value : undefined;
 	const visible = (id: string): boolean => {
 		const node = byId.get(id);
 		if (node === undefined) return false;
-		if (!isTerminal(node.status)) return true;
-		return (childrenByParent.get(id) ?? []).some(visible) || supersessionVisible.has(id);
+		if (id === selectedTaskId) return true;
+		if (!isTerminal(node)) return true;
+		const successorId = successorBySuperseded.get(id);
+		const hasActiveSuccessor = successorId !== undefined && visible(successorId);
+		return (
+			(childrenByParent.get(id) ?? []).some(visible) ||
+			supersessionVisible.has(id) ||
+			hasActiveSuccessor
+		);
 	};
 	for (const [parentId, childIds] of childrenByParent.entries()) {
 		childrenByParent.set(
@@ -1289,6 +1310,7 @@ const graphForIds = (
 			status: task.status,
 			title: task.title,
 			created_at: task.created_at,
+			completed_at: task.completed_at,
 			claimable: isClaimable(db, task),
 			unresolved_dependency_ids: unresolvedDependencies(db, task.id),
 			supersedes_task_id:

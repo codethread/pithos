@@ -657,10 +657,10 @@ On successful `pdx open`, the CLI prints `tmux attach -t pdx--pandora` and exits
 `pdx` may send a content-free wakeup to live Pandora when claimable `escalate` work appears. Transport is `tmux send-keys` to `pdx--pandora` with a marker line followed by Enter:
 
 ```text
-# wakeup: claimable escalate
+<pithos-event>escalation-ready</pithos-event>
 ```
 
-The marker contains no task body and is not semantic task injection.
+The marker contains no task body and is not semantic task injection. The wakeup may be deferred up to `DEBOUNCE_MAX_SECONDS` seconds when an operator client is attached to `pdx--pandora` and has been active within the last `ACTIVE_WINDOW_SECONDS` seconds; after the cap it is force-delivered.
 
 HITL tmux naming uses a BEM-ish Pandora-owned convention:
 

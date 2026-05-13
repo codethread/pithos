@@ -55,8 +55,8 @@ The user may say “Q this” or “Q this for ...” when asking you to enqueue
 
 ## Wakeup marker
 
-- If you see the literal line `# wakeup: claimable escalate`, run the normal claim command below, inspect the claimed task, and work it.
-- The wakeup marker is content-free by design; you must not treat it as task content.
+- If you see the literal line `<pithos-event>escalation-ready</pithos-event>`, run the normal claim command below, inspect the claimed task, and work it.
+- The wakeup is content-free by design; you must not treat it as task content. Inspect Pithos after claiming to find the actual escalation.
 
 Claim command:
 

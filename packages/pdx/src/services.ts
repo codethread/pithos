@@ -41,6 +41,11 @@ export interface IdsService {
 }
 export class Ids extends Context.Tag("pdx/Ids")<Ids, IdsService>() {}
 
+export interface TmuxPresence {
+	readonly attached: number;
+	readonly lastActivityUnix: number | null;
+}
+
 export interface TmuxService {
 	readonly hasSession: (target: string) => Effect.Effect<boolean, PdxError>;
 	readonly lsSessions: () => Effect.Effect<readonly string[], PdxError>;
@@ -53,6 +58,7 @@ export interface TmuxService {
 	readonly switchClient: (target: string) => Effect.Effect<void, PdxError>;
 	readonly sendLiteralLine: (target: string, text: string) => Effect.Effect<void, PdxError>;
 	readonly pasteBuffer: (target: string, content: string) => Effect.Effect<void, PdxError>;
+	readonly presence: (target: string) => Effect.Effect<TmuxPresence, PdxError>;
 }
 export class Tmux extends Context.Tag("pdx/Tmux")<Tmux, TmuxService>() {}
 
@@ -220,6 +226,8 @@ export interface RegistryService {
 	readonly list: Effect.Effect<readonly RegistryEntry[]>;
 	readonly lastEscalateClaimableCount: Effect.Effect<number>;
 	readonly setLastEscalateClaimableCount: (count: number) => Effect.Effect<void>;
+	readonly pendingWakeupSince: Effect.Effect<string | null>;
+	readonly setPendingWakeupSince: (value: string | null) => Effect.Effect<void>;
 	readonly upsert: (entry: RegistryEntry) => Effect.Effect<void>;
 	readonly remove: (runId: string) => Effect.Effect<void>;
 }
@@ -228,11 +236,14 @@ export class Registry extends Context.Tag("pdx/Registry")<Registry, RegistryServ
 export const makeRegistry = Effect.gen(function* () {
 	const entriesRef = yield* SynchronizedRef.make<readonly RegistryEntry[]>([]);
 	const lastEscalateClaimableCountRef = yield* SynchronizedRef.make(0);
+	const pendingWakeupSinceRef = yield* SynchronizedRef.make<string | null>(null);
 	return Registry.of({
 		list: SynchronizedRef.get(entriesRef),
 		lastEscalateClaimableCount: SynchronizedRef.get(lastEscalateClaimableCountRef),
 		setLastEscalateClaimableCount: (count) =>
 			SynchronizedRef.set(lastEscalateClaimableCountRef, count),
+		pendingWakeupSince: SynchronizedRef.get(pendingWakeupSinceRef),
+		setPendingWakeupSince: (value) => SynchronizedRef.set(pendingWakeupSinceRef, value),
 		upsert: (entry) =>
 			SynchronizedRef.update(entriesRef, (entries) => [
 				...entries.filter((existing) => existing.runId !== entry.runId),

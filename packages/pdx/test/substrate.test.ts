@@ -239,6 +239,7 @@ const alwaysLiveTmux = Tmux.of({
 	switchClient: () => Effect.void,
 	sendLiteralLine: () => Effect.void,
 	pasteBuffer: () => Effect.void,
+	presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 });
 
 const alwaysLiveProcess = Process.of({
@@ -702,6 +703,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
@@ -742,6 +744,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
@@ -799,6 +802,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
@@ -844,6 +848,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
@@ -932,6 +937,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const process = Process.of({
 			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
@@ -1065,6 +1071,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const killedPids: string[] = [];
 		const process = Process.of({
@@ -1162,6 +1169,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const config = await parseConfig(dataDir);
 		const handle = await run(
@@ -1210,6 +1218,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const pithosCalls: string[] = [];
 		const pithos = makePithos(pithosCalls, [{ scope_id: "global", capability: "escalate" }]);
@@ -1249,6 +1258,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const pithos = makePithos();
 		const fs = FileSystem.of({
@@ -1459,6 +1469,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 		await run(
@@ -1518,6 +1529,8 @@ describe("pdx substrate", () => {
 							switchClient: (target) => Effect.sync(() => switches.push(target)),
 							sendLiteralLine: () => Effect.void,
 							pasteBuffer: () => Effect.void,
+							presence: () =>
+								Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 						}),
 					),
 				),
@@ -1786,6 +1799,8 @@ describe("pdx substrate", () => {
 						switchClient: () => Effect.void,
 						sendLiteralLine: () => Effect.void,
 						pasteBuffer: () => Effect.void,
+						presence: () =>
+							Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 					}),
 				),
 			),
@@ -1927,6 +1942,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		await run(
 			reconcileTick(await parseConfig(dataDir)).pipe(
@@ -2011,6 +2027,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		await run(
 			reconcileTick(await parseConfig(dataDir)).pipe(
@@ -2308,6 +2325,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		await run(
 			reconcileTick(await parseConfig(dataDir)).pipe(
@@ -2373,6 +2391,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		await run(
 			reconcileTick(await parseConfig(dataDir)).pipe(
@@ -2450,6 +2469,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const config = await parseConfig(dataDir);
 		await run(
@@ -2676,6 +2696,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		await run(
 			reconcileTick(await parseConfig(dataDir)).pipe(
@@ -2773,6 +2794,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		await expect(
 			run(
@@ -3047,6 +3069,7 @@ describe("pdx substrate", () => {
 			switchClient: () => Effect.void,
 			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
 			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
 		});
 		const tick = async () =>
 			run(
@@ -3076,7 +3099,7 @@ describe("pdx substrate", () => {
 		expect(sends).toEqual([]);
 		ready = [{ scope_id: "global", capability: "escalate" }];
 		await tick();
-		expect(sends).toEqual([`${PANDORA_TARGET}:# wakeup: claimable escalate`]);
+		expect(sends).toEqual([`${PANDORA_TARGET}:<pithos-event>escalation-ready</pithos-event>`]);
 		await tick();
 		expect(sends).toHaveLength(1);
 		ready = [
@@ -3092,12 +3115,260 @@ describe("pdx substrate", () => {
 		expect(sends).toHaveLength(2);
 	});
 
+	it("defers wakeup and sets pendingWakeupSince when operator is actively typing", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const sends: string[] = [];
+		const nowIso = "2026-05-09T00:00:31.000Z";
+		const nowUnix = Math.floor(Date.parse(nowIso) / 1000);
+		const ready = [{ scope_id: "global", capability: "escalate" as const }];
+		const pithos = makePithos([], [], {
+			briefing: () =>
+				Effect.succeed(
+					ready.map((task, index) => ({
+						id: `task_${index}`,
+						scope_kind: "global" as const,
+						canonical_path: null,
+						...task,
+					})),
+				),
+		});
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
+			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
+			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 1, lastActivityUnix: nowUnix - 1 }),
+		});
+		const tick = async () =>
+			run(
+				reconcileTick(await parseConfig(dataDir)).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(
+						Ids,
+						Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+					),
+					Effect.provideService(
+						Spawner,
+						makeSpawner({
+							launchAgent: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+						}),
+					),
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(Process, alwaysLiveProcess),
+					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, Clock.of({ nowIso: Effect.succeed(nowIso) })),
+				),
+			);
+		await tick();
+		expect(sends).toEqual([]);
+		expect(await run(registry.pendingWakeupSince)).toBe(nowIso);
+		// second tick still deferred; pendingWakeupSince is not overwritten
+		await tick();
+		expect(sends).toEqual([]);
+		expect(await run(registry.pendingWakeupSince)).toBe(nowIso);
+	});
+
+	it("sends wakeup immediately when operator activity exceeds ACTIVE_WINDOW_SECONDS", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const sends: string[] = [];
+		const nowIso = "2026-05-09T00:00:31.000Z";
+		const nowUnix = Math.floor(Date.parse(nowIso) / 1000);
+		const pithos = makePithos([], [{ scope_id: "global", capability: "escalate" }]);
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
+			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
+			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 1, lastActivityUnix: nowUnix - 5 }),
+		});
+		await run(
+			reconcileTick(await parseConfig(dataDir)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(
+					Ids,
+					Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+				),
+				Effect.provideService(
+					Spawner,
+					makeSpawner({
+						launchAgent: () =>
+							Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+					}),
+				),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(Process, alwaysLiveProcess),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, Clock.of({ nowIso: Effect.succeed(nowIso) })),
+			),
+		);
+		expect(sends).toEqual([`${PANDORA_TARGET}:<pithos-event>escalation-ready</pithos-event>`]);
+		expect(await run(registry.pendingWakeupSince)).toBeNull();
+	});
+
+	it("force-sends wakeup after DEBOUNCE_MAX_SECONDS even while operator is typing", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const sends: string[] = [];
+		const baseIso = "2026-05-09T00:00:31.000Z";
+		const baseUnix = Math.floor(Date.parse(baseIso) / 1000);
+		let currentNowIso = baseIso;
+		const pithos = makePithos([], [{ scope_id: "global", capability: "escalate" }]);
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
+			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
+			pasteBuffer: () => Effect.void,
+			presence: () =>
+				Effect.sync(() => ({
+					attached: 1,
+					lastActivityUnix: Math.floor(Date.parse(currentNowIso) / 1000) - 1,
+				})),
+		});
+		const tick = async () =>
+			run(
+				reconcileTick(await parseConfig(dataDir)).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(
+						Ids,
+						Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+					),
+					Effect.provideService(
+						Spawner,
+						makeSpawner({
+							launchAgent: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+						}),
+					),
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(Process, alwaysLiveProcess),
+					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, Clock.of({ nowIso: Effect.sync(() => currentNowIso) })),
+				),
+			);
+		await tick();
+		expect(sends).toEqual([]);
+		expect(await run(registry.pendingWakeupSince)).toBe(baseIso);
+		currentNowIso = new Date((baseUnix + 61) * 1000).toISOString();
+		await tick();
+		expect(sends).toHaveLength(1);
+		expect(sends[0]).toBe(`${PANDORA_TARGET}:<pithos-event>escalation-ready</pithos-event>`);
+		expect(await run(registry.pendingWakeupSince)).toBeNull();
+	});
+
+	it("clears pendingWakeupSince and skips send when claimable count drops to zero", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const sends: string[] = [];
+		const nowIso = "2026-05-09T00:00:31.000Z";
+		const nowUnix = Math.floor(Date.parse(nowIso) / 1000);
+		let ready: readonly ReadyTaskInput[] = [{ scope_id: "global", capability: "escalate" }];
+		const pithos = makePithos([], [], {
+			briefing: () =>
+				Effect.succeed(
+					ready.map((task, index) => ({
+						id: `task_${index}`,
+						scope_kind: "global" as const,
+						canonical_path: null,
+						...task,
+					})),
+				),
+		});
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
+			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
+			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 1, lastActivityUnix: nowUnix - 1 }),
+		});
+		const tick = async () =>
+			run(
+				reconcileTick(await parseConfig(dataDir)).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(
+						Ids,
+						Ids.of({ nextRunId: Effect.succeed("r"), nextSessionId: Effect.succeed("s") }),
+					),
+					Effect.provideService(
+						Spawner,
+						makeSpawner({
+							launchAgent: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected" })),
+						}),
+					),
+					Effect.provideService(Tmux, tmux),
+					Effect.provideService(Process, alwaysLiveProcess),
+					Effect.provideService(SupervisorLog, testLog),
+					Effect.provideService(LifecycleReporter, testLifecycle),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, Clock.of({ nowIso: Effect.succeed(nowIso) })),
+				),
+			);
+		await tick();
+		expect(sends).toEqual([]);
+		expect(await run(registry.pendingWakeupSince)).toBe(nowIso);
+		ready = [];
+		await tick();
+		expect(sends).toEqual([]);
+		expect(await run(registry.pendingWakeupSince)).toBeNull();
+	});
+
+	it("normalises client_activity microseconds to correct unix seconds for presence detection", async () => {
+		const nowMs = Date.parse("2026-05-09T00:00:31.000Z");
+		const activityMicros = nowMs * 1000 - 2_000_000; // 2 seconds before now, microseconds format
+		const processService = Process.of({
+			execFile: (_file, args) => {
+				if (args[0] === "display-message") {
+					return Effect.succeed({ exitCode: 0, stdout: "1\n", stderr: "" });
+				}
+				if (args[0] === "list-clients") {
+					return Effect.succeed({ exitCode: 0, stdout: `${activityMicros}\n`, stderr: "" });
+				}
+				return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+			},
+			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
+		});
+		const tmux = await run(makeTmux.pipe(Effect.provideService(Process, processService)));
+		const presence = await run(tmux.presence("pdx--pandora"));
+		expect(presence.attached).toBe(1);
+		expect(presence.lastActivityUnix).toBe(Math.floor(nowMs / 1000) - 2);
+	});
+
 	it("Pandora template documents wakeup marker recognition", async () => {
 		const template = await readFile(
 			new URL("../../../templates/pandora.md", import.meta.url),
 			"utf8",
 		);
-		expect(template).toContain("# wakeup: claimable escalate");
+		expect(template).toContain("<pithos-event>escalation-ready</pithos-event>");
 		expect(template).toContain("must not treat it as task content");
 	});
 

@@ -736,7 +736,9 @@ const hasAgentScopeCap = (
 const hasAfkCapacity = (entries: readonly RegistryEntry[], maxAfk: number): boolean =>
 	entries.filter((entry) => entry.agent !== "pandora" && entry.mode === "afk").length < maxAfk;
 
-const WAKEUP_MARKER = "# wakeup: claimable escalate";
+const WAKEUP_MARKER = "<pithos-event>escalation-ready</pithos-event>";
+const ACTIVE_WINDOW_SECONDS = 3;
+const DEBOUNCE_MAX_SECONDS = 60;
 
 const sendEscalateWakeupIfNeeded = () =>
 	Effect.gen(function* () {
@@ -744,17 +746,39 @@ const sendEscalateWakeupIfNeeded = () =>
 		const pithos = yield* PithosClient;
 		const tmux = yield* Tmux;
 		const log = yield* SupervisorLog;
+		const clock = yield* Clock;
 		const ready = yield* pithos.briefing();
 		const claimableEscalateCount = ready.filter(
 			(task) => task.scope_id === "global" && task.capability === "escalate",
 		).length;
 		const previousCount = yield* registry.lastEscalateClaimableCount;
-		if (previousCount === 0 && claimableEscalateCount > 0) {
+		const pendingWakeupSince = yield* registry.pendingWakeupSince;
+
+		yield* registry.setLastEscalateClaimableCount(claimableEscalateCount);
+
+		if (claimableEscalateCount === 0) {
+			if (pendingWakeupSince !== null) yield* registry.setPendingWakeupSince(null);
+			return;
+		}
+
+		const isNewWork =
+			(previousCount === 0 && claimableEscalateCount > 0) || pendingWakeupSince !== null;
+		if (!isNewWork) return;
+
+		const nowIso = yield* clock.nowIso;
+		const nowUnix = Math.floor(Date.parse(nowIso) / 1000);
+
+		const exceedsCap =
+			pendingWakeupSince !== null &&
+			nowUnix - Math.floor(Date.parse(pendingWakeupSince) / 1000) >= DEBOUNCE_MAX_SECONDS;
+
+		if (exceedsCap) {
 			yield* tmux.sendLiteralLine(PANDORA_TARGET, WAKEUP_MARKER);
+			yield* registry.setPendingWakeupSince(null);
 			yield* log.write({
 				level: "info",
 				span: "pdx.wakeup",
-				msg: "sent Pandora wakeup",
+				msg: "wakeup_forced",
 				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
 			});
 			yield* reportLifecycle({
@@ -763,8 +787,43 @@ const sendEscalateWakeupIfNeeded = () =>
 				target: PANDORA_TARGET,
 				claimableEscalateCount,
 			});
+			return;
 		}
-		yield* registry.setLastEscalateClaimableCount(claimableEscalateCount);
+
+		const presence = yield* tmux.presence(PANDORA_TARGET);
+		const isTyping =
+			presence.attached > 0 &&
+			presence.lastActivityUnix !== null &&
+			nowUnix - presence.lastActivityUnix < ACTIVE_WINDOW_SECONDS;
+
+		if (!isTyping) {
+			yield* tmux.sendLiteralLine(PANDORA_TARGET, WAKEUP_MARKER);
+			yield* registry.setPendingWakeupSince(null);
+			yield* log.write({
+				level: "info",
+				span: "pdx.wakeup",
+				msg: "wakeup_sent",
+				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
+			});
+			yield* reportLifecycle({
+				kind: "wakeup",
+				reason: "claimable_escalate",
+				target: PANDORA_TARGET,
+				claimableEscalateCount,
+			});
+		} else {
+			if (pendingWakeupSince === null) yield* registry.setPendingWakeupSince(nowIso);
+			yield* log.write({
+				level: "info",
+				span: "pdx.wakeup",
+				msg: "wakeup_deferred",
+				data: {
+					target: PANDORA_TARGET,
+					claimable_escalate_count: claimableEscalateCount,
+					pending_since: pendingWakeupSince ?? nowIso,
+				},
+			});
+		}
 	});
 
 const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>

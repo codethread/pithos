@@ -24,6 +24,35 @@
 - Escalation is a normal global-scope task claimed by Pandora.
 - pdx owns lifecycle cleanup, interrupt, timeout, and kill policy.
 
+### Worktree and branch cleanup task ordering
+
+Cleanup or removal tasks that can delete worktrees or local branches are destructive and irreversible. Never author them as flat (dependency-free) tasks when merge or land work targeting the same branches or worktrees may still be outstanding. Pithos only enforces ordering you encode — no dependency edge means immediately claimable.
+
+**Best case — enqueue cleanup from inside the merge/land task.** Default auto chaining adds the held task as a blocking dependency, so the cleanup task cannot be claimed before the merge completes:
+
+```sh
+# Held merge task becomes the auto-chain parent; no --chain flag needed
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
+  --title 'Remove worktree: feat/my-feature' --stdin <<'EOF'
+Remove the worktree and local branch for feat/my-feature now that <merge-task-id> has completed.
+EOF
+```
+
+**If queued from an idle or manual context** (no held task, so auto chaining adds nothing), enumerate every outstanding merge task whose worktree or branch the cleanup could remove and add explicit `--depends-on` for each:
+
+```sh
+# --chain none: no held task to auto-chain from
+# --depends-on: blocks cleanup until each listed merge task completes
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability execute \
+  --title 'Sweep merged worktrees' --stdin --chain none \
+  --depends-on <merge-task-id-1> --depends-on <merge-task-id-2> <<'EOF'
+Remove worktrees and local branches for PRs that have already merged.
+Depends on <merge-task-id-1> and <merge-task-id-2> to ensure in-flight merges finish first.
+EOF
+```
+
+For a **repo-wide sweep** (removes any merged worktree it finds), depend on _all_ outstanding merge tasks for the repo — not just the ones you expect to touch. A sweep can race work it was never explicitly linked to. If no merge tasks are currently in-flight for any candidate branch, you may omit `--depends-on`, but verify before skipping.
+
 ## Common command recipes
 
 After claiming, inspect the held task:

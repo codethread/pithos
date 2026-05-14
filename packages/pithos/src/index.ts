@@ -36,20 +36,24 @@ export {
 } from "./chain-policy.js";
 export {
 	makeEngine,
+	PDX_SYSTEM_RUN_ID,
 	renderBriefingText,
 	renderGraphInspectText,
 	renderTaskInspectMarkdown,
 	type Engine,
 	type EngineContext,
+	type RepairAlertOutput,
 	type RunOutput,
 } from "./engine.js";
 export { loadConfig, ConfigSchema, type Config, type EnvReader } from "./config.js";
 export { migrate, openDb, type Db, type Mode, type ScopeKind, type TaskStatus } from "./db.js";
 export {
 	decodeRow,
+	RepairAlertKindSchema,
 	RunRowSchema,
 	ScopeRowSchema,
 	TaskRowSchema,
+	type RepairAlertKind,
 	type RunRow,
 	type ScopeRow,
 	type TaskRow,

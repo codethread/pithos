@@ -23,13 +23,17 @@ import { fail } from "./errors.js";
 import {
 	decodeRow,
 	EventRowSchema,
+	RepairAlertKindSchema,
 	RunRowSchema,
 	ScopeRowSchema,
 	TaskRowSchema,
+	type RepairAlertKind,
 	type RunRow,
 	type ScopeRow,
 } from "./rows.js";
 import type { Services } from "./services.js";
+
+export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
 
 export interface EngineContext {
 	readonly config: Config;
@@ -174,13 +178,17 @@ export interface Engine {
 		readonly escalationTitle: string;
 		readonly escalationBody: string;
 	}) => LaunchPreconditionEscalationOutput;
-	readonly createRepairEscalation: (input: {
+	readonly createRepairAlert: (input: {
 		readonly runId: string | undefined;
-		readonly affectedTaskId: string;
-		readonly sourceKind: "repair_source";
+		readonly affectedTaskId?: string;
+		readonly kind: RepairAlertKind;
 		readonly escalationTitle: string;
 		readonly escalationBody: string;
-	}) => RepairEscalationOutput;
+	}) => RepairAlertOutput;
+	readonly claimableRepairAlertKinds: () => {
+		readonly ok: true;
+		readonly kinds: readonly RepairAlertKind[];
+	};
 }
 
 export type Json =
@@ -239,6 +247,7 @@ export interface TaskInspectOutput {
 	readonly supersedes: string | null;
 	readonly superseded_by: string | null;
 	readonly artifacts: readonly ArtifactOutput[];
+	readonly repair_alert_kind: RepairAlertKind | null;
 }
 
 const effectiveTaskStatus = (task: {
@@ -327,6 +336,9 @@ export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string =>
 	];
 	if (inspect.source !== null) {
 		currentParts.push("Source link:", renderSourceBullet(inspect.source));
+	}
+	if (inspect.repair_alert_kind !== null) {
+		currentParts.push(`Repair Alert kind: ${inspect.repair_alert_kind}`);
 	}
 	const sections = [`# ${taskTitleLine(inspect.task)}`];
 	if (inspect.superseded_by !== null) {
@@ -457,15 +469,16 @@ export interface LaunchPreconditionEscalationOutput {
 	};
 }
 
-export interface RepairEscalationOutput {
+export interface RepairAlertOutput {
 	readonly ok: true;
 	readonly escalation: {
 		readonly id: string;
 		readonly status: "queued";
 		readonly scope_id: "global";
 		readonly capability: "escalate";
-		readonly source_task_id: string;
-		readonly source_kind: "repair_source";
+		readonly source_task_id: string | null;
+		readonly source_kind: "repair_source" | null;
+		readonly kind: RepairAlertKind;
 	};
 }
 
@@ -1268,32 +1281,90 @@ export const renderBriefingText = (briefing: BriefingOutput): string => {
 	return `${lines.join("\n")}\n`;
 };
 
-const createRepairEscalationTask = (
+const insertRepairAlert = (db: Db, alertTaskId: string, kind: RepairAlertKind): void => {
+	db.prepare(sql`INSERT INTO repair_alerts(task_id, kind) VALUES (?, ?)`).run(alertTaskId, kind);
+};
+
+const ensureSystemRunRow = (db: Db): void => {
+	// The system-actor run must exist before any repair alert insert (tasks FK).
+	// pdx upserts this row with real values via runUpsert on daemon start; this
+	// INSERT OR IGNORE handles early-startup cleanup and standalone CLI paths.
+	db.prepare(
+		sql`INSERT OR IGNORE INTO runs(id,agent_kind,mode,scope_id,cwd,session_id,harness_kind,session_log_path) VALUES ('run_pdx_system','pdx','afk','global','/pdx','run_pdx_system','system','/dev/null')`,
+	).run();
+};
+
+const createRepairAlertInTxn = (
+	ctx: EngineContext,
+	db: Db,
+	input: {
+		readonly kind: RepairAlertKind;
+		readonly affectedTaskId: string | undefined;
+		readonly escalationTitle: string;
+		readonly escalationBody: string;
+	},
+): void => {
+	ensureSystemRunRow(db);
+	const alertId = Effect.runSync(ctx.services.ids.make("task"));
+	db.prepare(
+		sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
+	).run(
+		alertId,
+		"global",
+		"escalate",
+		input.escalationTitle,
+		input.escalationBody,
+		PDX_SYSTEM_RUN_ID,
+	);
+	insertRepairAlert(db, alertId, input.kind);
+	if (input.affectedTaskId !== undefined) {
+		insertTaskSource(db, alertId, input.affectedTaskId, PDX_SYSTEM_RUN_ID, "repair_source");
+	}
+	event(ctx, db, "task.created", {
+		task_id: alertId,
+		actor_run_id: PDX_SYSTEM_RUN_ID,
+		payload: {
+			scope_id: "global",
+			capability: "escalate",
+			title: input.escalationTitle,
+			depends_on_task_ids: [],
+			...(input.affectedTaskId !== undefined
+				? { source_task_id: input.affectedTaskId, source_kind: "repair_source" }
+				: {}),
+		},
+	});
+};
+
+const createRepairAlertTask = (
 	ctx: EngineContext,
 	db: Db,
 	input: {
 		readonly actorRunId: string;
-		readonly affectedTaskId: string;
-		readonly sourceKind: "repair_source";
+		readonly affectedTaskId: string | undefined;
+		readonly kind: RepairAlertKind;
 		readonly escalationTitle: string;
 		readonly escalationBody: string;
 	},
-): RepairEscalationOutput => {
+): RepairAlertOutput => {
 	const actorRun = liveRun(db, input.actorRunId);
 	if (actorRun.agent_kind !== "pdx") {
-		fail("VALIDATION_ERROR", "repair escalation must be authored by pdx");
+		fail("VALIDATION_ERROR", "repair alert must be authored by pdx");
 	}
 	scopeForCapability(db, "global", "escalate");
-	const affectedTask = taskSummary(db, input.affectedTaskId);
+	const affectedTask =
+		input.affectedTaskId !== undefined ? taskSummary(db, input.affectedTaskId) : undefined;
 	const title = requireNonEmpty(input.escalationTitle, "escalation title");
 	const bodyText = requireNonEmpty(input.escalationBody, "escalation body");
 	const escalationId = Effect.runSync(ctx.services.ids.make("task"));
 	return withCollisionGuard(escalationId, () =>
-		db.transaction((): RepairEscalationOutput => {
+		db.transaction((): RepairAlertOutput => {
 			db.prepare(
 				sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
 			).run(escalationId, "global", "escalate", title, bodyText, input.actorRunId);
-			insertTaskSource(db, escalationId, affectedTask.id, input.actorRunId, input.sourceKind);
+			insertRepairAlert(db, escalationId, input.kind);
+			if (affectedTask !== undefined) {
+				insertTaskSource(db, escalationId, affectedTask.id, input.actorRunId, "repair_source");
+			}
 			event(ctx, db, "task.created", {
 				task_id: escalationId,
 				actor_run_id: input.actorRunId,
@@ -1302,8 +1373,9 @@ const createRepairEscalationTask = (
 					capability: "escalate",
 					title,
 					depends_on_task_ids: [],
-					source_task_id: affectedTask.id,
-					source_kind: input.sourceKind,
+					...(affectedTask !== undefined
+						? { source_task_id: affectedTask.id, source_kind: "repair_source" }
+						: {}),
 				},
 			});
 			return {
@@ -1313,8 +1385,9 @@ const createRepairEscalationTask = (
 					status: "queued" as const,
 					scope_id: "global" as const,
 					capability: "escalate" as const,
-					source_task_id: affectedTask.id,
-					source_kind: input.sourceKind,
+					source_task_id: affectedTask?.id ?? null,
+					source_kind: affectedTask !== undefined ? ("repair_source" as const) : null,
+					kind: input.kind,
 				},
 			};
 		})(),
@@ -1345,7 +1418,19 @@ const graphForIds = (
 			}
 		}
 		for (const row of taskSourceEdges(db)) {
-			if (ids.has(row.task_id) || ids.has(row.source_task_id)) {
+			if (row.kind === "repair_source" && selector.kind === "scope") {
+				// For scope-based graphs, repair_source expansion is one-directional:
+				// follow alert → affected task, but not the reverse. This prevents
+				// global Repair Alert tasks from leaking into scoped (repo/worktree)
+				// graph views just because a failed task in that scope is in the
+				// seed set. For task-by-ID graphs the bidirectional path below is
+				// intentional so the repair alert is visible when inspecting the
+				// affected task directly.
+				if (ids.has(row.task_id) && !ids.has(row.source_task_id)) {
+					ids.add(row.source_task_id);
+					changed = true;
+				}
+			} else if (ids.has(row.task_id) || ids.has(row.source_task_id)) {
 				if (!ids.has(row.task_id)) {
 					ids.add(row.task_id);
 					changed = true;
@@ -1727,6 +1812,14 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						task_id: task.id,
 					},
 				});
+				if (nextTaskStatus === "dead_letter") {
+					createRepairAlertInTxn(ctx, db, {
+						kind: "dead_letter",
+						affectedTaskId: task.id,
+						escalationTitle: `Investigate dead-lettered task ${task.id}`,
+						escalationBody: `Task ${task.id} exhausted its ${task.max_attempts} attempts and entered dead_letter state (scope: ${task.scope_id}, capability: ${task.capability}).\n\nReason: ${nonEmptyReason}\n\nInvestigate the task history, fix the underlying issue, and supersede the task to restart the work.`,
+					});
+				}
 				return runById(db, run.id);
 			})();
 			return { ok: true, run: toRunOutput(finalRun) };
@@ -1823,6 +1916,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 								status: "failed",
 								task_id: task.id,
 							},
+						});
+						createRepairAlertInTxn(ctx, db, {
+							kind: "interrupt",
+							affectedTaskId: task.id,
+							escalationTitle: `Investigate interrupted task ${task.id}`,
+							escalationBody: `Task ${task.id} was interrupted while held by run ${run.id} (scope: ${task.scope_id}, capability: ${task.capability}).\n\nReason: ${nonEmptyReason}\n\nInvestigate the task, determine if the work should be resumed, and take the appropriate action (supersede, re-enqueue, or accept the failure).`,
 						});
 						return {
 							run: runById(db, run.id),
@@ -2154,6 +2253,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			liveRun(db, actorRunId);
 			const nonEmptyReason = requireNonEmpty(reason, "--reason");
 			db.transaction(() => {
+				const affectedTask = taskDetail(db, taskId);
 				const result = db
 					.prepare(sql`
 					UPDATE tasks
@@ -2171,6 +2271,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					task_id: taskId,
 					actor_run_id: actorRunId,
 					payload: { run_id: actorRunId, fencing_token: token, reason: nonEmptyReason },
+				});
+				createRepairAlertInTxn(ctx, db, {
+					kind: "task_failed",
+					affectedTaskId: taskId,
+					escalationTitle: `Investigate failed task ${taskId}`,
+					escalationBody: `Task ${taskId} failed while held by run ${actorRunId} (scope: ${affectedTask.scope_id}, capability: ${affectedTask.capability}, attempts: ${affectedTask.attempts}).\n\nReason: ${nonEmptyReason}\n\nInvestigate the task and decide whether to supersede, re-enqueue, or accept the failure.`,
 				});
 			})();
 			return { ok: true, task: { id: taskId, status: "failed" } };
@@ -2249,6 +2355,17 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				.all(taskId)
 				.map((row) => parseTaskDetail(row, "malformed dependent task row"));
 			const { supersedes, superseded_by } = taskSupersessionLinks(db, taskId);
+			const repairAlertRow = db
+				.prepare(sql`SELECT kind FROM repair_alerts WHERE task_id=?`)
+				.get(taskId) as { kind: string } | undefined;
+			const repairAlertKind: RepairAlertKind | null =
+				repairAlertRow !== undefined
+					? decodeRow(
+							RepairAlertKindSchema,
+							repairAlertRow.kind,
+							`repair_alerts.kind for task ${taskId}`,
+						)
+					: null;
 			return {
 				ok: true,
 				task,
@@ -2259,6 +2376,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				supersedes,
 				superseded_by,
 				artifacts: taskArtifacts(db, taskId),
+				repair_alert_kind: repairAlertKind,
 			};
 		}),
 	graphInspect: ({ taskId, scope, all }) =>
@@ -2527,6 +2645,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
 					).run(escalationId, "global", "escalate", title, bodyText, actorRunId);
 					insertTaskSource(db, escalationId, expectedTaskId, actorRunId, "repair_source");
+					insertRepairAlert(db, escalationId, "launch_precondition");
 					event(ctx, db, "task.cancelled", {
 						task_id: expectedTaskId,
 						actor_run_id: actorRunId,
@@ -2575,22 +2694,38 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				})(),
 			);
 		}),
-	createRepairEscalation: ({
-		runId,
-		affectedTaskId,
-		sourceKind,
-		escalationTitle,
-		escalationBody,
-	}) =>
+	createRepairAlert: ({ runId, affectedTaskId, kind, escalationTitle, escalationBody }) =>
 		withDb(ctx, (db) =>
-			createRepairEscalationTask(ctx, db, {
+			createRepairAlertTask(ctx, db, {
 				actorRunId: resolveRunId(ctx, runId),
 				affectedTaskId,
-				sourceKind,
+				kind,
 				escalationTitle,
 				escalationBody,
 			}),
 		),
+	claimableRepairAlertKinds: () =>
+		withDb(ctx, (db) => {
+			const rows = db
+				.prepare(
+					sql`
+					SELECT DISTINCT ra.kind
+					FROM repair_alerts ra
+					JOIN tasks t ON t.id = ra.task_id
+					WHERE t.status = 'queued'
+					  AND t.scope_id = 'global'
+					  AND t.capability = 'escalate'
+					  AND NOT EXISTS (
+					    SELECT 1 FROM task_dependencies td
+					    JOIN tasks dep ON dep.id = td.depends_on_task_id
+					    WHERE td.task_id = t.id AND dep.status <> 'done'
+					  )
+				`,
+				)
+				.all() as { kind: string }[];
+			const kinds = rows.map((r) => decodeRow(RepairAlertKindSchema, r.kind, "repair_alerts.kind"));
+			return { ok: true as const, kinds };
+		}),
 });
 
 const scopeForCapability = (db: Db, scopeId: string, cap: Capability): ScopeRow => {

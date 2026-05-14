@@ -53,8 +53,15 @@ export const formatLifecycleEvent = (now: Date, event: LifecycleEvent): string =
 			return `${timestamp} ${green}spawn${reset} ${event.agent} ${dim}${event.mode}${reset} run=${event.runId} scope=${event.scopeId} session=${event.sessionId}`;
 		case "removed":
 			return `${timestamp} ${red}remove${reset} ${event.agent} ${dim}${event.reason}${reset} run=${event.runId} scope=${event.scopeId}`;
-		case "nudge":
-			return `${timestamp} ${yellow}nudge${reset} pandora ${dim}${event.reason}${reset} target=${event.target} claimable-escalate=${event.claimableEscalateCount}`;
+		case "nudge": {
+			const reasonLabel =
+				event.reason === "task_dead_lettered_alert"
+					? "task-dead-lettered"
+					: event.reason === "task_failed_alert"
+						? "task-failed"
+						: "claimable-escalate";
+			return `${timestamp} ${yellow}nudge${reset} pandora ${dim}${reasonLabel}${reset} target=${event.target} claimable-escalate=${event.claimableEscalateCount}`;
+		}
 		case "error":
 			return `${timestamp} ${red}error${reset} ${event.span} ${dim}attempt=${event.attempt}/${event.maxAttempts}${reset} ${event.message}`;
 	}

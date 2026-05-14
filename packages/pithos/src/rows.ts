@@ -58,6 +58,16 @@ export const EventRowSchema = Schema.Struct({
 	created_at: NonEmptyString,
 });
 
+export const RepairAlertKindSchema = Schema.Literal(
+	"interrupt",
+	"task_failed",
+	"dead_letter",
+	"launch_precondition",
+	"reconciler_stuck",
+	"kill_failure",
+);
+export type RepairAlertKind = typeof RepairAlertKindSchema.Type;
+
 export type RunRow = typeof RunRowSchema.Type;
 export type TaskRow = typeof TaskRowSchema.Type;
 export type ScopeRow = typeof ScopeRowSchema.Type;

@@ -213,12 +213,13 @@ const makePithos = (
 					`escalateLaunchPrecondition:${input.expectedTaskId}:${input.expectedScopeId}:${input.canonicalPath}`,
 				),
 			),
-		createRepairEscalation: (input) =>
+		createRepairAlert: (input) =>
 			Effect.sync(() =>
 				calls.push(
-					`createRepairEscalation:${input.affectedTaskId}:${input.sourceKind}:${input.escalationTitle}`,
+					`createRepairAlert:${input.affectedTaskId ?? "none"}:${input.kind}:${input.escalationTitle}`,
 				),
 			),
+		claimableRepairAlertKinds: () => Effect.succeed([]),
 		briefing: () =>
 			Effect.succeed(
 				ready.map((task, index) => ({
@@ -593,7 +594,29 @@ describe("pdx substrate", () => {
 				}),
 			),
 		).toBe(
-			"[May 9 00:31] nudge pandora claimable_escalate target=pdx--pandora claimable-escalate=2",
+			"[May 9 00:31] nudge pandora claimable-escalate target=pdx--pandora claimable-escalate=2",
+		);
+		expect(
+			stripAnsi(
+				formatLifecycleEvent(now, {
+					kind: "nudge",
+					reason: "task_failed_alert",
+					target: PANDORA_TARGET,
+					claimableEscalateCount: 1,
+				}),
+			),
+		).toBe("[May 9 00:31] nudge pandora task-failed target=pdx--pandora claimable-escalate=1");
+		expect(
+			stripAnsi(
+				formatLifecycleEvent(now, {
+					kind: "nudge",
+					reason: "task_dead_lettered_alert",
+					target: PANDORA_TARGET,
+					claimableEscalateCount: 1,
+				}),
+			),
+		).toBe(
+			"[May 9 00:31] nudge pandora task-dead-lettered target=pdx--pandora claimable-escalate=1",
 		);
 		expect(
 			stripAnsi(
@@ -1746,7 +1769,6 @@ describe("pdx substrate", () => {
 			}),
 		);
 		const calls: string[] = [];
-		const repairEscalations: Parameters<PithosClientService["createRepairEscalation"]>[0][] = [];
 		const pithos = makePithos(calls, [], {
 			activeRunForTask: () =>
 				Effect.succeed(
@@ -1770,13 +1792,6 @@ describe("pdx substrate", () => {
 						session_id: "session_new",
 					}),
 					interruptedTask: { id: "task_held", scope_id: "scope_repo" },
-				}),
-			createRepairEscalation: (input) =>
-				Effect.sync(() => {
-					repairEscalations.push(input);
-					calls.push(
-						`createRepairEscalation:${input.affectedTaskId}:${input.sourceKind}:${input.escalationTitle}`,
-					);
 				}),
 		});
 		const kills: string[] = [];
@@ -1807,18 +1822,6 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(kills).toEqual(["321:SIGTERM"]);
-		expect(calls).toContain(
-			"createRepairEscalation:task_held:repair_source:Investigate interrupted task task_held",
-		);
-		expect(repairEscalations[0]).toMatchObject({
-			runId: PDX_SYSTEM_RUN_ID,
-			affectedTaskId: "task_held",
-			sourceKind: "repair_source",
-		});
-		expect(repairEscalations[0]?.escalationBody).toContain("Run: run_new_owner");
-		expect(repairEscalations[0]?.escalationBody).toContain("Task: task_held");
-		expect(repairEscalations[0]?.escalationBody).toContain("Scope: scope_repo");
-		expect(repairEscalations[0]?.escalationBody).toContain("Reason: operator stop");
 		expect(await run(registry.list)).toContainEqual(
 			expect.objectContaining({ runId: "run_new_owner", state: "terminating" }),
 		);
@@ -2000,11 +2003,11 @@ describe("pdx substrate", () => {
 				killReason: "operator stop",
 			}),
 		);
-		const taskEnqueueCalls: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
+		const createRepairAlertCalls: Parameters<PithosClientService["createRepairAlert"]>[0][] = [];
 		const pithos = makePithos([], [], {
-			taskEnqueue: (input) =>
+			createRepairAlert: (input) =>
 				Effect.sync(() => {
-					taskEnqueueCalls.push(input);
+					createRepairAlertCalls.push(input);
 				}),
 		});
 		const process = Process.of({
@@ -2034,17 +2037,16 @@ describe("pdx substrate", () => {
 				Effect.provideService(Clock, testClock),
 			),
 		);
-		expect(taskEnqueueCalls).toHaveLength(1);
-		expect(taskEnqueueCalls[0]).toMatchObject({
-			scope: "global",
-			capability: "escalate",
+		expect(createRepairAlertCalls).toHaveLength(1);
+		expect(createRepairAlertCalls[0]).toMatchObject({
 			runId: PDX_SYSTEM_RUN_ID,
+			kind: "kill_failure",
 		});
-		expect(taskEnqueueCalls[0]?.title).toContain("run_kill");
-		expect(taskEnqueueCalls[0]?.body).toContain("Run: run_kill");
-		expect(taskEnqueueCalls[0]?.body).toContain("PID: 456");
-		expect(taskEnqueueCalls[0]?.body).toContain("Interrupted task: task_held");
-		expect(taskEnqueueCalls[0]?.body).toContain("Kill reason: operator stop");
+		expect(createRepairAlertCalls[0]?.escalationTitle).toContain("run_kill");
+		expect(createRepairAlertCalls[0]?.escalationBody).toContain("Run: run_kill");
+		expect(createRepairAlertCalls[0]?.escalationBody).toContain("PID: 456");
+		expect(createRepairAlertCalls[0]?.escalationBody).toContain("Interrupted task: task_held");
+		expect(createRepairAlertCalls[0]?.escalationBody).toContain("Kill reason: operator stop");
 		expect(await run(registry.list)).toContainEqual(
 			expect.objectContaining({ runId: "run_kill", state: "terminating", killAttempts: 3 }),
 		);
@@ -2120,11 +2122,11 @@ describe("pdx substrate", () => {
 				everClaimed: false,
 			}),
 		);
-		const taskEnqueueCalls: Parameters<PithosClientService["taskEnqueue"]>[0][] = [];
+		const createRepairAlertCalls: Parameters<PithosClientService["createRepairAlert"]>[0][] = [];
 		const pithos = makePithos([], [], {
-			taskEnqueue: (input) =>
+			createRepairAlert: (input) =>
 				Effect.sync(() => {
-					taskEnqueueCalls.push(input);
+					createRepairAlertCalls.push(input);
 				}),
 			runTimeout: () => Effect.void,
 		});
@@ -2163,10 +2165,10 @@ describe("pdx substrate", () => {
 		await runTick();
 		// Third tick reaches max — reconciler stops and enqueues the kill-confirm escalation.
 		await expect(runTick()).rejects.toThrow("still alive after kill");
-		const escalation = taskEnqueueCalls.find((c) => c.capability === "escalate");
+		const escalation = createRepairAlertCalls.find((c) => c.kind === "reconciler_stuck");
 		expect(escalation).toBeDefined();
-		expect(escalation?.title).toBe("pdx reconciler stopped: kill confirmation failed");
-		expect(escalation?.body).toContain("still alive after kill");
+		expect(escalation?.escalationTitle).toBe("pdx reconciler stopped: kill confirmation failed");
+		expect(escalation?.escalationBody).toContain("still alive after kill");
 	});
 
 	it("reconcile spawns one non-Pandora agent in seeded order without pre-claiming", async () => {

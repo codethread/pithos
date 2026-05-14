@@ -79,6 +79,16 @@ const setup = (runIdEnv?: string, svc: Services = services()) => {
 		sessionLogPath: "/tmp/s_pdx.jsonl",
 		runId: "run_pdx",
 	});
+	engine.runUpsert({
+		agent: "pdx",
+		mode: "afk",
+		scope: "global",
+		cwd: "/tmp",
+		sessionId: "s_pdx_system",
+		harnessKind: "system",
+		sessionLogPath: "/tmp/s_pdx_system.jsonl",
+		runId: "run_pdx_system",
+	});
 	return { dbPath, engine, repo };
 };
 
@@ -685,9 +695,11 @@ describe("task lifecycle", () => {
 		const selectedStaleLeafGraphText = renderGraphInspectText(
 			engine.graphInspect({ taskId: staleFailedTask, scope: undefined, all: false }),
 		);
-		expect(selectedStaleLeafGraphText).toBe(
-			[`- ${staleFailedTask} [execute] [failed] stale failed leaf`, ""].join("\n"),
+		expect(selectedStaleLeafGraphText).toContain(
+			`- ${staleFailedTask} [execute] [failed] stale failed leaf`,
 		);
+		// Auto-alert created by failTask appears in the graph via repair_source link
+		expect(selectedStaleLeafGraphText).toContain(`Investigate failed task ${staleFailedTask}`);
 	});
 
 	it("auto-chains ordinary follow-up to the actor run's held task", () => {
@@ -1421,7 +1433,7 @@ describe("task lifecycle", () => {
 		db.close();
 	});
 
-	it("creates a pdx-authored repair escalation with repair source provenance", () => {
+	it("creates a pdx-authored repair alert with repair source provenance", () => {
 		const { dbPath, engine, repo } = setup();
 		const affected = engine.enqueue({
 			scope: repo,
@@ -1436,10 +1448,10 @@ describe("task lifecycle", () => {
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
 		engine.runInterrupt({ runId: "run_war", taskId: undefined, reason: "operator kill" });
 
-		const result = engine.createRepairEscalation({
+		const result = engine.createRepairAlert({
 			runId: "run_pdx",
 			affectedTaskId: affected,
-			sourceKind: "repair_source",
+			kind: "interrupt",
 			escalationTitle: "Interrupted run requires attention",
 			escalationBody: "The run was interrupted and needs repair.",
 		});
@@ -1452,12 +1464,14 @@ describe("task lifecycle", () => {
 				capability: "escalate",
 				source_task_id: affected,
 				source_kind: "repair_source",
+				kind: "interrupt",
 			},
 		});
 		expect(engine.taskInspect({ taskId: result.escalation.id })).toMatchObject({
 			task: { id: result.escalation.id, status: "queued", scope_id: "global" },
 			source: { id: affected, status: "failed", source_kind: "repair_source" },
 			dependencies: [],
+			repair_alert_kind: "interrupt",
 		});
 		const graph = engine.graphInspect({
 			taskId: result.escalation.id,
@@ -1480,6 +1494,12 @@ describe("task lifecycle", () => {
 				.pluck()
 				.get(result.escalation.id, affected, "run_pdx"),
 		).toBe("repair_source");
+		expect(
+			db
+				.prepare("SELECT kind FROM repair_alerts WHERE task_id=?")
+				.pluck()
+				.get(result.escalation.id),
+		).toBe("interrupt");
 		const created = JSON.parse(
 			db
 				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
@@ -1490,13 +1510,13 @@ describe("task lifecycle", () => {
 		db.close();
 	});
 
-	it("rolls back repair escalation creation when affected task is missing", () => {
+	it("rolls back repair alert creation when affected task is missing", () => {
 		const { dbPath, engine } = setup();
 		expect(() =>
-			engine.createRepairEscalation({
+			engine.createRepairAlert({
 				runId: "run_pdx",
 				affectedTaskId: "task_missing",
-				sourceKind: "repair_source",
+				kind: "task_failed",
 				escalationTitle: "Missing source",
 				escalationBody: "This should not be persisted.",
 			}),
@@ -1510,7 +1530,7 @@ describe("task lifecycle", () => {
 		db.close();
 	});
 
-	it("rolls back repair escalation creation for non-pdx actors", () => {
+	it("rolls back repair alert creation for non-pdx actors", () => {
 		const { dbPath, engine, repo } = setup();
 		const affected = engine.enqueue({
 			scope: repo,
@@ -1524,14 +1544,14 @@ describe("task lifecycle", () => {
 		}).task.id;
 
 		expect(() =>
-			engine.createRepairEscalation({
+			engine.createRepairAlert({
 				runId: "run_toil",
 				affectedTaskId: affected,
-				sourceKind: "repair_source",
+				kind: "task_failed",
 				escalationTitle: "Bad actor",
 				escalationBody: "This should not be persisted.",
 			}),
-		).toThrow(/repair escalation must be authored by pdx/);
+		).toThrow(/repair alert must be authored by pdx/);
 
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT COUNT(*) FROM tasks WHERE capability='escalate'").pluck().get()).toBe(

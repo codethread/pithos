@@ -245,8 +245,10 @@ const pithosClient = (dbPath: string): PithosClientService => {
 				"pithos launch precondition escalation",
 				() => void engine.escalateLaunchPrecondition(input),
 			),
-		createRepairEscalation: (input) =>
-			run("pithos repair escalation", () => void engine.createRepairEscalation(input)),
+		createRepairAlert: (input) =>
+			run("pithos repair alert", () => void engine.createRepairAlert(input)),
+		claimableRepairAlertKinds: () =>
+			run("pithos repair alert kinds", () => engine.claimableRepairAlertKinds().kinds),
 		briefing: () => run("pithos briefing", () => engine.briefing({ agent: undefined }).ready),
 	};
 };

@@ -1,5 +1,5 @@
 import { Context, Effect, SynchronizedRef } from "effect";
-import type { RunOutput as PithosRunOutput } from "@pdx/pithos";
+import type { RepairAlertKind, RunOutput as PithosRunOutput } from "@pdx/pithos";
 import type { PdxError } from "./errors.js";
 
 export interface ProcessResult {
@@ -147,13 +147,14 @@ export interface PithosClientService {
 		readonly escalationTitle: string;
 		readonly escalationBody: string;
 	}) => Effect.Effect<void, PdxError>;
-	readonly createRepairEscalation: (input: {
+	readonly createRepairAlert: (input: {
 		readonly runId: string;
-		readonly affectedTaskId: string;
-		readonly sourceKind: "repair_source";
+		readonly affectedTaskId?: string;
+		readonly kind: RepairAlertKind;
 		readonly escalationTitle: string;
 		readonly escalationBody: string;
 	}) => Effect.Effect<void, PdxError>;
+	readonly claimableRepairAlertKinds: () => Effect.Effect<readonly RepairAlertKind[], PdxError>;
 	readonly briefing: () => Effect.Effect<readonly PithosReadyTask[], PdxError>;
 }
 export class PithosClient extends Context.Tag("pdx/PithosClient")<
@@ -281,6 +282,8 @@ export class SupervisorLog extends Context.Tag("pdx/SupervisorLog")<
 	SupervisorLogService
 >() {}
 
+export type NudgeReason = "claimable_escalate" | "task_failed_alert" | "task_dead_lettered_alert";
+
 export type LifecycleEvent =
 	| {
 			readonly kind: "spawned";
@@ -303,7 +306,7 @@ export type LifecycleEvent =
 	  }
 	| {
 			readonly kind: "nudge";
-			readonly reason: "claimable_escalate";
+			readonly reason: NudgeReason;
 			readonly target: string;
 			readonly claimableEscalateCount: number;
 	  }

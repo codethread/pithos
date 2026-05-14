@@ -1,4 +1,5 @@
 import { Deferred, Effect, Fiber, Ref, Schedule, Either } from "effect";
+import { PDX_SYSTEM_RUN_ID } from "@pdx/pithos";
 import { requestIpc, listenIpc } from "./ipc-socket.js";
 import type { IpcResponse } from "./ipc.js";
 import { PdxError } from "./errors.js";
@@ -13,6 +14,7 @@ import {
 	Spawner,
 	SupervisorLog,
 	Tmux,
+	type NudgeReason,
 	type RegistryEntry,
 	type TmuxService,
 } from "./services.js";
@@ -20,7 +22,7 @@ import { reportLifecycle } from "./lifecycle.js";
 
 export const DAEMON_TARGET = "pdx--daemon";
 export const PANDORA_TARGET = "pdx--pandora";
-export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
+export { PDX_SYSTEM_RUN_ID };
 const NO_CLAIM_TIMEOUT_MILLIS = 30_000;
 const MAX_CONSECUTIVE_RECONCILE_FAILURES = 3;
 const MAX_KILL_ATTEMPTS_BEFORE_ESCALATION = 3;
@@ -741,6 +743,12 @@ const NUDGE_MARKER = "<pithos-event>escalation-ready</pithos-event>";
 const ACTIVE_WINDOW_SECONDS = 3;
 const DEBOUNCE_MAX_SECONDS = 60;
 
+const deriveNudgeReason = (kinds: readonly string[]): NudgeReason => {
+	if (kinds.includes("dead_letter")) return "task_dead_lettered_alert";
+	if (kinds.includes("task_failed")) return "task_failed_alert";
+	return "claimable_escalate";
+};
+
 const sendEscalateNudgeIfNeeded = () =>
 	Effect.gen(function* () {
 		const registry = yield* Registry;
@@ -774,17 +782,19 @@ const sendEscalateNudgeIfNeeded = () =>
 			nowUnix - Math.floor(Date.parse(pendingNudgeSince) / 1000) >= DEBOUNCE_MAX_SECONDS;
 
 		if (exceedsCap) {
+			const repairKinds = yield* pithos.claimableRepairAlertKinds();
+			const reason = deriveNudgeReason(repairKinds);
 			yield* tmux.sendLiteralLine(PANDORA_TARGET, NUDGE_MARKER);
 			yield* registry.setPendingNudgeSince(null);
 			yield* log.write({
 				level: "info",
 				span: "pdx.nudge",
 				msg: "nudge_forced",
-				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
+				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount, reason },
 			});
 			yield* reportLifecycle({
 				kind: "nudge",
-				reason: "claimable_escalate",
+				reason,
 				target: PANDORA_TARGET,
 				claimableEscalateCount,
 			});
@@ -798,17 +808,19 @@ const sendEscalateNudgeIfNeeded = () =>
 			nowUnix - presence.lastActivityUnix < ACTIVE_WINDOW_SECONDS;
 
 		if (!isTyping) {
+			const repairKinds = yield* pithos.claimableRepairAlertKinds();
+			const reason = deriveNudgeReason(repairKinds);
 			yield* tmux.sendLiteralLine(PANDORA_TARGET, NUDGE_MARKER);
 			yield* registry.setPendingNudgeSince(null);
 			yield* log.write({
 				level: "info",
 				span: "pdx.nudge",
 				msg: "nudge_sent",
-				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
+				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount, reason },
 			});
 			yield* reportLifecycle({
 				kind: "nudge",
-				reason: "claimable_escalate",
+				reason,
 				target: PANDORA_TARGET,
 				claimableEscalateCount,
 			});
@@ -1086,16 +1098,15 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 						),
 					);
 					if (attempts >= MAX_KILL_ATTEMPTS_BEFORE_ESCALATION && !entry.killEscalated) {
-						const enqueueResult = yield* pithos
-							.taskEnqueue({
-								scope: "global",
-								capability: "escalate",
+						const alertResult = yield* pithos
+							.createRepairAlert({
 								runId: PDX_SYSTEM_RUN_ID,
-								title: killFailureEscalationTitle(entry.runId),
-								body: killFailureEscalationBody(entry, { attempts, signal }),
+								kind: "kill_failure",
+								escalationTitle: killFailureEscalationTitle(entry.runId),
+								escalationBody: killFailureEscalationBody(entry, { attempts, signal }),
 							})
 							.pipe(Effect.either);
-						if (Either.isRight(enqueueResult)) {
+						if (Either.isRight(alertResult)) {
 							yield* registry.upsert({ ...entry, killAttempts: attempts, killEscalated: true });
 						} else {
 							yield* registry.upsert({ ...entry, killAttempts: attempts });
@@ -1103,7 +1114,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 								level: "error",
 								span: "pdx.kill",
 								msg: "failed to enqueue kill-failure escalation",
-								data: { run_id: entry.runId, error: enqueueResult.left.message },
+								data: { run_id: entry.runId, error: alertResult.left.message },
 							});
 						}
 					} else {
@@ -1264,14 +1275,6 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 		yield* spawnReadyAgent(config, maxAfk);
 	});
 
-const escalationBody = (input: {
-	readonly runId: string;
-	readonly taskId: string;
-	readonly scopeId: string;
-	readonly reason: string;
-}) =>
-	`pdx kill interrupted a live run.\n\nRun: ${input.runId}\nTask: ${input.taskId}\nScope: ${input.scopeId}\nReason: ${input.reason}\n\nSuggested next steps: inspect the failed task and artifacts, decide whether to supersede, cancel, or replan the broken chain, then enqueue follow-up work if needed.`;
-
 const killFailureEscalationTitle = (runId: string): string => `Investigate stuck kill: ${runId}`;
 
 const killFailureEscalationBody = (
@@ -1372,20 +1375,6 @@ export const handleKillRequest = (input: {
 				}),
 			);
 		}
-		if (interruptResult.interruptedTask !== null) {
-			yield* pithos.createRepairEscalation({
-				runId: PDX_SYSTEM_RUN_ID,
-				affectedTaskId: interruptResult.interruptedTask.id,
-				sourceKind: "repair_source",
-				escalationTitle: `Investigate interrupted task ${interruptResult.interruptedTask.id}`,
-				escalationBody: escalationBody({
-					runId,
-					taskId: interruptResult.interruptedTask.id,
-					scopeId: interruptResult.interruptedTask.scope_id,
-					reason: input.reason,
-				}),
-			});
-		}
 		yield* registry.upsert({
 			...entry,
 			state: "terminating",
@@ -1455,12 +1444,11 @@ export const loggedReconcileTick = (
 							)
 							.join("\n");
 						yield* pithos
-							.taskEnqueue({
-								scope: "global",
-								capability: "escalate",
+							.createRepairAlert({
 								runId: PDX_SYSTEM_RUN_ID,
-								title: "pdx reconciler stopped: kill confirmation failed",
-								body: `The pdx reconciler stopped after ${MAX_CONSECUTIVE_RECONCILE_FAILURES} consecutive failures due to a kill confirmation error.\n\nError: ${error.message}\n\nSupervised entries at time of stop:\n${entryLines || "(none)"}\n\nInspect the daemon logs and manually kill the stuck resource.`,
+								kind: "reconciler_stuck",
+								escalationTitle: "pdx reconciler stopped: kill confirmation failed",
+								escalationBody: `The pdx reconciler stopped after ${MAX_CONSECUTIVE_RECONCILE_FAILURES} consecutive failures due to a kill confirmation error.\n\nError: ${error.message}\n\nSupervised entries at time of stop:\n${entryLines || "(none)"}\n\nInspect the daemon logs and manually kill the stuck resource.`,
 							})
 							.pipe(
 								Effect.catchAll((enqueueError) =>

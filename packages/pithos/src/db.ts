@@ -158,6 +158,19 @@ CREATE TABLE IF NOT EXISTS artifacts (
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS repair_alerts (
+	task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
+	kind       TEXT NOT NULL CHECK (kind IN (
+		'interrupt',
+		'task_failed',
+		'dead_letter',
+		'launch_precondition',
+		'reconciler_stuck',
+		'kill_failure'
+	)),
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_task_id
 	ON runs(task_id)
 	WHERE task_id IS NOT NULL;

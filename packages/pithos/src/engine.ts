@@ -663,6 +663,19 @@ DO UPDATE SET
 	updated_at = CURRENT_TIMESTAMP
 `;
 
+const insertRun = sql`
+INSERT INTO runs(
+	id,
+	agent_kind,
+	mode,
+	scope_id,
+	cwd,
+	session_id,
+	harness_kind,
+	session_log_path
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
 const runSelect = sql`
 SELECT
 	id,
@@ -685,19 +698,42 @@ SELECT id, kind, canonical_path, archived_at, description
 FROM scopes
 `;
 
+// Surfaces SQLite PRIMARY KEY constraint violations as ID_COLLISION errors.
+// The transaction rolls back automatically (better-sqlite3 throws on error).
+const withCollisionGuard = <A>(id: string, fn: () => A): A => {
+	try {
+		return fn();
+	} catch (error) {
+		if (
+			error !== null &&
+			typeof error === "object" &&
+			"code" in error &&
+			error.code === "SQLITE_CONSTRAINT_PRIMARYKEY"
+		) {
+			fail("ID_COLLISION", `generated ID already exists: ${id}`);
+		}
+		throw error;
+	}
+};
+
 const event = (
 	ctx: EngineContext,
 	db: Db,
 	type: string,
 	payload: { task_id?: string; run_id?: string; actor_run_id?: string; payload: Json },
 ): void => {
-	db.prepare(eventPayload).run(
-		Effect.runSync(ctx.services.ids.make("event")),
-		type,
-		payload.task_id ?? null,
-		payload.run_id ?? null,
-		payload.actor_run_id ?? null,
-		JSON.stringify(payload.payload),
+	const eventId = Effect.runSync(ctx.services.ids.make("event"));
+	withCollisionGuard(eventId, () =>
+		db
+			.prepare(eventPayload)
+			.run(
+				eventId,
+				type,
+				payload.task_id ?? null,
+				payload.run_id ?? null,
+				payload.actor_run_id ?? null,
+				JSON.stringify(payload.payload),
+			),
 	);
 };
 
@@ -1252,35 +1288,37 @@ const createRepairEscalationTask = (
 	const title = requireNonEmpty(input.escalationTitle, "escalation title");
 	const bodyText = requireNonEmpty(input.escalationBody, "escalation body");
 	const escalationId = Effect.runSync(ctx.services.ids.make("task"));
-	return db.transaction((): RepairEscalationOutput => {
-		db.prepare(
-			sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
-		).run(escalationId, "global", "escalate", title, bodyText, input.actorRunId);
-		insertTaskSource(db, escalationId, affectedTask.id, input.actorRunId, input.sourceKind);
-		event(ctx, db, "task.created", {
-			task_id: escalationId,
-			actor_run_id: input.actorRunId,
-			payload: {
-				scope_id: "global",
-				capability: "escalate",
-				title,
-				depends_on_task_ids: [],
-				source_task_id: affectedTask.id,
-				source_kind: input.sourceKind,
-			},
-		});
-		return {
-			ok: true as const,
-			escalation: {
-				id: escalationId,
-				status: "queued" as const,
-				scope_id: "global" as const,
-				capability: "escalate" as const,
-				source_task_id: affectedTask.id,
-				source_kind: input.sourceKind,
-			},
-		};
-	})();
+	return withCollisionGuard(escalationId, () =>
+		db.transaction((): RepairEscalationOutput => {
+			db.prepare(
+				sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
+			).run(escalationId, "global", "escalate", title, bodyText, input.actorRunId);
+			insertTaskSource(db, escalationId, affectedTask.id, input.actorRunId, input.sourceKind);
+			event(ctx, db, "task.created", {
+				task_id: escalationId,
+				actor_run_id: input.actorRunId,
+				payload: {
+					scope_id: "global",
+					capability: "escalate",
+					title,
+					depends_on_task_ids: [],
+					source_task_id: affectedTask.id,
+					source_kind: input.sourceKind,
+				},
+			});
+			return {
+				ok: true as const,
+				escalation: {
+					id: escalationId,
+					status: "queued" as const,
+					scope_id: "global" as const,
+					capability: "escalate" as const,
+					source_task_id: affectedTask.id,
+					source_kind: input.sourceKind,
+				},
+			};
+		})(),
+	);
 };
 
 const graphForIds = (
@@ -1551,8 +1589,9 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 
 			enforceActiveScope(scopeById(db, scope));
 
+			const callerProvidedId = runId !== undefined;
 			const rid = requireNonEmpty(runId ?? Effect.runSync(ctx.services.ids.make("run")), "--run");
-			db.prepare(upsertRun).run(
+			const runArgs = [
 				rid,
 				agent,
 				mode,
@@ -1561,7 +1600,15 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				requireNonEmpty(sessionId, "--session-id"),
 				parseHarnessKind(harnessKind),
 				requireNonEmpty(sessionLogPath, "--session-log-path"),
-			);
+			] as const;
+			if (callerProvidedId) {
+				// Caller-provided IDs use UPSERT for intentional re-registration (e.g. daemon restart).
+				db.prepare(upsertRun).run(...runArgs);
+			} else {
+				// Engine-generated IDs use plain INSERT: collision means the word combination
+				// was already taken, which must fail loudly rather than overwrite.
+				withCollisionGuard(rid, () => db.prepare(insertRun).run(...runArgs));
+			}
 			const row = decodeRow(
 				RunRowSchema,
 				db.prepare(`${runSelect} WHERE id=?`).get(rid),
@@ -1917,74 +1964,78 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const taskTitle = requireNonEmpty(title, "--title");
 			const taskId = Effect.runSync(ctx.services.ids.make("task"));
 
-			const chainOutput = db.transaction((): ChainOutput => {
-				const actorRun = liveRun(db, actorRunId);
-				const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
-				const heldSource = actorRun.task_id === null ? null : taskSourceEdge(db, actorRun.task_id);
-				const decision = resolveChainPolicy({
-					policy: chain,
-					newTaskCapability: capability,
-					heldTask,
-					heldSource:
-						heldSource === null
-							? null
-							: { taskId: heldSource.source_task_id, kind: heldSource.kind },
-				});
-				const dependencyIds = finalDependencyIds({
-					manualDependencyIds: dependsOn,
-					implicitDependencyIds: decision.implicitDependencyIds,
-				});
-				const output: ChainOutput = {
-					policy: decision.policy,
-					applied: decision.applied,
-					held_task_id: decision.heldTaskId,
-					source_task_id: decision.sourceTaskId,
-					source_kind: decision.sourceKind,
-					implicit_dependency_ids: decision.implicitDependencyIds,
-					final_dependency_ids: dependencyIds,
-				};
-				for (const depId of dependencyIds) {
-					validateReferenceTaskCurrent(db, depId, "dependency");
-				}
-				db.prepare(
-					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
-				).run(taskId, scope, capability, taskTitle, taskBody, actorRunId);
-				for (const depId of dependencyIds) {
+			const chainOutput = withCollisionGuard(taskId, () =>
+				db.transaction((): ChainOutput => {
+					const actorRun = liveRun(db, actorRunId);
+					const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
+					const heldSource =
+						actorRun.task_id === null ? null : taskSourceEdge(db, actorRun.task_id);
+					const decision = resolveChainPolicy({
+						policy: chain,
+						newTaskCapability: capability,
+						heldTask,
+						heldSource:
+							heldSource === null
+								? null
+								: { taskId: heldSource.source_task_id, kind: heldSource.kind },
+					});
+					const dependencyIds = finalDependencyIds({
+						manualDependencyIds: dependsOn,
+						implicitDependencyIds: decision.implicitDependencyIds,
+					});
+					const output: ChainOutput = {
+						policy: decision.policy,
+						applied: decision.applied,
+						held_task_id: decision.heldTaskId,
+						source_task_id: decision.sourceTaskId,
+						source_kind: decision.sourceKind,
+						implicit_dependency_ids: decision.implicitDependencyIds,
+						final_dependency_ids: dependencyIds,
+					};
+					for (const depId of dependencyIds) {
+						validateReferenceTaskCurrent(db, depId, "dependency");
+					}
 					db.prepare(
-						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
-					).run(taskId, depId);
-				}
-				if (decision.applied === "source_from_held") {
-					insertTaskSource(
-						db,
-						taskId,
-						decision.sourceTaskId ?? fail("INTERNAL_ERROR", "source decision missing source task"),
-						actorRunId,
-						"chain_source",
-					);
-				}
-				assertAcyclic(db);
-				event(ctx, db, "task.created", {
-					task_id: taskId,
-					actor_run_id: actorRunId,
-					payload: {
-						scope_id: scope,
-						capability,
-						title: taskTitle,
-						depends_on_task_ids: dependencyIds,
-						chain: {
-							policy: output.policy,
-							applied: output.applied,
-							held_task_id: output.held_task_id,
-							source_task_id: output.source_task_id,
-							source_kind: output.source_kind,
-							implicit_dependency_ids: output.implicit_dependency_ids,
-							final_dependency_ids: output.final_dependency_ids,
+						sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
+					).run(taskId, scope, capability, taskTitle, taskBody, actorRunId);
+					for (const depId of dependencyIds) {
+						db.prepare(
+							sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
+						).run(taskId, depId);
+					}
+					if (decision.applied === "source_from_held") {
+						insertTaskSource(
+							db,
+							taskId,
+							decision.sourceTaskId ??
+								fail("INTERNAL_ERROR", "source decision missing source task"),
+							actorRunId,
+							"chain_source",
+						);
+					}
+					assertAcyclic(db);
+					event(ctx, db, "task.created", {
+						task_id: taskId,
+						actor_run_id: actorRunId,
+						payload: {
+							scope_id: scope,
+							capability,
+							title: taskTitle,
+							depends_on_task_ids: dependencyIds,
+							chain: {
+								policy: output.policy,
+								applied: output.applied,
+								held_task_id: output.held_task_id,
+								source_task_id: output.source_task_id,
+								source_kind: output.source_kind,
+								implicit_dependency_ids: output.implicit_dependency_ids,
+								final_dependency_ids: output.final_dependency_ids,
+							},
 						},
-					},
-				});
-				return output;
-			})();
+					});
+					return output;
+				})(),
+			);
 			return { ok: true, task: { id: taskId, status: "queued" }, chain: chainOutput };
 		}),
 	claim: ({ runId, scope, capability }) =>
@@ -2131,23 +2182,25 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			if (task === undefined) fail("NOT_FOUND", `task not found: ${taskId}`);
 			liveRun(db, actorRunId);
 			const artifactId = Effect.runSync(ctx.services.ids.make("artifact"));
-			db.transaction(() => {
-				db.prepare(
-					sql`INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)`,
-				).run(
-					artifactId,
-					taskId,
-					actorRunId,
-					requireNonEmpty(kind, "--kind"),
-					requireNonEmpty(title, "--title"),
-					requireNonEmpty(body, "stdin body"),
-				);
-				event(ctx, db, "task.artifact_added", {
-					task_id: taskId,
-					actor_run_id: actorRunId,
-					payload: { artifact_id: artifactId, kind },
-				});
-			})();
+			withCollisionGuard(artifactId, () =>
+				db.transaction(() => {
+					db.prepare(
+						sql`INSERT INTO artifacts(id,task_id,run_id,kind,title,body) VALUES (?,?,?,?,?,?)`,
+					).run(
+						artifactId,
+						taskId,
+						actorRunId,
+						requireNonEmpty(kind, "--kind"),
+						requireNonEmpty(title, "--title"),
+						requireNonEmpty(body, "stdin body"),
+					);
+					event(ctx, db, "task.artifact_added", {
+						task_id: taskId,
+						actor_run_id: actorRunId,
+						payload: { artifact_id: artifactId, kind },
+					});
+				})(),
+			);
 			return { ok: true, artifact: { id: artifactId } };
 		}),
 	cancel: ({ taskId, runId, reason }) =>
@@ -2315,99 +2368,101 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const replacementBody =
 				body === undefined && bodyFile === undefined ? old.body : resolveBody(ctx, body, bodyFile);
 			const replacementTitle = title ?? old.title;
-			return db.transaction(() => {
-				if (
-					db.prepare(sql`SELECT 1 FROM task_supersessions WHERE old_task_id=?`).get(taskId) !==
-					undefined
-				)
-					fail("VALIDATION_ERROR", "task has already been superseded");
-				const dependents = db
-					.prepare(
-						sql`SELECT t.id, t.status FROM tasks t JOIN task_dependencies td ON td.task_id=t.id WHERE td.depends_on_task_id=?`,
+			return withCollisionGuard(replacementId, () =>
+				db.transaction(() => {
+					if (
+						db.prepare(sql`SELECT 1 FROM task_supersessions WHERE old_task_id=?`).get(taskId) !==
+						undefined
 					)
-					.all(taskId) as { id: string; status: string }[];
-				const retargeted = dependents.filter((d) => d.status === "queued").map((d) => d.id);
-				const invalid = dependents.find((d) => d.status !== "queued" && d.status !== "cancelled");
-				if (invalid !== undefined)
-					fail("VALIDATION_ERROR", `dependent task is not queued: ${invalid.id}`);
-				if (replacementScope !== old.scope_id && retargeted.length > 0)
-					fail("VALIDATION_ERROR", "cannot change scope while retargeting queued dependents");
-				db.prepare(
-					sql`INSERT INTO tasks(id,scope_id,capability,title,body,max_attempts,created_by_run_id) VALUES (?,?,?,?,?,?,?)`,
-				).run(
-					replacementId,
-					replacementScope,
-					replacementCap,
-					replacementTitle,
-					replacementBody,
-					old.max_attempts,
-					actorRunId,
-				);
-				for (const dep of db
-					.prepare(sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`)
-					.all(taskId) as { id: string }[])
+						fail("VALIDATION_ERROR", "task has already been superseded");
+					const dependents = db
+						.prepare(
+							sql`SELECT t.id, t.status FROM tasks t JOIN task_dependencies td ON td.task_id=t.id WHERE td.depends_on_task_id=?`,
+						)
+						.all(taskId) as { id: string; status: string }[];
+					const retargeted = dependents.filter((d) => d.status === "queued").map((d) => d.id);
+					const invalid = dependents.find((d) => d.status !== "queued" && d.status !== "cancelled");
+					if (invalid !== undefined)
+						fail("VALIDATION_ERROR", `dependent task is not queued: ${invalid.id}`);
+					if (replacementScope !== old.scope_id && retargeted.length > 0)
+						fail("VALIDATION_ERROR", "cannot change scope while retargeting queued dependents");
 					db.prepare(
-						sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
-					).run(replacementId, dep.id);
-				for (const id of retargeted)
+						sql`INSERT INTO tasks(id,scope_id,capability,title,body,max_attempts,created_by_run_id) VALUES (?,?,?,?,?,?,?)`,
+					).run(
+						replacementId,
+						replacementScope,
+						replacementCap,
+						replacementTitle,
+						replacementBody,
+						old.max_attempts,
+						actorRunId,
+					);
+					for (const dep of db
+						.prepare(sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`)
+						.all(taskId) as { id: string }[])
+						db.prepare(
+							sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
+						).run(replacementId, dep.id);
+					for (const id of retargeted)
+						db.prepare(
+							sql`UPDATE task_dependencies SET depends_on_task_id=? WHERE task_id=? AND depends_on_task_id=?`,
+						).run(replacementId, id, taskId);
 					db.prepare(
-						sql`UPDATE task_dependencies SET depends_on_task_id=? WHERE task_id=? AND depends_on_task_id=?`,
-					).run(replacementId, id, taskId);
-				db.prepare(
-					sql`INSERT INTO task_supersessions(old_task_id,new_task_id,created_by_run_id,reason) VALUES (?,?,?,?)`,
-				).run(taskId, replacementId, actorRunId, nonEmptyReason);
-				if (old.status === "queued") {
-					db.prepare(
-						sql`UPDATE tasks SET status='cancelled', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-					).run(taskId);
-					event(ctx, db, "task.cancelled", {
+						sql`INSERT INTO task_supersessions(old_task_id,new_task_id,created_by_run_id,reason) VALUES (?,?,?,?)`,
+					).run(taskId, replacementId, actorRunId, nonEmptyReason);
+					if (old.status === "queued") {
+						db.prepare(
+							sql`UPDATE tasks SET status='cancelled', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+						).run(taskId);
+						event(ctx, db, "task.cancelled", {
+							task_id: taskId,
+							actor_run_id: actorRunId,
+							payload: { reason: nonEmptyReason, superseded_by_task_id: replacementId },
+						});
+					}
+					event(ctx, db, "task.created", {
+						task_id: replacementId,
+						actor_run_id: actorRunId,
+						payload: {
+							scope_id: replacementScope,
+							capability: replacementCap,
+							title: replacementTitle,
+							depends_on_task_ids: (
+								db
+									.prepare(
+										sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`,
+									)
+									.all(replacementId) as { id: string }[]
+							).map((r) => r.id),
+							supersedes_task_id: taskId,
+						},
+					});
+					event(ctx, db, "task.superseded", {
 						task_id: taskId,
 						actor_run_id: actorRunId,
-						payload: { reason: nonEmptyReason, superseded_by_task_id: replacementId },
+						payload: {
+							new_task_id: replacementId,
+							reason: nonEmptyReason,
+							retargeted_dependent_task_ids: retargeted,
+						},
 					});
-				}
-				event(ctx, db, "task.created", {
-					task_id: replacementId,
-					actor_run_id: actorRunId,
-					payload: {
-						scope_id: replacementScope,
-						capability: replacementCap,
-						title: replacementTitle,
-						depends_on_task_ids: (
-							db
-								.prepare(
-									sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`,
-								)
-								.all(replacementId) as { id: string }[]
-						).map((r) => r.id),
-						supersedes_task_id: taskId,
-					},
-				});
-				event(ctx, db, "task.superseded", {
-					task_id: taskId,
-					actor_run_id: actorRunId,
-					payload: {
-						new_task_id: replacementId,
-						reason: nonEmptyReason,
-						retargeted_dependent_task_ids: retargeted,
-					},
-				});
-				assertAcyclic(db);
-				return {
-					ok: true as const,
-					task: {
-						id: replacementId,
-						status: "queued" as const,
-						scope_id: replacementScope,
-						capability: replacementCap,
-					},
-					supersession: {
-						old_task_id: taskId,
-						new_task_id: replacementId,
-						retargeted_dependent_task_ids: retargeted,
-					},
-				};
-			})();
+					assertAcyclic(db);
+					return {
+						ok: true as const,
+						task: {
+							id: replacementId,
+							status: "queued" as const,
+							scope_id: replacementScope,
+							capability: replacementCap,
+						},
+						supersession: {
+							old_task_id: taskId,
+							new_task_id: replacementId,
+							retargeted_dependent_task_ids: retargeted,
+						},
+					};
+				})(),
+			);
 		}),
 	escalateLaunchPrecondition: ({
 		runId,
@@ -2436,87 +2491,89 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const bodyText = requireNonEmpty(escalationBody, "escalation body");
 			const expectedPath = requireNonEmpty(canonicalPath, "canonical path");
 			const escalationId = Effect.runSync(ctx.services.ids.make("task"));
-			return db.transaction((): LaunchPreconditionEscalationOutput => {
-				const task = taskSummary(db, expectedTaskId);
-				if (task.status !== "queued") {
-					fail("STALE_TOKEN_RACE", `launch precondition task is not queued: ${task.status}`);
-				}
-				if (task.scope_id !== expectedScopeId) {
-					fail("STALE_TOKEN_RACE", "launch precondition task scope changed before cancel");
-				}
-				if (task.capability !== expectedCapability) {
-					fail("STALE_TOKEN_RACE", "launch precondition task capability changed before cancel");
-				}
-				if (task.canonical_path !== expectedPath) {
-					fail("STALE_TOKEN_RACE", "launch precondition scope path changed before cancel");
-				}
-				const holder = db
-					.prepare(
-						sql`SELECT id FROM runs WHERE task_id=? AND status NOT IN ('ended','failed','cancelled','timed_out')`,
-					)
-					.pluck()
-					.get(expectedTaskId) as string | undefined;
-				if (holder !== undefined) {
-					fail("STALE_TOKEN_RACE", `launch precondition task is held by run: ${holder}`);
-				}
-				const cancelUpdate = db
-					.prepare(
-						sql`UPDATE tasks SET status='cancelled', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`,
-					)
-					.run(expectedTaskId);
-				if (cancelUpdate.changes === 0) {
-					fail("STALE_TOKEN_RACE", "launch precondition task changed before cancel");
-				}
-				db.prepare(
-					sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
-				).run(escalationId, "global", "escalate", title, bodyText, actorRunId);
-				insertTaskSource(db, escalationId, expectedTaskId, actorRunId, "repair_source");
-				event(ctx, db, "task.cancelled", {
-					task_id: expectedTaskId,
-					actor_run_id: actorRunId,
-					payload: {
-						reason: nonEmptyReason,
-						scope_id: expectedScopeId,
-						capability: expectedCapability,
-						canonical_path: expectedPath,
-						agent_kind: agentKind,
-						escalation_task_id: escalationId,
-						source_kind: "repair_source",
-					},
-				});
-				event(ctx, db, "task.created", {
-					task_id: escalationId,
-					actor_run_id: actorRunId,
-					payload: {
-						scope_id: "global",
-						capability: "escalate",
-						title,
-						depends_on_task_ids: [],
-						source_task_id: expectedTaskId,
-						source_kind: "repair_source",
-						reason: nonEmptyReason,
-						launch_precondition: {
-							task_id: expectedTaskId,
+			return withCollisionGuard(escalationId, () =>
+				db.transaction((): LaunchPreconditionEscalationOutput => {
+					const task = taskSummary(db, expectedTaskId);
+					if (task.status !== "queued") {
+						fail("STALE_TOKEN_RACE", `launch precondition task is not queued: ${task.status}`);
+					}
+					if (task.scope_id !== expectedScopeId) {
+						fail("STALE_TOKEN_RACE", "launch precondition task scope changed before cancel");
+					}
+					if (task.capability !== expectedCapability) {
+						fail("STALE_TOKEN_RACE", "launch precondition task capability changed before cancel");
+					}
+					if (task.canonical_path !== expectedPath) {
+						fail("STALE_TOKEN_RACE", "launch precondition scope path changed before cancel");
+					}
+					const holder = db
+						.prepare(
+							sql`SELECT id FROM runs WHERE task_id=? AND status NOT IN ('ended','failed','cancelled','timed_out')`,
+						)
+						.pluck()
+						.get(expectedTaskId) as string | undefined;
+					if (holder !== undefined) {
+						fail("STALE_TOKEN_RACE", `launch precondition task is held by run: ${holder}`);
+					}
+					const cancelUpdate = db
+						.prepare(
+							sql`UPDATE tasks SET status='cancelled', completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'`,
+						)
+						.run(expectedTaskId);
+					if (cancelUpdate.changes === 0) {
+						fail("STALE_TOKEN_RACE", "launch precondition task changed before cancel");
+					}
+					db.prepare(
+						sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
+					).run(escalationId, "global", "escalate", title, bodyText, actorRunId);
+					insertTaskSource(db, escalationId, expectedTaskId, actorRunId, "repair_source");
+					event(ctx, db, "task.cancelled", {
+						task_id: expectedTaskId,
+						actor_run_id: actorRunId,
+						payload: {
+							reason: nonEmptyReason,
 							scope_id: expectedScopeId,
 							capability: expectedCapability,
 							canonical_path: expectedPath,
 							agent_kind: agentKind,
+							escalation_task_id: escalationId,
+							source_kind: "repair_source",
 						},
-					},
-				});
-				return {
-					ok: true as const,
-					task: { id: expectedTaskId, status: "cancelled" as const },
-					escalation: {
-						id: escalationId,
-						status: "queued" as const,
-						scope_id: "global" as const,
-						capability: "escalate" as const,
-						source_task_id: expectedTaskId,
-						source_kind: "repair_source" as const,
-					},
-				};
-			})();
+					});
+					event(ctx, db, "task.created", {
+						task_id: escalationId,
+						actor_run_id: actorRunId,
+						payload: {
+							scope_id: "global",
+							capability: "escalate",
+							title,
+							depends_on_task_ids: [],
+							source_task_id: expectedTaskId,
+							source_kind: "repair_source",
+							reason: nonEmptyReason,
+							launch_precondition: {
+								task_id: expectedTaskId,
+								scope_id: expectedScopeId,
+								capability: expectedCapability,
+								canonical_path: expectedPath,
+								agent_kind: agentKind,
+							},
+						},
+					});
+					return {
+						ok: true as const,
+						task: { id: expectedTaskId, status: "cancelled" as const },
+						escalation: {
+							id: escalationId,
+							status: "queued" as const,
+							scope_id: "global" as const,
+							capability: "escalate" as const,
+							source_task_id: expectedTaskId,
+							source_kind: "repair_source" as const,
+						},
+					};
+				})(),
+			);
 		}),
 	createRepairEscalation: ({
 		runId,

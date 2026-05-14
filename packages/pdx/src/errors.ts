@@ -13,6 +13,7 @@ export type PdxErrorCode =
 	| "STALE_TOKEN"
 	| "STALE_TOKEN_RACE"
 	| "NO_CLAIMABLE_WORK"
+	| "ID_COLLISION"
 	| "INTERNAL_ERROR";
 
 export class PdxError extends Data.TaggedError("PdxError")<{

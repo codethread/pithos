@@ -159,7 +159,7 @@ Defines the service interface used by CLI/Engine code:
 - filesystem reads/removes and directory status checks
 - stdin reading
 - stdout/stderr writing
-- ID generation
+- ID generation — `task`, `run`, and `artifact` IDs use three random English words (`task_pear-orange-tree`); `event` IDs keep hex (`event_8f64959bbf004fda`)
 - clock
 
 `liveServices` is the Node implementation. Tests use deterministic service objects with real isolated SQLite DB files.

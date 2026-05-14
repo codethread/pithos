@@ -87,7 +87,7 @@ Central service boundary for domain code. Controller logic depends on these inte
 - `Process` — exec, liveness probes, kill
 - `FileSystem` — read/write/mkdir/remove
 - `Clock` — current ISO timestamp
-- `Ids` — run/session IDs
+- `Ids` — run/session IDs; run IDs use the word-based format (`run_fish-butter-clam`)
 - `Tmux` — session lifecycle and operator attach helpers
 - `PithosClient` — typed Pithos operations needed by supervision
 - `Spawner` — render/launch/Harness session transcript operations

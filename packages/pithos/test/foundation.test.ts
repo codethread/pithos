@@ -519,4 +519,15 @@ describe("pithos foundation", () => {
 			}),
 		).toEqual({ dbPath: "/tmp/pithos.db" });
 	});
+
+	it("live IdService produces word-based IDs for task/run/artifact and hex for event", async () => {
+		const wordFormat = /^(task|run|artifact)_[a-z]+(-[a-z]+){2}$/;
+		const hexFormat = /^event_[0-9a-f]{16}$/;
+		for (const prefix of ["task", "run", "artifact"] as const) {
+			const id = await Effect.runPromise(liveServices.ids.make(prefix));
+			expect(id, `${prefix} ID format`).toMatch(wordFormat);
+		}
+		const eventId = await Effect.runPromise(liveServices.ids.make("event"));
+		expect(eventId, "event ID format").toMatch(hexFormat);
+	});
 });

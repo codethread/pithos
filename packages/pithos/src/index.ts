@@ -57,3 +57,5 @@ export {
 export { PithosError, exitCodeFor, type ErrorCode } from "./errors.js";
 export { liveServices, LiveServicesLayer, PithosServices } from "./services.js";
 export type { FsService, InputService, OutputService, Services, StdinState } from "./services.js";
+export { pickThreeWords } from "./wordlists/index.js";
+export type { Rng } from "./wordlists/index.js";

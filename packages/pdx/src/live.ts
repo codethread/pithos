@@ -24,7 +24,7 @@ import {
 	renderSessionTranscript,
 	SpawnerError,
 } from "@pdx/spawner";
-import { liveServices, makeEngine, PithosError } from "@pdx/pithos";
+import { liveServices, makeEngine, pickThreeWords, PithosError } from "@pdx/pithos";
 import type { Config as PithosConfig } from "@pdx/pithos";
 import { PdxError } from "./errors.js";
 import {
@@ -158,7 +158,7 @@ export const FileSystemLive = FileSystem.of({
 });
 export const ClockLive = Clock.of({ nowIso: Effect.sync(() => new Date().toISOString()) });
 export const IdsLive = Ids.of({
-	nextRunId: Effect.sync(() => `run_${randomUUID().replaceAll("-", "")}`),
+	nextRunId: Effect.sync(() => `run_${pickThreeWords()}`),
 	nextSessionId: Effect.sync(() => randomUUID()),
 });
 const pithosError = (operation: string, error: unknown) => {

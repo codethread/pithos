@@ -3,6 +3,7 @@ import { readFileSync, rmSync, statSync } from "node:fs";
 import process from "node:process";
 import { Context, Effect, Layer } from "effect";
 import { PithosError } from "./errors.js";
+import { pickThreeWords } from "./wordlists/index.js";
 
 export interface FsService {
 	readonly readText: (path: string) => Effect.Effect<string, PithosError>;
@@ -106,7 +107,11 @@ export const liveServices: Services = {
 	},
 	ids: {
 		make: (prefix) =>
-			Effect.sync(() => `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 16)}`),
+			Effect.sync(() =>
+				prefix === "event"
+					? `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 16)}`
+					: `${prefix}_${pickThreeWords()}`,
+			),
 	},
 	clock: {
 		nowIso: () => Effect.sync(() => new Date().toISOString()),

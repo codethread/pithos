@@ -7,6 +7,7 @@ export type ErrorCode =
 	| "STALE_TOKEN"
 	| "STALE_TOKEN_RACE"
 	| "NO_CLAIMABLE_WORK"
+	| "ID_COLLISION"
 	| "INTERNAL_ERROR";
 
 export class PithosError extends Data.TaggedError("PithosError")<{
@@ -28,6 +29,8 @@ export const exitCodeFor = (code: ErrorCode): number => {
 			return 4;
 		case "NO_CLAIMABLE_WORK":
 			return 5;
+		case "ID_COLLISION":
+			return 6;
 	}
 };
 

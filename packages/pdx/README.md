@@ -115,8 +115,8 @@ Owns pdx behavior:
 - `openPdx` supports normal reuse, `--update` template refresh, and `--clean` full data-dir reset before starting the pdx daemon tmux session and waiting for IPC readiness.
 - `runDaemon` settles startup orphans, upserts the `pdx` system Run, starts reconcile, and serves IPC.
 - `reconcileTick` performs Cleanup/settlement first, maintains Pandora, sends Nudges for new Escalation tasks, validates launch preconditions, and spawns at most one ready non-Pandora Agent run per tick.
-- When a ready repo/worktree task's cwd is missing before run creation, pdx uses Pithos' atomic launch-precondition transition to cancel the still-queued task, create a source-linked global Launch-precondition escalation for Pandora, and avoid creating a Run. If the cwd disappears after run creation but before launch succeeds, pdx first calls Pithos' launch-abort transition so the no-claim Run becomes `cancelled` with reason `launch_precondition_failed`, then applies the same atomic task transition.
-- `handleKillRequest` performs Interrupt in Pithos before killing the live resource and enqueues an Interruption escalation when a Held task was interrupted.
+- When a ready repo/worktree task's cwd is missing before run creation, pdx uses Pithos' atomic launch-precondition transition to cancel the still-queued task, create a source-linked global Repair Alert (kind=`launch_precondition`) for Pandora, and avoid creating a Run. If the cwd disappears after run creation but before launch succeeds, pdx first calls Pithos' launch-abort transition so the no-claim Run becomes `cancelled` with reason `launch_precondition_failed`, then applies the same atomic task transition.
+- `handleKillRequest` performs Interrupt in Pithos before killing the live resource and enqueues a Repair Alert (kind=`interrupt`) when a Held task was interrupted.
 - `statusPdx`, `logsShowPdx`, `runTranscriptPdx`, `runShowPdx`, and `taskShowPdx` implement operator/Pandora inspection helpers.
 
 The Registry is intentionally in-memory. Startup does not adopt old sessions; it kills deterministic `pdx--*` leftovers and cleans active built-in Runs through Pithos.

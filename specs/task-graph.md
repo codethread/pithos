@@ -200,7 +200,7 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_source
   ON task_sources(source_task_id);
 ```
 
-`task_sources.source_run_id` is the actor run that created/asserted the source link, not necessarily a run that ever claimed the source task. Normal agent chaining uses the creating agent run. Supervisor-created repair escalations use the `pdx` system run, which is valid even when the source task was never claimed.
+`task_sources.source_run_id` is the actor run that created/asserted the source link, not necessarily a run that ever claimed the source task. Normal agent chaining uses the creating agent run. Supervisor-created Repair Alerts use the `pdx` system run, which is valid even when the source task was never claimed.
 
 `task_sources.kind` controls how prompts and chain policy treat the source:
 
@@ -418,7 +418,7 @@ Pandora has three distinct intents while holding an escalation:
 | Pandora intent                                                                               | Required/default chain mode                                                                                                                                                                                 | Result                                                   |
 | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Resolve a held checkpoint/approval escalation by routing approved `chain_source` work onward | default `--chain auto`; optional `--chain source` only when a fail-loud source assertion is desired                                                                                                         | new task blocks on the source task                       |
-| Repair a held interruption or launch-precondition escalation with `repair_source`            | use `pithos task supersede <source-task>` after fixing the issue, or use `--chain none`/manual dependencies for explicit replans; `--chain auto` and `--chain source` fail loudly for ordinary continuation | source task is replaced or chain is explicitly replanned |
+| Repair a held interruption or launch-precondition **Repair Alert** with `repair_source`      | use `pithos task supersede <source-task>` after fixing the issue, or use `--chain none`/manual dependencies for explicit replans; `--chain auto` and `--chain source` fail loudly for ordinary continuation | source task is replaced or chain is explicitly replanned |
 | user says “Q this” without naming the held escalation/source as context                      | `--chain none` by Pandora prompt/Q convention                                                                                                                                                               | new task is intentionally flat                           |
 | user says “Q this for task_X”                                                                | `--chain none --depends-on task_X`                                                                                                                                                                          | manual dependency on the named task only                 |
 

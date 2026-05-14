@@ -104,7 +104,7 @@ Owns the Pithos domain API used by both the CLI and `pdx`:
 - scope upsert/list/archive, including repo/worktree directory admission checks
 - Run upsert/inspect/Cleanup/Interrupt/timeout/launch-abort
 - task enqueue/claim/heartbeat/complete/fail/cancel/supersede, including active-scope and repo/worktree directory admission checks
-- library-only pdx repair escalation creation with `repair_source` provenance
+- library-only pdx Repair Alert creation with `repair_source` provenance
 - artifact add
 - graph inspect
 - briefing

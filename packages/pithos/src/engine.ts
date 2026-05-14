@@ -2597,7 +2597,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const actorRunId = resolveRunId(ctx, runId);
 			const actorRun = liveRun(db, actorRunId);
 			if (actorRun.agent_kind !== "pdx") {
-				fail("VALIDATION_ERROR", "launch-precondition escalation must be authored by pdx");
+				fail("VALIDATION_ERROR", "launch-precondition Repair Alert must be authored by pdx");
 			}
 			const agentExists = db
 				.prepare(sql`SELECT 1 FROM agent_kinds WHERE agent_kind = ?`)

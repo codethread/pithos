@@ -26,7 +26,7 @@ Cover the kill path:
 1. Spawn a Greed or War run and let it hold a task.
 2. `pdx run kill <id> --reason <text>`.
 3. Observe Pithos `Interrupt`: held task becomes `failed`, Fencing token increments.
-4. Observe pdx-authored global Interruption escalation.
+4. Observe system-authored global Repair Alert (kind=`interrupt`).
 5. Observe Pandora can claim/complete the escalation.
 
 ## Test focus

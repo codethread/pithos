@@ -133,7 +133,7 @@ pdx reconcile loop (each tick settles lifecycle before spawning)
   8. validate the chosen task's launch cwd before run creation/render/launch
        global scope -> `<data-dir>` must be present
        repo/worktree scope -> `scope.canonical_path` must exist and be a directory
-       missing/not-directory repo/worktree cwd -> cancel the queued task with preconditions, enqueue a global Launch-precondition escalation, and do not create a run
+       missing/not-directory repo/worktree cwd -> cancel the queued task with preconditions, enqueue a global Repair Alert (kind=`launch_precondition`), and do not create a run
   9. spawn at most one AFK/HITL agent through spawner library according to manifest/policy and caps
        never pre-claim; spawned agents claim their own work via Pithos
        cap entries by in-memory registry, so a live launched-but-not-claimed agent still occupies its slot
@@ -256,7 +256,7 @@ CREATE TABLE agent_enqueues (
 );
 ```
 
-`pithos run upsert` validates `--agent` against `agent_kinds`. The seeded `pdx` agent kind is a system actor: it is not spawnable, has no manifest/template, has no claim authority, and is excluded from Registry/caps/no-claim timeout. Its global run authors supervisor-created escalation tasks such as kill-induced Interruption escalations.
+`pithos run upsert` validates `--agent` against `agent_kinds`. The seeded `pdx` agent kind is a system actor: it is not spawnable, has no manifest/template, has no claim authority, and is excluded from Registry/caps/no-claim timeout. Its global run authors supervisor-created Repair Alerts such as kill-induced Repair Alerts (kind=`interrupt`).
 
 `pithos task enqueue` validates `--capability` against `capabilities`, enforces capability-specific task rules, validates that the target scope exists and is active, validates current repo/worktree scope directories when applicable, and validates `(run.agent_kind, requested_capability)` against `agent_enqueues`. Scope validation failures use `VALIDATION_ERROR` with contextual messages, for example: `scope not found: <scope-id>; create or reactivate it with pithos scope upsert first` or `scope path does not exist: <path>; create the directory, then run pithos scope upsert --kind <repo|worktree> --path <path>`.
 
@@ -316,7 +316,7 @@ Capability-specific enqueue/supersede validation:
 
 Any task created in a `repo` or `worktree` scope also requires that scope's `canonical_path` to exist as a directory at enqueue/supersede time. This is a Pithos boundary validation, not a durable guarantee that the path will still exist when pdx later launches a run.
 
-`pithos task supersede` applies the same validation to the replacement task after overrides. Because `escalate` is global-only, all Checkpoint, Interruption, and Launch-precondition escalation tasks live in global scope and reference original task/run/scope details in body or metadata.
+`pithos task supersede` applies the same validation to the replacement task after overrides. Because `escalate` is global-only, all Checkpoint escalation tasks and Repair Alerts live in global scope and reference original task/run/scope details in body or metadata.
 
 ## 6. Escalation and Repair
 
@@ -330,9 +330,9 @@ triage -> design -> escalate(review design) -> triage(plan execution) -> execute
 
 Because the dependency points at expected successful work, the escalation becomes claimable only after that work is `done`.
 
-### Failure/interruption escalation
+### Failure/interruption Repair Alert
 
-Failure or interruption escalations must not depend on failed/cancelled/dead-lettered tasks, because only `done` satisfies dependencies. They are global-scope `escalate` tasks and reference the failed task/run/scope in body or metadata instead. When there is one affected task, the escalation carries a source link to that task for provenance; Pandora treats it as a repair source, not as a normal successful handoff target.
+Failure or interruption Repair Alerts must not depend on failed/cancelled/dead-lettered tasks, because only `done` satisfies dependencies. They are global-scope `escalate` tasks and reference the failed task/run/scope in body or metadata instead. When there is one affected task, the Repair Alert carries a `repair_source` link to that task for provenance; Pandora treats it as a repair source, not as a normal successful handoff target.
 
 Example escalation body:
 
@@ -352,15 +352,15 @@ Expected resolution:
 - cancel/replan downstream chain.
 ```
 
-### Launch-precondition escalation
+### Launch-precondition Repair Alert
 
-A Launch-precondition escalation is created by pdx when a queued non-Pandora task cannot be launched because the selected repo/worktree cwd is missing or not a directory before any run claims the task. pdx cancels the queued task instead of marking it failed, because no agent attempted the work. The escalation is a normal global `escalate` task authored by the `pdx` system run.
+A Launch-precondition Repair Alert is created by pdx when a queued non-Pandora task cannot be launched because the selected repo/worktree cwd is missing or not a directory before any run claims the task. pdx cancels the queued task instead of marking it failed, because no agent attempted the work. The Repair Alert is a normal global `escalate` task authored by the `pdx` system run.
 
-Launch-precondition escalations must not depend on the cancelled task. The cancelled task is a broken dependency for downstream work, so depending on it would block Pandora forever. The escalation carries a repair source link to the cancelled task and includes the task id, scope id, canonical path, agent kind, capability, and cancel reason in the body.
+Launch-precondition Repair Alerts must not depend on the cancelled task. The cancelled task is a broken dependency for downstream work, so depending on it would block Pandora forever. The Repair Alert carries a `repair_source` link to the cancelled task and includes the task id, scope id, canonical path, agent kind, capability, and cancel reason in the body.
 
-The Pithos launch-precondition transition performs the task cancel, repair source-link creation, escalation enqueue, and event writes in one transaction. It requires the expected task id, expected `queued` status, expected scope id, expected capability, expected reason, and absence of an active holder. If escalation enqueue or source-link creation fails, the whole transition rolls back and pdx records a supervisor error instead of leaving a cancelled task without repair work.
+The Pithos launch-precondition transition performs the task cancel, repair source-link creation, Repair Alert enqueue, and event writes in one transaction. It requires the expected task id, expected `queued` status, expected scope id, expected capability, expected reason, and absence of an active holder. If Repair Alert enqueue or source-link creation fails, the whole transition rolls back and pdx records a supervisor error instead of leaving a cancelled task without repair work.
 
-Pandora must not resolve a Launch-precondition escalation by enqueueing ordinary follow-up with default `--chain auto`, because the escalation source is cancelled. Repair is either `pithos task supersede <cancelled-task>` after recreating/upserting the scope, or an explicit replan/cancel path using `--chain none` or named manual dependencies.
+Pandora must not resolve a Launch-precondition Repair Alert by enqueueing ordinary follow-up with default `--chain auto`, because the Repair Alert source is cancelled. Repair is either `pithos task supersede <cancelled-task>` after recreating/upserting the scope, or an explicit replan/cancel path using `--chain none` or named manual dependencies.
 
 Example escalation body:
 
@@ -503,7 +503,7 @@ pithos briefing [--agent pandora] [--json]
 
 The Pithos library exposes a supervisor-only launch-precondition transition for pdx. Input includes expected task id, expected scope id, expected capability, canonical path, agent kind, reason, and escalation body. The transition atomically verifies the task is still queued and unheld, cancels it, creates a global `escalate` task authored by the `pdx` system run, records a `repair_source` link from that escalation to the cancelled task, and emits events. It is not a public CLI shortcut because operators should use normal `task cancel` or `task supersede` explicitly.
 
-The Pithos library also exposes repair-escalation creation for pdx/system callers. Input includes escalation title/body, affected task id, and `source_kind: repair_source`. pdx uses it for interruption/failure escalations after `run interrupt` returns an affected task, so those escalations carry the same non-blocking repair provenance as launch-precondition escalations.
+The Pithos library also exposes Repair Alert creation for pdx/system callers. Input includes escalation title/body, affected task id, `kind`, and `source_kind: repair_source`. pdx uses it for interruption/failure Repair Alerts after `run interrupt` returns an affected task, so those Repair Alerts carry the same non-blocking repair provenance as Launch-precondition Repair Alerts.
 
 Removed/not exposed:
 

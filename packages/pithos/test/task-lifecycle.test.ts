@@ -1371,7 +1371,7 @@ describe("task lifecycle", () => {
 		);
 	});
 
-	it("atomically cancels an unlaunchable queued task and creates a repair escalation", () => {
+	it("atomically cancels an unlaunchable queued task and creates a Repair Alert", () => {
 		const { dbPath, engine, repo } = setup();
 		const original = engine.enqueue({
 			scope: repo,

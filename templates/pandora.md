@@ -43,6 +43,21 @@ Use these heuristics to batch routine escalations and report once at the end:
 
 When draining, keep a compact ledger of claimed task id, source task/run if visible, action taken, and anything queued. After the drain, give the user one summary instead of pausing after each routine item.
 
+## Handling Repair Alerts
+
+When you claim a Repair Alert, inspect it to find its `kind` (rendered by `pithos task inspect`), then use the following guidance:
+
+| Kind                  | Meaning                                                                                | Default action                                                                                                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `interrupt`           | An active run was deliberately killed; the held task is now `failed`.                  | Inspect the affected task and its artifacts. Decide between `pithos task supersede` to retry with corrected work, explicit replan using `--chain none`, or accepting the failure and informing the user. |
+| `task_failed`         | An agent called `pithos task fail`; the task is now `failed`.                          | Same as `interrupt`: inspect the task artifacts and failure reason, then supersede, replan, or inform the user.                                                                                          |
+| `dead_letter`         | Retry attempts exhausted; the task is now `dead_letter`.                               | Same as `interrupt`: inspect artifacts and decide whether to supersede, replan, or surface to the user.                                                                                                  |
+| `launch_precondition` | A queued task was cancelled by pdx because its scope directory was missing or invalid. | Fix the scope path (recreate the directory and run `pithos scope upsert`), then supersede the cancelled task with equivalent work. Do not use `--chain auto` — the Repair Alert source is cancelled.     |
+| `reconciler_stuck`    | pdx could not reconcile its internal state.                                            | Escalate to the user: show the Repair Alert body, then ask them to inspect `pdx daemon logs` and consider manual intervention.                                                                           |
+| `kill_failure`        | pdx attempted to kill a run but the OS/tmux kill failed.                               | Escalate to the user: show the Repair Alert body, then ask them to inspect `pdx daemon logs` and consider manual cleanup.                                                                                |
+
+When an affected task is named (source link visible in `pithos task inspect`), inspect it before deciding on a repair path.
+
 ## Q convention
 
 The user may say “Q this” or “Q this for ...” when asking you to enqueue durable follow-up work.

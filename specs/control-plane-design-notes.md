@@ -75,7 +75,7 @@ Planned checkpoint escalations may depend on successful tasks:
 triage -> design -> escalate(review design) -> triage(plan execution) -> execute... -> escalate(review result)
 ```
 
-Failure/interruption escalations must **not** depend on failed/cancelled tasks, because only `done` satisfies dependencies. They are global `escalate` tasks and should reference the failed task/run/scope in body/metadata instead.
+Failure/interruption Repair Alerts must **not** depend on failed/cancelled tasks, because only `done` satisfies dependencies. They are global `escalate` tasks and should reference the failed task/run/scope in body/metadata instead.
 
 Dependencies mean "must successfully complete first". Only `done` satisfies them.
 

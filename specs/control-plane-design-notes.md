@@ -245,7 +245,7 @@ Default reconcile interval is 5 seconds. Each tick settles lifecycle first, then
 
 `pdx daemon logs` prints raw structured JSONL supervisor log lines. Default limit is 100. `--since` accepts ISO timestamps, durations like `10m`, `1h`, `2d`, `1w`, plus local-time `today` and `yesterday`. Each supervisor log line includes at least `ts`, `level`, `span`, and `msg`. The internal daemon may also print concise lifecycle pulses to its tmux stdout for operator visibility, but those are not the structured log contract.
 
-Wakeups use `tmux send-keys` to `pdx--pandora` with the content-free tagged marker `<pithos-event>escalation-ready</pithos-event>`. Delivery may be deferred up to `DEBOUNCE_MAX_SECONDS` when an operator client is attached and recently active; after the cap it is force-delivered.
+Nudges use `tmux send-keys` to `pdx--pandora` with the content-free tagged marker `<pithos-event>escalation-ready</pithos-event>`. Delivery may be deferred up to `DEBOUNCE_MAX_SECONDS` when an operator client is attached and recently active; after the cap it is force-delivered.
 
 ## Spawner surface
 

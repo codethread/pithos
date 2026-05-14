@@ -229,8 +229,8 @@ export interface RegistryService {
 	readonly list: Effect.Effect<readonly RegistryEntry[]>;
 	readonly lastEscalateClaimableCount: Effect.Effect<number>;
 	readonly setLastEscalateClaimableCount: (count: number) => Effect.Effect<void>;
-	readonly pendingWakeupSince: Effect.Effect<string | null>;
-	readonly setPendingWakeupSince: (value: string | null) => Effect.Effect<void>;
+	readonly pendingNudgeSince: Effect.Effect<string | null>;
+	readonly setPendingNudgeSince: (value: string | null) => Effect.Effect<void>;
 	readonly upsert: (entry: RegistryEntry) => Effect.Effect<void>;
 	readonly remove: (runId: string) => Effect.Effect<void>;
 }
@@ -239,14 +239,14 @@ export class Registry extends Context.Tag("pdx/Registry")<Registry, RegistryServ
 export const makeRegistry = Effect.gen(function* () {
 	const entriesRef = yield* SynchronizedRef.make<readonly RegistryEntry[]>([]);
 	const lastEscalateClaimableCountRef = yield* SynchronizedRef.make(0);
-	const pendingWakeupSinceRef = yield* SynchronizedRef.make<string | null>(null);
+	const pendingNudgeSinceRef = yield* SynchronizedRef.make<string | null>(null);
 	return Registry.of({
 		list: SynchronizedRef.get(entriesRef),
 		lastEscalateClaimableCount: SynchronizedRef.get(lastEscalateClaimableCountRef),
 		setLastEscalateClaimableCount: (count) =>
 			SynchronizedRef.set(lastEscalateClaimableCountRef, count),
-		pendingWakeupSince: SynchronizedRef.get(pendingWakeupSinceRef),
-		setPendingWakeupSince: (value) => SynchronizedRef.set(pendingWakeupSinceRef, value),
+		pendingNudgeSince: SynchronizedRef.get(pendingNudgeSinceRef),
+		setPendingNudgeSince: (value) => SynchronizedRef.set(pendingNudgeSinceRef, value),
 		upsert: (entry) =>
 			SynchronizedRef.update(entriesRef, (entries) => [
 				...entries.filter((existing) => existing.runId !== entry.runId),
@@ -302,7 +302,7 @@ export type LifecycleEvent =
 			readonly pid?: number | undefined;
 	  }
 	| {
-			readonly kind: "wakeup";
+			readonly kind: "nudge";
 			readonly reason: "claimable_escalate";
 			readonly target: string;
 			readonly claimableEscalateCount: number;

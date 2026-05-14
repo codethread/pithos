@@ -36,7 +36,7 @@ Pithos is the durable source of truth for:
 
 ## What Pithos is not
 
-- Not the local supervisor. `pdx` owns Registry state, live process/tmux resources, Kill policy, Cleanup, Interrupt orchestration, and Wakeups.
+- Not the local supervisor. `pdx` owns Registry state, live process/tmux resources, Kill policy, Cleanup, Interrupt orchestration, and Nudges.
 - Not a Harness launcher. Spawner renders prompts, builds Harness argv/env, launches Harness sessions, and parses Harness session logs.
 - Not a Control-plane backend. tmux is the current backend for HITL mode; Pithos only stores durable Run metadata.
 - Not a prompt/template system. Pithos exposes state transitions and inspection surfaces; Agent instructions live in Spawner templates.

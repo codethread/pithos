@@ -737,11 +737,11 @@ const hasAgentScopeCap = (
 const hasAfkCapacity = (entries: readonly RegistryEntry[], maxAfk: number): boolean =>
 	entries.filter((entry) => entry.agent !== "pandora" && entry.mode === "afk").length < maxAfk;
 
-const WAKEUP_MARKER = "<pithos-event>escalation-ready</pithos-event>";
+const NUDGE_MARKER = "<pithos-event>escalation-ready</pithos-event>";
 const ACTIVE_WINDOW_SECONDS = 3;
 const DEBOUNCE_MAX_SECONDS = 60;
 
-const sendEscalateWakeupIfNeeded = () =>
+const sendEscalateNudgeIfNeeded = () =>
 	Effect.gen(function* () {
 		const registry = yield* Registry;
 		const pithos = yield* PithosClient;
@@ -753,37 +753,37 @@ const sendEscalateWakeupIfNeeded = () =>
 			(task) => task.scope_id === "global" && task.capability === "escalate",
 		).length;
 		const previousCount = yield* registry.lastEscalateClaimableCount;
-		const pendingWakeupSince = yield* registry.pendingWakeupSince;
+		const pendingNudgeSince = yield* registry.pendingNudgeSince;
 
 		yield* registry.setLastEscalateClaimableCount(claimableEscalateCount);
 
 		if (claimableEscalateCount === 0) {
-			if (pendingWakeupSince !== null) yield* registry.setPendingWakeupSince(null);
+			if (pendingNudgeSince !== null) yield* registry.setPendingNudgeSince(null);
 			return;
 		}
 
 		const isNewWork =
-			(previousCount === 0 && claimableEscalateCount > 0) || pendingWakeupSince !== null;
+			(previousCount === 0 && claimableEscalateCount > 0) || pendingNudgeSince !== null;
 		if (!isNewWork) return;
 
 		const nowIso = yield* clock.nowIso;
 		const nowUnix = Math.floor(Date.parse(nowIso) / 1000);
 
 		const exceedsCap =
-			pendingWakeupSince !== null &&
-			nowUnix - Math.floor(Date.parse(pendingWakeupSince) / 1000) >= DEBOUNCE_MAX_SECONDS;
+			pendingNudgeSince !== null &&
+			nowUnix - Math.floor(Date.parse(pendingNudgeSince) / 1000) >= DEBOUNCE_MAX_SECONDS;
 
 		if (exceedsCap) {
-			yield* tmux.sendLiteralLine(PANDORA_TARGET, WAKEUP_MARKER);
-			yield* registry.setPendingWakeupSince(null);
+			yield* tmux.sendLiteralLine(PANDORA_TARGET, NUDGE_MARKER);
+			yield* registry.setPendingNudgeSince(null);
 			yield* log.write({
 				level: "info",
-				span: "pdx.wakeup",
-				msg: "wakeup_forced",
+				span: "pdx.nudge",
+				msg: "nudge_forced",
 				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
 			});
 			yield* reportLifecycle({
-				kind: "wakeup",
+				kind: "nudge",
 				reason: "claimable_escalate",
 				target: PANDORA_TARGET,
 				claimableEscalateCount,
@@ -798,30 +798,30 @@ const sendEscalateWakeupIfNeeded = () =>
 			nowUnix - presence.lastActivityUnix < ACTIVE_WINDOW_SECONDS;
 
 		if (!isTyping) {
-			yield* tmux.sendLiteralLine(PANDORA_TARGET, WAKEUP_MARKER);
-			yield* registry.setPendingWakeupSince(null);
+			yield* tmux.sendLiteralLine(PANDORA_TARGET, NUDGE_MARKER);
+			yield* registry.setPendingNudgeSince(null);
 			yield* log.write({
 				level: "info",
-				span: "pdx.wakeup",
-				msg: "wakeup_sent",
+				span: "pdx.nudge",
+				msg: "nudge_sent",
 				data: { target: PANDORA_TARGET, claimable_escalate_count: claimableEscalateCount },
 			});
 			yield* reportLifecycle({
-				kind: "wakeup",
+				kind: "nudge",
 				reason: "claimable_escalate",
 				target: PANDORA_TARGET,
 				claimableEscalateCount,
 			});
 		} else {
-			if (pendingWakeupSince === null) yield* registry.setPendingWakeupSince(nowIso);
+			if (pendingNudgeSince === null) yield* registry.setPendingNudgeSince(nowIso);
 			yield* log.write({
 				level: "info",
-				span: "pdx.wakeup",
-				msg: "wakeup_deferred",
+				span: "pdx.nudge",
+				msg: "nudge_deferred",
 				data: {
 					target: PANDORA_TARGET,
 					claimable_escalate_count: claimableEscalateCount,
-					pending_since: pendingWakeupSince ?? nowIso,
+					pending_since: pendingNudgeSince ?? nowIso,
 				},
 			});
 		}
@@ -1260,7 +1260,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				tmuxTarget,
 			});
 		}
-		yield* sendEscalateWakeupIfNeeded();
+		yield* sendEscalateNudgeIfNeeded();
 		yield* spawnReadyAgent(config, maxAfk);
 	});
 

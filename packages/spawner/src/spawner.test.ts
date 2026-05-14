@@ -454,7 +454,7 @@ describe("renderAgent", () => {
 	});
 
 	it.each(["pi", "claude"] as const)(
-		"renders a begin nudge for %s HITL sessions",
+		"renders the begin bootstrap arg for %s HITL sessions",
 		(harnessKind) => {
 			const rendered = renderAgent(
 				{ ...base, agent: "pandora", mode: "hitl" },

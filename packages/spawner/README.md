@@ -31,7 +31,7 @@ Spawner owns:
 Spawner does not own:
 
 - durable Tasks, Runs, Claims, Fencing tokens, Artifacts, Events, or Task graph invariants — Pithos owns those
-- Registry state, Kill, Cleanup, Interrupt, Wakeups, or live Run finalization — `pdx` owns those
+- Registry state, Kill, Cleanup, Interrupt, Nudges, or live Run finalization — `pdx` owns those
 - claim/enqueue authorization truth — Pithos built-ins own that; Spawner derives render metadata from them
 - task body routing — Agent runs claim Claimable tasks themselves via the rendered claim command
 

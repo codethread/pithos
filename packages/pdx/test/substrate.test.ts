@@ -556,7 +556,7 @@ describe("pdx substrate", () => {
 		});
 	});
 
-	it("formats lifecycle pulse lines for spawn, remove, wakeup, and errors", () => {
+	it("formats lifecycle pulse lines for spawn, remove, nudge, and errors", () => {
 		const now = new Date("2026-05-09T00:31:00.000Z");
 		expect(
 			stripAnsi(
@@ -586,14 +586,14 @@ describe("pdx substrate", () => {
 		expect(
 			stripAnsi(
 				formatLifecycleEvent(now, {
-					kind: "wakeup",
+					kind: "nudge",
 					reason: "claimable_escalate",
 					target: PANDORA_TARGET,
 					claimableEscalateCount: 2,
 				}),
 			),
 		).toBe(
-			"[May 9 00:31] wakeup pandora claimable_escalate target=pdx--pandora claimable-escalate=2",
+			"[May 9 00:31] nudge pandora claimable_escalate target=pdx--pandora claimable-escalate=2",
 		);
 		expect(
 			stripAnsi(
@@ -3303,7 +3303,7 @@ describe("pdx substrate", () => {
 		expect(sends).toHaveLength(2);
 	});
 
-	it("defers wakeup and sets pendingWakeupSince when operator is actively typing", async () => {
+	it("defers nudge and sets pendingNudgeSince when operator is actively typing", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
@@ -3358,14 +3358,14 @@ describe("pdx substrate", () => {
 			);
 		await tick();
 		expect(sends).toEqual([]);
-		expect(await run(registry.pendingWakeupSince)).toBe(nowIso);
-		// second tick still deferred; pendingWakeupSince is not overwritten
+		expect(await run(registry.pendingNudgeSince)).toBe(nowIso);
+		// second tick still deferred; pendingNudgeSince is not overwritten
 		await tick();
 		expect(sends).toEqual([]);
-		expect(await run(registry.pendingWakeupSince)).toBe(nowIso);
+		expect(await run(registry.pendingNudgeSince)).toBe(nowIso);
 	});
 
-	it("sends wakeup immediately when operator activity exceeds ACTIVE_WINDOW_SECONDS", async () => {
+	it("sends nudge immediately when operator activity exceeds ACTIVE_WINDOW_SECONDS", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
@@ -3407,10 +3407,10 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(sends).toEqual([`${PANDORA_TARGET}:<pithos-event>escalation-ready</pithos-event>`]);
-		expect(await run(registry.pendingWakeupSince)).toBeNull();
+		expect(await run(registry.pendingNudgeSince)).toBeNull();
 	});
 
-	it("force-sends wakeup after DEBOUNCE_MAX_SECONDS even while operator is typing", async () => {
+	it("force-sends nudge after DEBOUNCE_MAX_SECONDS even while operator is typing", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
@@ -3459,15 +3459,15 @@ describe("pdx substrate", () => {
 			);
 		await tick();
 		expect(sends).toEqual([]);
-		expect(await run(registry.pendingWakeupSince)).toBe(baseIso);
+		expect(await run(registry.pendingNudgeSince)).toBe(baseIso);
 		currentNowIso = new Date((baseUnix + 61) * 1000).toISOString();
 		await tick();
 		expect(sends).toHaveLength(1);
 		expect(sends[0]).toBe(`${PANDORA_TARGET}:<pithos-event>escalation-ready</pithos-event>`);
-		expect(await run(registry.pendingWakeupSince)).toBeNull();
+		expect(await run(registry.pendingNudgeSince)).toBeNull();
 	});
 
-	it("clears pendingWakeupSince and skips send when claimable count drops to zero", async () => {
+	it("clears pendingNudgeSince and skips send when claimable count drops to zero", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
 		await run(upsertPandora(registry));
@@ -3522,11 +3522,11 @@ describe("pdx substrate", () => {
 			);
 		await tick();
 		expect(sends).toEqual([]);
-		expect(await run(registry.pendingWakeupSince)).toBe(nowIso);
+		expect(await run(registry.pendingNudgeSince)).toBe(nowIso);
 		ready = [];
 		await tick();
 		expect(sends).toEqual([]);
-		expect(await run(registry.pendingWakeupSince)).toBeNull();
+		expect(await run(registry.pendingNudgeSince)).toBeNull();
 	});
 
 	it("normalises client_activity microseconds to correct unix seconds for presence detection", async () => {
@@ -3551,7 +3551,7 @@ describe("pdx substrate", () => {
 		expect(presence.lastActivityUnix).toBe(Math.floor(nowMs / 1000) - 2);
 	});
 
-	it("Pandora template documents wakeup marker recognition", async () => {
+	it("Pandora template documents nudge marker recognition", async () => {
 		const template = await readFile(
 			new URL("../../../templates/pandora.md", import.meta.url),
 			"utf8",

@@ -158,11 +158,11 @@ pdx run kill <run-id> --reason / pdx task kill <task-id> --reason
 
 Layer responsibilities:
 
-| Layer   | Owns                                                                                                | Does not own                                        |
-| ------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Pithos  | DB schema, seeded agents/capabilities, task/runs state transitions, graph repair, artifacts/events  | OS processes, tmux supervision, harness argv        |
-| Spawner | templates, prompt rendering, harness argv/env, AFK launch, HITL tmux creation, launch metadata      | registration, cleanup, status, kill, nudge, reclaim |
-| pdx     | reconcile, in-memory registry, caps, process/tmux ownership, status, kill, wakeups, supervisor logs | DB invariants, prompt/task content injection        |
+| Layer   | Owns                                                                                               | Does not own                                        |
+| ------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Pithos  | DB schema, seeded agents/capabilities, task/runs state transitions, graph repair, artifacts/events | OS processes, tmux supervision, harness argv        |
+| Spawner | templates, prompt rendering, harness argv/env, AFK launch, HITL tmux creation, launch metadata     | registration, cleanup, status, kill, nudge, reclaim |
+| pdx     | reconcile, in-memory registry, caps, process/tmux ownership, status, kill, nudges, supervisor logs | DB invariants, prompt/task content injection        |
 
 `@pdx/pithos` is the supervisor-facing integration boundary. `pdx` calls typed library operations directly for queue inspection and run/task mutations. The `pithos` CLI is the agent/operator boundary only; when this spec says `pithos run cleanup`, `pithos briefing`, or similar in pdx flows, it names the corresponding Pithos operation and semantics, not a required subprocess invocation.
 
@@ -654,13 +654,13 @@ No `pdx restart` in MVP. Recovery is explicit through Pandora and the user and g
 
 On successful `pdx open`, the CLI prints `tmux attach -t pdx--pandora` and exits. It does not auto-attach.
 
-`pdx` may send a content-free wakeup to live Pandora when claimable `escalate` work appears. Transport is `tmux send-keys` to `pdx--pandora` with a marker line followed by Enter:
+`pdx` may send a content-free nudge to live Pandora when claimable `escalate` work appears. Transport is `tmux send-keys` to `pdx--pandora` with a marker line followed by Enter:
 
 ```text
 <pithos-event>escalation-ready</pithos-event>
 ```
 
-The marker contains no task body and is not semantic task injection. The wakeup may be deferred up to `DEBOUNCE_MAX_SECONDS` seconds when an operator client is attached to `pdx--pandora` and has been active within the last `ACTIVE_WINDOW_SECONDS` seconds; after the cap it is force-delivered.
+The marker contains no task body and is not semantic task injection. The nudge may be deferred up to `DEBOUNCE_MAX_SECONDS` seconds when an operator client is attached to `pdx--pandora` and has been active within the last `ACTIVE_WINDOW_SECONDS` seconds; after the cap it is force-delivered.
 
 HITL tmux naming uses a BEM-ish Pandora-owned convention:
 
@@ -674,7 +674,7 @@ AFK agents use the same `logical_name` convention in logs/status even though the
 
 Supervisor logs are structured JSONL at an internal pdx-controlled path such as `<data-dir>/pdx.jsonl`. Use structured `Effect.log*` output and spans per project rules; do not write unstructured daemon logs. Every supervisor log line includes at least `ts`, `level`, `span`, and `msg`.
 
-The internal daemon tmux pane may also print concise human-readable lifecycle pulses (for example spawn/remove/wakeup) to stdout for operator visibility. Those pulses are ephemeral operator affordances, not the durable or machine-readable supervisor log contract.
+The internal daemon tmux pane may also print concise human-readable lifecycle pulses (for example spawn/remove/nudge) to stdout for operator visibility. Those pulses are ephemeral operator affordances, not the durable or machine-readable supervisor log contract.
 
 ## 9. Spawner Interface
 

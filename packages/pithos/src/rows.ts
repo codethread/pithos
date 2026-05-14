@@ -45,6 +45,7 @@ export const ScopeRowSchema = Schema.Struct({
 	kind: Schema.Literal("global", "repo", "worktree"),
 	canonical_path: NullableString,
 	archived_at: NullableString,
+	description: NullableString,
 });
 
 export const EventRowSchema = Schema.Struct({

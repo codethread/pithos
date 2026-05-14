@@ -176,6 +176,7 @@ Pithos owns durable invariants, not live resource observation. Important rules t
 - A Task has exactly one Capability.
 - A Task must reference an existing Scope row; the database foreign key is the integrity backstop for row existence.
 - Engine prechecks require the Scope to be active and provide tagged JSON errors for missing or archived scopes.
+- Scopes carry an optional `description` field for operator context; set via `--description` on `scope upsert`, surfaced in `scope list` and `briefing` output.
 - Repo/worktree Scope paths are validated as directories at scope upsert and task enqueue/supersede time. The filesystem can change later, so pdx still owns launch-time runtime-path checks.
 - Claim authorization is enforced by seeded `agent_claims`.
 - Enqueue authorization is enforced by seeded `agent_enqueues`.

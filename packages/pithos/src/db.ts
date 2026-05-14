@@ -175,6 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_source
 	ON task_sources(source_task_id);
 `);
 	ensureScopesArchivedAtColumn(db);
+	ensureScopesDescriptionColumn(db);
 	seed(db);
 };
 
@@ -182,6 +183,13 @@ const ensureScopesArchivedAtColumn = (db: Db): void => {
 	const columns = db.prepare(sql`PRAGMA table_info(scopes)`).all() as { name: string }[];
 	if (!columns.some((column) => column.name === "archived_at")) {
 		db.exec(sql`ALTER TABLE scopes ADD COLUMN archived_at TEXT`);
+	}
+};
+
+const ensureScopesDescriptionColumn = (db: Db): void => {
+	const columns = db.prepare(sql`PRAGMA table_info(scopes)`).all() as { name: string }[];
+	if (!columns.some((column) => column.name === "description")) {
+		db.exec(sql`ALTER TABLE scopes ADD COLUMN description TEXT`);
 	}
 };
 

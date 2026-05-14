@@ -41,6 +41,7 @@ export interface Engine {
 	readonly scopeUpsert: (input: {
 		readonly kind: ScopeKind;
 		readonly path: string | undefined;
+		readonly description?: string | undefined;
 	}) => {
 		readonly ok: true;
 		readonly scope: ScopeIdentityOutput;
@@ -195,6 +196,7 @@ export interface TaskSummaryOutput {
 	readonly scope_id: string;
 	readonly scope_kind: ScopeKind;
 	readonly canonical_path: string | null;
+	readonly scope_description: string | null;
 	readonly capability: Capability;
 	readonly status: TaskStatus;
 	readonly title: string;
@@ -396,6 +398,7 @@ export interface BlockerOutput {
 	readonly id: string;
 	readonly scope_id: string;
 	readonly status: TaskStatus;
+	readonly scope_description: string | null;
 }
 
 export interface BlockedTaskOutput extends TaskSummaryOutput {
@@ -471,6 +474,7 @@ export interface ScopeIdentityOutput {
 	readonly kind: ScopeKind;
 	readonly canonical_path: string | null;
 	readonly archived_at: string | null;
+	readonly description: string | null;
 }
 
 export interface ScopeOutput extends ScopeIdentityOutput {
@@ -602,7 +606,8 @@ const resolveBody = (
 	);
 };
 
-const upsertScope = sql`
+// Used when --description is omitted: preserves any existing description value.
+const upsertScopePreserveDescription = sql`
 INSERT INTO scopes(
 	id,
 	kind,
@@ -614,7 +619,25 @@ DO UPDATE SET
 	canonical_path = excluded.canonical_path,
 	archived_at = NULL,
 	updated_at = CURRENT_TIMESTAMP
-RETURNING id, kind, canonical_path, archived_at
+RETURNING id, kind, canonical_path, archived_at, description
+`;
+
+// Used when --description is explicitly provided: sets or clears the description.
+const upsertScopeSetDescription = sql`
+INSERT INTO scopes(
+	id,
+	kind,
+	canonical_path,
+	description
+) VALUES (?, ?, ?, ?)
+ON CONFLICT(id)
+DO UPDATE SET
+	kind = excluded.kind,
+	canonical_path = excluded.canonical_path,
+	description = excluded.description,
+	archived_at = NULL,
+	updated_at = CURRENT_TIMESTAMP
+RETURNING id, kind, canonical_path, archived_at, description
 `;
 
 const upsertRun = sql`
@@ -658,7 +681,7 @@ FROM runs
 `;
 
 const scopeSelect = sql`
-SELECT id, kind, canonical_path, archived_at
+SELECT id, kind, canonical_path, archived_at, description
 FROM scopes
 `;
 
@@ -757,6 +780,7 @@ const TaskSummaryRowSchema = Schema.extend(
 	Schema.Struct({
 		scope_kind: Schema.Literal("global", "repo", "worktree"),
 		canonical_path: Schema.NullOr(Schema.String),
+		scope_description: Schema.NullOr(Schema.String),
 		completed_at: Schema.NullOr(Schema.String),
 	}),
 );
@@ -777,7 +801,7 @@ const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
 	).map((r) => r.id);
 
 const taskSummarySelect = sql`
-SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at, t.completed_at
+SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, s.description AS scope_description, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at, t.completed_at
 FROM tasks t
 JOIN scopes s ON s.id = t.scope_id
 `;
@@ -787,6 +811,7 @@ const toTaskSummary = (row: TaskSummaryRow): TaskSummary => ({
 	scope_id: row.scope_id,
 	scope_kind: row.scope_kind,
 	canonical_path: row.canonical_path,
+	scope_description: row.scope_description,
 	capability: row.capability,
 	status: row.status,
 	title: row.title,
@@ -832,6 +857,7 @@ const toScopeIdentityOutput = (row: ScopeRow): ScopeIdentityOutput => ({
 	kind: row.kind,
 	canonical_path: row.canonical_path,
 	archived_at: row.archived_at,
+	description: row.description,
 });
 
 const parseScopeIdentity = (value: unknown, message: string): ScopeIdentityOutput =>
@@ -1173,7 +1199,10 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 	return `${lines.join("\n")}\n`;
 };
 
-const renderBriefingTaskBullet = (task: TaskSummaryOutput): string => `- ${taskTitleLine(task)}`;
+const renderBriefingTaskBullet = (task: TaskSummaryOutput): string => {
+	const descNote = task.scope_description ? ` (${task.scope_description})` : "";
+	return `- ${taskTitleLine(task)}${descNote}`;
+};
 
 export const renderBriefingText = (briefing: BriefingOutput): string => {
 	const lines = ["# Briefing", "", "## Ready"];
@@ -1185,9 +1214,12 @@ export const renderBriefingText = (briefing: BriefingOutput): string => {
 		lines.push("- none");
 	} else {
 		for (const task of briefing.blocked) {
-			lines.push(`- ${taskTitleLine(task)}`);
+			lines.push(renderBriefingTaskBullet(task));
 			for (const blocker of task.blockers) {
-				lines.push(`  - blocked by ${blocker.id} [${blocker.status}] scope=${blocker.scope_id}`);
+				const descNote = blocker.scope_description ? ` (${blocker.scope_description})` : "";
+				lines.push(
+					`  - blocked by ${blocker.id} [${blocker.status}] scope=${blocker.scope_id}${descNote}`,
+				);
 			}
 		}
 	}
@@ -1309,6 +1341,7 @@ const graphForIds = (
 			scope_id: task.scope_id,
 			scope_kind: task.scope_kind,
 			canonical_path: task.canonical_path,
+			scope_description: task.scope_description,
 			capability: task.capability,
 			status: task.status,
 			title: task.title,
@@ -1387,7 +1420,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		}
 		return { ok: true };
 	},
-	scopeUpsert: ({ kind, path }) =>
+	scopeUpsert: ({ kind, path, description }) =>
 		withDb(ctx, (db) => {
 			if (!(["global", "repo", "worktree"] as const).includes(kind)) {
 				fail("VALIDATION_ERROR", `invalid scope kind: ${kind}`);
@@ -1409,7 +1442,9 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			}
 			const sid = kind === "global" ? "global" : `${kind}:${canonical}`;
 			const scopeRow = parseScopeIdentity(
-				db.prepare(upsertScope).get(sid, kind, canonical),
+				description !== undefined
+					? db.prepare(upsertScopeSetDescription).get(sid, kind, canonical, description)
+					: db.prepare(upsertScopePreserveDescription).get(sid, kind, canonical),
 				`scope not found after upsert: ${sid}`,
 			);
 			return { ok: true, scope: scopeRow };
@@ -1424,13 +1459,14 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						s.kind,
 						s.canonical_path,
 						s.archived_at,
+						s.description,
 						COUNT(DISTINCT t.id) AS task_count,
 						COUNT(DISTINCT r.id) AS run_count
 					FROM scopes s
 					LEFT JOIN tasks t ON t.scope_id = s.id
 					LEFT JOIN runs r ON r.scope_id = s.id
 					${all ? "" : "WHERE s.archived_at IS NULL"}
-					GROUP BY s.id, s.kind, s.canonical_path, s.archived_at
+					GROUP BY s.id, s.kind, s.canonical_path, s.archived_at, s.description
 					ORDER BY s.archived_at IS NOT NULL ASC, s.kind ASC, s.canonical_path ASC, s.id ASC
 				`)
 				.all()
@@ -1452,6 +1488,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							s.kind,
 							s.canonical_path,
 							s.archived_at,
+							s.description,
 							COUNT(DISTINCT t.id) AS task_count,
 							COUNT(DISTINCT r.id) AS run_count,
 							COUNT(DISTINCT CASE WHEN r.status = 'live' THEN r.id END) AS live_run_count,
@@ -1460,7 +1497,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						LEFT JOIN tasks t ON t.scope_id = s.id
 						LEFT JOIN runs r ON r.scope_id = s.id
 						WHERE s.id = ?
-						GROUP BY s.id, s.kind, s.canonical_path, s.archived_at
+						GROUP BY s.id, s.kind, s.canonical_path, s.archived_at, s.description
 					`)
 							.get(scopeId),
 						`scope not found: ${scopeId}`,
@@ -1488,7 +1525,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					const archivedScope = parseScopeIdentity(
 						db
 							.prepare(
-								sql`UPDATE scopes SET archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, kind, canonical_path, archived_at`,
+								sql`UPDATE scopes SET archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, kind, canonical_path, archived_at, description`,
 							)
 							.get(scopeId),
 						`scope not found after archive: ${scopeId}`,
@@ -2246,7 +2283,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					.map((t) => {
 						const blockers = unresolvedDependencies(db, t.id).map((id) => {
 							const blocker = taskSummary(db, id);
-							return { id: blocker.id, scope_id: blocker.scope_id, status: blocker.status };
+							return {
+								id: blocker.id,
+								scope_id: blocker.scope_id,
+								status: blocker.status,
+								scope_description: blocker.scope_description,
+							};
 						});
 						return { ...t, unresolved_dependency_ids: blockers.map((b) => b.id), blockers };
 					}),

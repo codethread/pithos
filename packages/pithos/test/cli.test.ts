@@ -243,6 +243,7 @@ describe("pithos cli", () => {
 					kind: "global",
 					canonical_path: null,
 					archived_at: null,
+					description: null,
 					task_count: 0,
 					run_count: 0,
 				},
@@ -251,6 +252,7 @@ describe("pithos cli", () => {
 					kind: "repo",
 					canonical_path: "/tmp/pithos-cli",
 					archived_at: null,
+					description: null,
 					task_count: 0,
 					run_count: 0,
 				},
@@ -320,6 +322,7 @@ describe("pithos cli", () => {
 				kind: "repo",
 				canonical_path: "/tmp/pithos-delete-cli",
 				archived_at: null,
+				description: null,
 				task_count: 0,
 				run_count: 0,
 			},
@@ -333,11 +336,50 @@ describe("pithos cli", () => {
 					kind: "global",
 					canonical_path: null,
 					archived_at: null,
+					description: null,
 					task_count: 0,
 					run_count: 0,
 				},
 			],
 		});
+	});
+
+	it("stores and surfaces scope description via --description flag", async () => {
+		const dbPath = tempDb();
+		await runCli(["init", "--fresh"], dbPath);
+		const scoped = await runCli(
+			[
+				"scope",
+				"upsert",
+				"--kind",
+				"repo",
+				"--path",
+				"/tmp/pithos-desc-cli",
+				"--description",
+				"my repo description",
+			],
+			dbPath,
+		);
+		const scopeBody = JSON.parse(scoped.stdout[0] ?? "") as {
+			scope: { description: string | null };
+		};
+		expect(scopeBody.scope.description).toBe("my repo description");
+		const listed = await runCli(["scope", "list"], dbPath);
+		const listBody = JSON.parse(listed.stdout[0] ?? "") as {
+			scopes: { id: string; description: string | null }[];
+		};
+		expect(listBody.scopes.find((s) => s.id === "repo:/tmp/pithos-desc-cli")?.description).toBe(
+			"my repo description",
+		);
+		// Re-upsert without --description preserves the existing description
+		const reupserted = await runCli(
+			["scope", "upsert", "--kind", "repo", "--path", "/tmp/pithos-desc-cli"],
+			dbPath,
+		);
+		const reBody = JSON.parse(reupserted.stdout[0] ?? "") as {
+			scope: { description: string | null };
+		};
+		expect(reBody.scope.description).toBe("my repo description");
 	});
 
 	it("lists archived scopes only with --all through the CLI", async () => {

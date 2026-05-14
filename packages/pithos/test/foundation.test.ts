@@ -94,6 +94,12 @@ describe("pithos foundation", () => {
 				.pluck()
 				.get(),
 		).toBe("archived_at");
+		expect(
+			db
+				.prepare("SELECT name FROM pragma_table_info('scopes') WHERE name = 'description'")
+				.pluck()
+				.get(),
+		).toBe("description");
 	});
 
 	it("non-fresh init is idempotent", () => {
@@ -128,6 +134,7 @@ describe("pithos foundation", () => {
 			kind: "repo",
 			canonical_path: "/tmp/pithos-repo",
 			archived_at: null,
+			description: null,
 		});
 		expect(engine.scopeList({ all: false })).toEqual({
 			ok: true,
@@ -137,6 +144,7 @@ describe("pithos foundation", () => {
 					kind: "global",
 					canonical_path: null,
 					archived_at: null,
+					description: null,
 					task_count: 0,
 					run_count: 0,
 				},
@@ -145,6 +153,7 @@ describe("pithos foundation", () => {
 					kind: "repo",
 					canonical_path: "/tmp/pithos-repo",
 					archived_at: null,
+					description: null,
 					task_count: 0,
 					run_count: 0,
 				},
@@ -182,6 +191,7 @@ describe("pithos foundation", () => {
 					kind: "global",
 					canonical_path: null,
 					archived_at: null,
+					description: null,
 					task_count: 0,
 					run_count: 0,
 				},
@@ -190,6 +200,7 @@ describe("pithos foundation", () => {
 					kind: "repo",
 					canonical_path: "/tmp/pithos-repo",
 					archived_at: null,
+					description: null,
 					task_count: 0,
 					run_count: 1,
 				},
@@ -366,6 +377,7 @@ describe("pithos foundation", () => {
 				kind: "repo",
 				canonical_path: "/tmp/pithos-archive-history",
 				archived_at: null,
+				description: null,
 			},
 		);
 		expect(engine.scopeList({ all: false }).scopes).toContainEqual(
@@ -391,6 +403,7 @@ describe("pithos foundation", () => {
 				kind: "repo",
 				canonical_path: "/tmp/pithos-archive-delete",
 				archived_at: null,
+				description: null,
 				task_count: 0,
 				run_count: 0,
 			},

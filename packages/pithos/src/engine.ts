@@ -1099,8 +1099,11 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 	// SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" with no timezone suffix; treat as UTC.
 	const parseSqliteUtcMs = (s: string): number => Date.parse(`${s.replace(" ", "T")}Z`);
 	const isTerminal = (node: GraphNodeOutput): boolean => {
-		if (node.status === "done" || node.status === "cancelled") return true;
-		if ((node.status === "failed" || node.status === "dead_letter") && node.completed_at !== null) {
+		if (node.status === "done") return true;
+		if (
+			(node.status === "failed" || node.status === "dead_letter" || node.status === "cancelled") &&
+			node.completed_at !== null
+		) {
 			return now - parseSqliteUtcMs(node.completed_at) >= ONE_HOUR_MS;
 		}
 		return false;
@@ -2185,7 +2188,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					{ kind: "scope", value: scope },
 					(
 						db
-							.prepare(sql`SELECT id FROM tasks WHERE scope_id=? AND status <> 'cancelled'`)
+							.prepare(sql`
+								SELECT id
+								FROM tasks
+								WHERE scope_id=?
+								  AND (status <> 'cancelled' OR completed_at > datetime('now', '-1 hour'))
+							`)
 							.all(scope) as { id: string }[]
 					).map((r) => r.id),
 				);
@@ -2194,7 +2202,13 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				db,
 				{ kind: "all" },
 				(
-					db.prepare(sql`SELECT id FROM tasks WHERE status <> 'cancelled'`).all() as {
+					db
+						.prepare(sql`
+							SELECT id
+							FROM tasks
+							WHERE status <> 'cancelled' OR completed_at > datetime('now', '-1 hour')
+						`)
+						.all() as {
 						id: string;
 					}[]
 				).map((r) => r.id),

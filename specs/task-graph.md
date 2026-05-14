@@ -616,22 +616,22 @@ Requirements:
 
 Selectors are mutually exclusive:
 
-| Selector             | Result                                                                                                                                                            |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--task <id>`        | Transitive closure around that task following dependency, source, and supersession edges both directions                                                          |
-| `--scope <scope-id>` | Seed with all non-cancelled tasks in that scope, then walk dependency, source, and supersession edges in both directions recursively until the response is closed |
-| `--all`              | All non-cancelled tasks and all current graph edges, plus any referenced dependency or source or supersession neighbors needed to keep the response closed        |
+| Selector             | Result                                                                                                                                                                                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--task <id>`        | Transitive closure around that task following dependency, source, and supersession edges both directions                                                                                                    |
+| `--scope <scope-id>` | Seed with all tasks in that scope except `cancelled` tasks completed more than 1 hour ago, then walk dependency, source, and supersession edges in both directions recursively until the response is closed |
+| `--all`              | All tasks except `cancelled` tasks completed more than 1 hour ago, plus all current graph edges and any referenced dependency or source or supersession neighbors needed to keep the response closed        |
 
 Output flags:
 
-| Flag     | Effect                                                                           |
-| -------- | -------------------------------------------------------------------------------- |
-| `--json` | Return the full closed graph object instead of the readable overview             |
-| `--all`  | Selector: inspect every non-cancelled task and graph neighbor needed for closure |
+| Flag     | Effect                                                                                                                        |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--json` | Return the full closed graph object instead of the readable overview                                                          |
+| `--all`  | Selector: inspect every task except `cancelled` tasks completed more than 1 hour ago, plus graph neighbors needed for closure |
 
 Default readable graph output renders dependency edges as an indented tree, includes each task's capability and effective status, and labels queued tasks with unresolved dependencies as `[blocked]`. `--all` is selection, not output format; scripts use `--json`.
 
-Terminal tasks are suppressed from readable output to reduce noise: `done` and `cancelled` tasks are always hidden unless they have visible descendants or are part of an active supersession chain. `failed` and `dead_letter` tasks that completed more than 1 hour ago are treated the same way; recently-failed tasks (within the hour) remain visible. The `--json` output always includes every node in the closed graph regardless of age.
+Terminal tasks are suppressed from readable output to reduce noise: `done` tasks are always hidden unless they have visible descendants or are part of an active supersession chain. `failed`, `dead_letter`, and `cancelled` tasks that completed more than 1 hour ago are treated the same way; recently-terminal tasks within the hour remain visible. The `--json` output always includes every node in the closed graph regardless of age.
 
 Graph closure requirement:
 

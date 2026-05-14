@@ -548,7 +548,7 @@ describe("task lifecycle", () => {
 		);
 	});
 
-	it("hides stale terminal failed/dead_letter leaf tasks from readable graph output", () => {
+	it("ages out stale failed/dead_letter/cancelled leaf tasks from readable graph output", () => {
 		const { dbPath, engine, repo } = setup();
 		const db = new Database(dbPath);
 
@@ -576,6 +576,18 @@ describe("task lifecycle", () => {
 			"UPDATE tasks SET status='dead_letter', completed_at=datetime('now', '-2 hours') WHERE id=?",
 		).run(staleDeadLetterTask);
 
+		// stale cancelled leaf — should be hidden after the same 1 hour window
+		const staleCancelledTask = enqueueTask(engine, {
+			title: "stale cancelled leaf",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		engine.cancel({ taskId: staleCancelledTask, runId: "run_toil", reason: "stale cancel" });
+		db.prepare("UPDATE tasks SET completed_at=datetime('now', '-2 hours') WHERE id=?").run(
+			staleCancelledTask,
+		);
+
 		// recently failed leaf — should remain visible
 		engine.runUpsert({
 			agent: "war",
@@ -595,6 +607,15 @@ describe("task lifecycle", () => {
 		}).task.id;
 		engine.claim({ runId: "run_war_r2", scope: repo, capability: "execute" });
 		engine.failTask({ taskId: recentFailedTask, runId: "run_war_r2", token: 1, reason: "bad" });
+
+		// recently cancelled leaf — should remain visible for the first hour
+		const recentCancelledTask = enqueueTask(engine, {
+			title: "recent cancelled leaf",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		engine.cancel({ taskId: recentCancelledTask, runId: "run_toil", reason: "recent cancel" });
 
 		// stale failed parent with active child — parent should still appear due to visible descendant
 		const staleFailedParent = enqueueTask(engine, {
@@ -641,11 +662,15 @@ describe("task lifecycle", () => {
 			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
 		);
 
-		// stale failed and dead_letter leaf tasks are hidden
+		// stale failed, dead_letter, and cancelled leaf tasks are hidden
 		expect(graphText).not.toContain("stale failed leaf");
 		expect(graphText).not.toContain("stale dead_letter leaf");
-		// recently failed task is still visible
+		expect(graphText).not.toContain("stale cancelled leaf");
+		// recent terminal failures/cancellations are still visible
 		expect(graphText).toContain(`${recentFailedTask} [execute] [failed] recent failed leaf`);
+		expect(graphText).toContain(
+			`${recentCancelledTask} [execute] [cancelled] recent cancelled leaf`,
+		);
 		// stale parent remains visible because its dependency child is active
 		expect(graphText).toContain(`${staleFailedParent} [execute] [failed] stale failed parent`);
 		expect(graphText).toContain(`${activeChild} [execute] [blocked] active child of stale parent`);

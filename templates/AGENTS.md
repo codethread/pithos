@@ -1,11 +1,14 @@
 # Template config agent guide
 
-This directory is user-owned Pandora's Box configuration after `pdx init` copies
-it into `<data-dir>/templates/`. These files configure how Pandora's Box renders
-agent harness prompts and argv. They are not Pithos runtime state.
+The repo-root `templates/` directory is the bundled source. After `pdx init` or
+`pdx open`, `<data-dir>/templates/` holds a read-only copy (files 0444, dirs
+0555) that is **always refreshed** from the bundle. Do not edit files there
+directly — they will be overwritten on the next init/open.
 
-Edit this directory directly when changing agent harnesses, models, tools, or
-prompt wording.
+User customisations live in `<data-dir>/extensions/templates/`. Spawner checks
+that directory first before falling back to `<data-dir>/templates/`. To change
+harness config, models, tools, or prompt wording, place edited files in the
+extensions layer, not in the bundle-owned templates dir.
 
 ## Files
 
@@ -31,6 +34,7 @@ Each `agents.json` entry has this shape:
 		"argv": ["--plugin-dir", "~/my-plugins"]
 	},
 	"includes": ["_common.md"],
+	"appends": ["~/my-extensions/war-extra.md"],
 	"template": "war.md"
 }
 ```
@@ -51,11 +55,14 @@ Fields:
   flags. Use for harness features not modeled by other fields, such as
   `["--plugin-dir", "~/my-plugins"]` for Claude Code plugins. Elements must be
   non-empty; no tilde expansion or env substitution is applied.
-- `includes`: optional list of template paths. Relative paths resolve from this
-  directory; absolute paths and `~/` paths are allowed. No recursive include
-  rendering.
-- `template`: template path. Relative paths resolve from this directory;
-  absolute paths and `~/` paths are allowed.
+- `includes`: optional list of template paths resolved through the overlay.
+  Relative paths resolve from the templates directory; absolute and `~/` paths
+  are allowed. No recursive include rendering.
+- `appends`: optional list of template paths resolved through the overlay.
+  Files are concatenated verbatim **after** the rendered template, joined by
+  `\n\n---\n\n`. Same path resolution rules as `includes`. Paths must be unique.
+- `template`: template path resolved through the overlay. Relative paths resolve
+  from the templates directory; absolute and `~/` paths are allowed.
 
 The manifest controls render configuration only. Durable authorization is still
 owned by Pithos built-ins. If you invent new agent kinds or capabilities, this
@@ -105,25 +112,32 @@ Available variables:
 - one variable per include path exactly as listed, for example `{{_common.md}}`,
   `{{snippets/common.md}}`, or `{{~/agent/common.md}}`
 
+`appends` entries are not available as template variables. They are read and
+appended after the template is fully rendered, so they do not participate in
+`{{variable}}` substitution.
+
 Templates receive launch/self-claim context only. They do not receive task
 bodies.
 
 ## Safe editing checklist
 
-1. Keep `agents.json` valid JSON.
-2. Keep every referenced `template` and `includes` path readable. Relative paths
-   are resolved from this directory; absolute paths and `~/` can point at files
-   outside `<data-dir>/templates/` for workflows that keep prompt files in a
-   separate version-controlled directory.
-3. When using nested or external includes, reference them in templates with the
+1. Do not edit files in `<data-dir>/templates/` — they are read-only and will be
+   overwritten on the next `pdx init` or `pdx open`. Edit in
+   `<data-dir>/extensions/templates/` instead.
+2. Keep `agents.json` valid JSON.
+3. Keep every referenced `template`, `includes`, and `appends` path readable.
+   Relative paths resolve from the templates directory; absolute paths and `~/`
+   can point at files outside the data dir for workflows that keep prompt files
+   in a separate version-controlled directory.
+4. When using nested or external includes, reference them in templates with the
    exact manifest string, for example `{{snippets/common.md}}`.
-4. Choose harness `kind`, `model`, and `tools` from the real harness CLI docs/help.
-5. Do not remove required launch/self-claim instructions from prompts unless you
+5. Choose harness `kind`, `model`, and `tools` from the real harness CLI docs/help.
+6. Do not remove required launch/self-claim instructions from prompts unless you
    are intentionally changing runtime behavior.
-6. After edits, run a preview from the project if available, for example:
+7. After edits, run a preview from the project if available, for example:
 
 ```sh
-PDX_DATA_DIR="$(pwd)/.." pandora-spawn preview \
+pandora-spawn preview \
   --agent war \
   --mode afk \
   --scope scope_repo \

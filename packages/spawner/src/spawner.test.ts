@@ -264,6 +264,7 @@ const agentsFile = (input: {
 	model?: string;
 	harnessMode?: "replace" | "append";
 	includes?: readonly string[];
+	appends?: readonly string[];
 	template?: string;
 }): string => {
 	const {
@@ -275,6 +276,7 @@ const agentsFile = (input: {
 		model = "model_test",
 		harnessMode = "append",
 		includes = ["_common.md"],
+		appends,
 		template = `${agent}.md`,
 	} = input;
 	return JSON.stringify({
@@ -290,6 +292,7 @@ const agentsFile = (input: {
 					...(argv === undefined ? {} : { argv }),
 				},
 				includes,
+				...(appends === undefined ? {} : { appends }),
 				template,
 			},
 		],
@@ -521,7 +524,9 @@ describe("renderAgent", () => {
 					}
 					if (path === `${templatesDir}/_common.md`) return "DATA_DIR_COMMON";
 					if (path === `${templatesDir}/war.md`) return "{{_common.md}} {{model}} {{tools_csv}}";
-					throw new Error(`unexpected readText call: ${path}`);
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
 				},
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
@@ -719,7 +724,9 @@ describe("renderAgent", () => {
 					if (path === "/tmp/instruction-files/war.md") {
 						return "{{snippets/common.md}} {{../../instruction-files/shared.md}} {{~/agent/common.md}} {{claim_command}}";
 					}
-					throw new Error(`unexpected readText call: ${path}`);
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
 				},
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
@@ -902,6 +909,284 @@ describe("renderAgent", () => {
 				),
 			),
 		).toThrow("invalid manifest");
+	});
+
+	it("overlay resolver prefers extensions/templates over templates for includes", () => {
+		const dataDir = "/tmp/pdx-overlay-test";
+		const templatesDir = `${dataDir}/templates`;
+		const extensionsDir = `${dataDir}/extensions/templates`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			{
+				readText: (path: string) => {
+					if (path === `${templatesDir}/agents.json`) {
+						return agentsFile({
+							agent: "war",
+							mode: "afk",
+							harnessKind: "pi",
+							includes: ["_common.md"],
+						});
+					}
+					if (path === `${extensionsDir}/_common.md`) return "EXTENSION_COMMON";
+					if (path === `${templatesDir}/_common.md`) return "BUNDLE_COMMON";
+					if (path === `${templatesDir}/war.md`)
+						return "{{_common.md}} {{claim_command}}\n{{command_cards}}";
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
+				},
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: (file: string, args: readonly string[]) => {
+					if (file.split("/").at(-1) === "pithos" && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		expect(rendered.prompt).toContain("EXTENSION_COMMON");
+		expect(rendered.prompt).not.toContain("BUNDLE_COMMON");
+	});
+
+	it("overlay resolver falls back to templates when extensions file is absent", () => {
+		const dataDir = "/tmp/pdx-overlay-fallback";
+		const templatesDir = `${dataDir}/templates`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			{
+				readText: (path: string) => {
+					if (path === `${templatesDir}/agents.json`) {
+						return agentsFile({
+							agent: "war",
+							mode: "afk",
+							harnessKind: "pi",
+							includes: ["_common.md"],
+						});
+					}
+					if (path === `${templatesDir}/_common.md`) return "BUNDLE_COMMON";
+					if (path === `${templatesDir}/war.md`)
+						return "{{_common.md}} {{claim_command}}\n{{command_cards}}";
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
+				},
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: (file: string, args: readonly string[]) => {
+					if (file.split("/").at(-1) === "pithos" && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		expect(rendered.prompt).toContain("BUNDLE_COMMON");
+	});
+
+	it("appends render after template body joined by separator in declared order", () => {
+		const dataDir = "/tmp/pdx-appends-test";
+		const templatesDir = `${dataDir}/templates`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			{
+				readText: (path: string) => {
+					if (path === `${templatesDir}/agents.json`) {
+						return agentsFile({
+							agent: "war",
+							mode: "afk",
+							harnessKind: "pi",
+							includes: [],
+							appends: ["extra-a.md", "extra-b.md"],
+							template: "war.md",
+						});
+					}
+					if (path === `${templatesDir}/war.md`)
+						return "TEMPLATE_BODY {{claim_command}}\n{{command_cards}}";
+					if (path === `${templatesDir}/extra-a.md`) return "APPEND_A";
+					if (path === `${templatesDir}/extra-b.md`) return "APPEND_B";
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
+				},
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: (file: string, args: readonly string[]) => {
+					if (file.split("/").at(-1) === "pithos" && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		const appendSeparatorIndex = rendered.prompt.indexOf("\n\n---\n\n");
+		expect(appendSeparatorIndex).toBeGreaterThan(0);
+		expect(rendered.prompt).toContain("TEMPLATE_BODY");
+		expect(rendered.prompt.indexOf("TEMPLATE_BODY")).toBeLessThan(appendSeparatorIndex);
+		expect(rendered.prompt).toContain("APPEND_A");
+		expect(rendered.prompt).toContain("APPEND_B");
+		expect(rendered.prompt.indexOf("APPEND_A")).toBeLessThan(rendered.prompt.indexOf("APPEND_B"));
+		// separator between appends too
+		const firstSep = rendered.prompt.indexOf("\n\n---\n\n");
+		const secondSep = rendered.prompt.indexOf("\n\n---\n\n", firstSep + 1);
+		expect(secondSep).toBeGreaterThan(firstSep);
+	});
+
+	it("appends via extensions overlay are preferred over bundle appends", () => {
+		const dataDir = "/tmp/pdx-appends-overlay";
+		const templatesDir = `${dataDir}/templates`;
+		const extensionsDir = `${dataDir}/extensions/templates`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			{
+				readText: (path: string) => {
+					if (path === `${templatesDir}/agents.json`) {
+						return agentsFile({
+							agent: "war",
+							mode: "afk",
+							harnessKind: "pi",
+							includes: [],
+							appends: ["extra.md"],
+							template: "war.md",
+						});
+					}
+					if (path === `${templatesDir}/war.md`) return "BODY {{claim_command}}\n{{command_cards}}";
+					if (path === `${extensionsDir}/extra.md`) return "EXTENSION_APPEND";
+					if (path === `${templatesDir}/extra.md`) return "BUNDLE_APPEND";
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
+				},
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: (file: string, args: readonly string[]) => {
+					if (file.split("/").at(-1) === "pithos" && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		expect(rendered.prompt).toContain("EXTENSION_APPEND");
+		expect(rendered.prompt).not.toContain("BUNDLE_APPEND");
+	});
+
+	it("missing appends path fails loudly with TEMPLATE_ERROR", () => {
+		const dataDir = "/tmp/pdx-appends-missing";
+		const templatesDir = `${dataDir}/templates`;
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				{
+					readText: (path: string) => {
+						if (path === `${templatesDir}/agents.json`) {
+							return agentsFile({
+								agent: "war",
+								mode: "afk",
+								harnessKind: "pi",
+								includes: [],
+								appends: ["missing.md"],
+								template: "war.md",
+							});
+						}
+						if (path === `${templatesDir}/war.md`)
+							return "BODY {{claim_command}}\n{{command_cards}}";
+						throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+							code: "ENOENT",
+						});
+					},
+					env: (key: string) => {
+						if (key === "PDX_DATA_DIR") return dataDir;
+						if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+						return undefined;
+					},
+					execFile: (file: string, args: readonly string[]) => {
+						if (file.split("/").at(-1) === "pithos" && args[0] === "--help-json") {
+							return { status: 0, stdout: pithosHelpJson, stderr: "" };
+						}
+						return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+					},
+				},
+			),
+		).toThrow(SpawnerError);
+	});
+
+	it("validates appends uniqueness", () => {
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "war",
+						mode: "afk",
+						harnessKind: "pi",
+						appends: ["extra.md", "extra.md"],
+					}),
+				),
+			),
+		).toThrow("appends must be unique");
+	});
+
+	it("non-ENOENT error reading extensions file fails loudly as TEMPLATE_ERROR", () => {
+		const dataDir = "/tmp/pdx-overlay-acl";
+		const templatesDir = `${dataDir}/templates`;
+		const extensionsDir = `${dataDir}/extensions/templates`;
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				{
+					readText: (path: string) => {
+						if (path === `${templatesDir}/agents.json`) {
+							return agentsFile({
+								agent: "war",
+								mode: "afk",
+								harnessKind: "pi",
+								includes: ["_common.md"],
+							});
+						}
+						if (path === `${extensionsDir}/_common.md`) {
+							throw Object.assign(new Error(`EACCES: permission denied, open '${path}'`), {
+								code: "EACCES",
+							});
+						}
+						throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+							code: "ENOENT",
+						});
+					},
+					env: (key: string) => {
+						if (key === "PDX_DATA_DIR") return dataDir;
+						if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+						return undefined;
+					},
+					execFile: (file: string, args: readonly string[]) => {
+						if (file.split("/").at(-1) === "pithos" && args[0] === "--help-json") {
+							return { status: 0, stdout: pithosHelpJson, stderr: "" };
+						}
+						return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+					},
+				},
+			),
+		).toThrow(/EACCES/);
+	});
+
+	it("prompt without appends has no separator", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			fakeRenderServices(agentsFile({ agent: "war", mode: "afk", harnessKind: "pi" })),
+		);
+		expect(rendered.prompt).not.toContain("\n\n---\n\n");
 	});
 });
 

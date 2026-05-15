@@ -49,7 +49,11 @@ const fileMapGet = (
 export const makeFakeSpawnerServices = (input: FakeSpawnerServicesInput): LaunchServices => ({
 	readText: (path) => {
 		const value = fileMapGet(input.files, path);
-		if (value === undefined) throw new Error(`fake spawner missing file: ${path}`);
+		if (value === undefined) {
+			throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+				code: "ENOENT",
+			});
+		}
 		return value;
 	},
 	env: (key) => input.env?.[key],

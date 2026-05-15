@@ -8,7 +8,7 @@ import {
 } from "@pdx/pithos/builtins";
 import { Either, ParseResult, Schema } from "effect";
 import { SpawnerError } from "./errors.js";
-import { resolveAgentsPath, resolveTemplatesDir } from "./paths.js";
+import { resolveAgentsPath, resolveExtensionsTemplatesDir, resolveTemplatesDir } from "./paths.js";
 import {
 	LiveSpawnerServices,
 	type LaunchServices,
@@ -76,6 +76,7 @@ const ManifestSchema = Schema.Struct({
 	mode: ModeSchema,
 	harness: HarnessSchema,
 	includes: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
+	appends: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
 	template: Schema.NonEmptyString,
 });
 const AgentsFileSchema = Schema.Struct({ agents: Schema.Array(ManifestSchema) });
@@ -130,16 +131,19 @@ const templateAssetPaths = (services: RenderServices) => {
 	return {
 		agentsPath: resolveAgentsPath(pdxDataDir),
 		templatesDir: resolveTemplatesDir(pdxDataDir),
+		extensionsTemplatesDir: resolveExtensionsTemplatesDir(pdxDataDir),
 	};
 };
 
 const loadManifests = (services: RenderServices = LiveSpawnerServices): readonly Manifest[] => {
 	const paths = templateAssetPaths(services);
-	const parsed = decode(
-		Schema.parseJson(AgentsFileSchema),
-		readText(paths.agentsPath, services),
-		paths.agentsPath,
+	const agentsContent = resolveWithOverlay(
+		paths.extensionsTemplatesDir,
+		paths.templatesDir,
+		"agents.json",
+		services,
 	);
+	const parsed = decode(Schema.parseJson(AgentsFileSchema), agentsContent, paths.agentsPath);
 	for (const manifest of parsed.agents) validateManifestContract(manifest);
 	return parsed.agents;
 };
@@ -150,6 +154,13 @@ const validateManifestContract = (manifest: Manifest): void => {
 		throw new SpawnerError({
 			code: "VALIDATION_ERROR",
 			message: `${manifest.agent}: includes must be unique template paths`,
+		});
+	}
+	const appendSet = new Set(manifest.appends);
+	if (appendSet.size !== manifest.appends.length) {
+		throw new SpawnerError({
+			code: "VALIDATION_ERROR",
+			message: `${manifest.agent}: appends must be unique template paths`,
 		});
 	}
 };
@@ -184,6 +195,39 @@ const resolveTemplateReference = (templatesDir: string, path: string): string =>
 	if (path.startsWith("~/")) return join(homedir(), path.slice(2));
 	if (path.startsWith("/")) return path;
 	return join(templatesDir, path);
+};
+
+const isEnoent = (error: unknown): boolean =>
+	error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
+
+// For templates-relative paths (not absolute or home-relative), prefer
+// extensions/templates/<rel> over templates/<rel> so users can override
+// individual files without modifying the bundle. Only absent files (ENOENT)
+// trigger fallback; permission denied or other IO errors fail loudly.
+const resolveWithOverlay = (
+	extensionsTemplatesDir: string | undefined,
+	templatesDir: string,
+	path: string,
+	services: RenderServices,
+): string => {
+	if (path === "~" || path.startsWith("~/") || path.startsWith("/")) {
+		return readText(resolveTemplateReference(templatesDir, path), services);
+	}
+	if (extensionsTemplatesDir !== undefined) {
+		const extensionsPath = join(extensionsTemplatesDir, path);
+		try {
+			return services.readText(extensionsPath);
+		} catch (error) {
+			if (!isEnoent(error)) {
+				throw new SpawnerError({
+					code: "TEMPLATE_ERROR",
+					message: `${extensionsPath}: ${error instanceof Error ? error.message : String(error)}`,
+				});
+			}
+			// file absent in extensions layer; fall through to bundle
+		}
+	}
+	return readText(join(templatesDir, path), services);
 };
 
 const SpawnerConfigSchema = Schema.Struct({
@@ -531,13 +575,18 @@ export const renderAgent = (
 	const includes = Object.fromEntries(
 		manifest.includes.map((include) => [
 			include,
-			readText(resolveTemplateReference(paths.templatesDir, include), services),
+			resolveWithOverlay(paths.extensionsTemplatesDir, paths.templatesDir, include, services),
 		]),
 	);
 	const claimCommand = `pithos task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
 	const commandCards = renderCommandCards(input.agent, services);
-	const prompt = renderTemplate(
-		readText(resolveTemplateReference(paths.templatesDir, manifest.template), services),
+	const renderedTemplate = renderTemplate(
+		resolveWithOverlay(
+			paths.extensionsTemplatesDir,
+			paths.templatesDir,
+			manifest.template,
+			services,
+		),
 		{
 			...includes,
 			agent: input.agent,
@@ -553,6 +602,13 @@ export const renderAgent = (
 			tools_csv: manifest.harness.tools?.join(", ") ?? "",
 		},
 	);
+	const appendTexts = manifest.appends.map((append) =>
+		resolveWithOverlay(paths.extensionsTemplatesDir, paths.templatesDir, append, services),
+	);
+	const prompt =
+		appendTexts.length > 0
+			? `${renderedTemplate}\n\n---\n\n${appendTexts.join("\n\n---\n\n")}`
+			: renderedTemplate;
 	const env = {
 		PITHOS_DB: config.pithosDb,
 		PITHOS_RUN_ID: input.runId,

@@ -276,16 +276,7 @@ const spawnerError = (operation: string, error: unknown) => {
 const isNodeErrorCode = (error: unknown, code: string): boolean =>
 	typeof error === "object" && error !== null && "code" in error && error.code === code;
 
-const materializeSpawnerTemplates = async (dataDir: string): Promise<void> => {
-	const targetDir = join(dataDir, "templates");
-	// Make the dir writable so it can be wiped (no-op if it doesn't exist yet)
-	try {
-		await chmod(targetDir, 0o755);
-	} catch (error) {
-		if (!isNodeErrorCode(error, "ENOENT")) throw error;
-	}
-	await rm(targetDir, { recursive: true, force: true });
-	await mkdir(targetDir, { recursive: true });
+const copyBundledTemplates = async (targetDir: string): Promise<void> => {
 	const entries = await readdir(bundledTemplatesDir, { withFileTypes: true });
 	for (const entry of entries) {
 		const sourcePath = join(bundledTemplatesDir, entry.name);
@@ -298,6 +289,36 @@ const materializeSpawnerTemplates = async (dataDir: string): Promise<void> => {
 			await symlink(await readlink(sourcePath), targetPath);
 		}
 	}
+};
+
+// Full re-seed: used by materializeTemplates() on pdx init/open.
+const reseedSpawnerTemplates = async (dataDir: string): Promise<void> => {
+	const targetDir = join(dataDir, "templates");
+	// Make the dir writable before wiping so rm -rf can remove files from it
+	try {
+		await chmod(targetDir, 0o755);
+	} catch (error) {
+		if (!isNodeErrorCode(error, "ENOENT")) throw error;
+	}
+	await rm(targetDir, { recursive: true, force: true });
+	await mkdir(targetDir, { recursive: true });
+	await copyBundledTemplates(targetDir);
+	await chmod(targetDir, 0o555);
+};
+
+// Seed-if-missing: used by renderAgent() as a defensive guard when the spawner
+// is invoked without a prior pdx init/open.
+const seedSpawnerTemplatesIfMissing = async (dataDir: string): Promise<void> => {
+	const targetDir = join(dataDir, "templates");
+	const agentsPath = join(targetDir, "agents.json");
+	try {
+		await stat(agentsPath);
+		return;
+	} catch (error) {
+		if (!isNodeErrorCode(error, "ENOENT")) throw error;
+	}
+	await mkdir(targetDir, { recursive: true });
+	await copyBundledTemplates(targetDir);
 	await chmod(targetDir, 0o555);
 };
 
@@ -318,13 +339,13 @@ export const makeSpawnerLive = (config: {
 	return Spawner.of({
 		materializeTemplates: () =>
 			Effect.tryPromise({
-				try: () => materializeSpawnerTemplates(config.dataDir),
+				try: () => reseedSpawnerTemplates(config.dataDir),
 				catch: (error) => spawnerError("spawner template materialize", error),
 			}),
 		renderAgent: (input) =>
 			Effect.tryPromise({
 				try: async () => {
-					await materializeSpawnerTemplates(config.dataDir);
+					await seedSpawnerTemplatesIfMissing(config.dataDir);
 					return renderAgent(input, renderServices);
 				},
 				catch: (error) => spawnerError("spawner render", error),

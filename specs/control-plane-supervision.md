@@ -96,10 +96,12 @@ This is a destructive pre-v1 rewrite.
 ```text
 pdx init
   -> normal init: reuse existing `<data-dir>` state
-  -> `--update`: remove `<data-dir>/templates/` only, then continue
-  -> `--clean`: remove the full `<data-dir>` first, then continue
+  -> `--clean`: remove db + runs + logs only, then continue; keeps templates and extensions
+  -> `--nuke`: remove the full `<data-dir>` first, then continue
+  -> `--clean` and `--nuke` are mutually exclusive
   -> pithos init (non-destructive)
-  -> materialize editable templates from bundled defaults when missing
+  -> always re-seed `<data-dir>/templates/` from bundled defaults (read-only, 0444/0555)
+  -> leave `<data-dir>/extensions/` untouched
   -> exit without touching tmux or Harness CLIs
 
 pdx open
@@ -587,8 +589,8 @@ Intentional abandon.
 Minimal operator/Pandora-facing API:
 
 ```text
-pdx init [--data-dir <path>] [--update | --clean]
-pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>] [--update | --clean]
+pdx init [--data-dir <path>] [--clean | --nuke]
+pdx open [--data-dir <path>] [--interval-seconds <n>] [--max-afk <n>] [--clean | --nuke]
 pdx close [--data-dir <path>]
 
 pdx daemon status [--data-dir <path>]

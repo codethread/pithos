@@ -4291,4 +4291,45 @@ describe("LiveHookExecutor", () => {
 			}),
 		);
 	});
+
+	it("fails with HOOK_OUTPUT_OVERFLOW when hook writes more than 1 MB without a newline", async () => {
+		const tmpDir = await mkdtemp(join(tmpdir(), "pdx-hook-live-"));
+		const scriptPath = join(tmpDir, "overflow.sh");
+		// Write 1 MB + 1 byte without any newline to exceed the hard cap.
+		await writeFile(
+			scriptPath,
+			"#!/bin/sh\nnode -e \"process.stdout.write(Buffer.alloc(1024 * 1024 + 1, 'x'))\"",
+		);
+		await chmod(scriptPath, 0o755);
+		const stderrPath = join(tmpDir, "stderr.log");
+
+		const err = await Effect.runPromise(
+			Effect.flip(
+				Effect.gen(function* () {
+					const handle = yield* LiveHookExecutor.spawn([scriptPath], stderrPath);
+					yield* handle.waitForLine;
+				}),
+			),
+		);
+		expect(err.code).toBe("HOOK_OUTPUT_OVERFLOW");
+	});
+
+	it("continues delivering normal lines before the cap is reached", async () => {
+		const tmpDir = await mkdtemp(join(tmpdir(), "pdx-hook-live-"));
+		const scriptPath = join(tmpDir, "undercap.sh");
+		// Each line is well under the 1 MB cap; 3 complete lines should arrive cleanly.
+		await writeFile(scriptPath, "#!/bin/sh\necho alpha\necho beta\necho gamma\n");
+		await chmod(scriptPath, 0o755);
+		const stderrPath = join(tmpDir, "stderr.log");
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const handle = yield* LiveHookExecutor.spawn([scriptPath], stderrPath);
+				expect(yield* handle.waitForLine).toBe("alpha");
+				expect(yield* handle.waitForLine).toBe("beta");
+				expect(yield* handle.waitForLine).toBe("gamma");
+				expect(yield* handle.waitForLine).toBeNull();
+			}),
+		);
+	});
 });

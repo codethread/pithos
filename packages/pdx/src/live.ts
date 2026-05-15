@@ -399,6 +399,9 @@ export const makeSpawnerLive = (config: {
 	});
 };
 
+// Hard cap on buffered hook stdout bytes before a newline arrives.
+const HOOK_STDOUT_MAX_BYTES = 1 * 1024 * 1024;
+
 export const LiveHookExecutor = HookExecutor.of({
 	spawn: (argv, stderrPath) =>
 		Effect.async<HookChildHandle, PdxError>((resume) => {
@@ -435,12 +438,13 @@ export const LiveHookExecutor = HookExecutor.of({
 					const decoder = new StringDecoder("utf8");
 					let pending = "";
 					const lineQueue: (string | null)[] = [];
-					const waiters: ((line: string | null) => void)[] = [];
+					const waiters: ((r: Effect.Effect<string | null, PdxError>) => void)[] = [];
 					let closed = false;
+					let overflowError: PdxError | null = null;
 
 					const deliver = (line: string | null): void => {
 						if (waiters.length > 0) {
-							(waiters.shift() as (line: string | null) => void)(line);
+							waiters.shift()!(Effect.succeed(line));
 						} else {
 							lineQueue.push(line);
 						}
@@ -464,19 +468,30 @@ export const LiveHookExecutor = HookExecutor.of({
 							deliver(pending.replace(/\r$/, ""));
 							pending = "";
 						}
-						while (waiters.length > 0) (waiters.shift() as (line: string | null) => void)(null);
+						while (waiters.length > 0) waiters.shift()!(Effect.succeed(null));
 						void stderrFd.close().catch(() => undefined);
 					};
 
 					stdout.on("data", (chunk: Buffer) => {
 						stdout.pause();
 						pending += decoder.write(chunk);
+						if (Buffer.byteLength(pending, "utf8") > HOOK_STDOUT_MAX_BYTES) {
+							child.kill("SIGTERM");
+							closed = true;
+							const err = new PdxError({
+								code: "HOOK_OUTPUT_OVERFLOW",
+								message: `hook stdout exceeded ${HOOK_STDOUT_MAX_BYTES} bytes without a newline`,
+							});
+							overflowError = err;
+							pending = "";
+							while (waiters.length > 0) waiters.shift()!(Effect.fail(err));
+							void stderrFd.close().catch(() => undefined);
+							return;
+						}
 						drainPendingLines();
 						if (lineQueue.length === 0) {
-							// no complete line yet: resume to accumulate more bytes
 							stdout.resume();
 						}
-						// if lineQueue has lines the stream stays paused until consumer resumes
 					});
 
 					// end fires when all data is consumed; close fires on destroy/kill
@@ -484,9 +499,12 @@ export const LiveHookExecutor = HookExecutor.of({
 					stdout.on("close", onStreamDone);
 
 					const waitForLine: Effect.Effect<string | null, PdxError> = Effect.async((resume2) => {
+						if (overflowError !== null) {
+							resume2(Effect.fail(overflowError));
+							return;
+						}
 						if (lineQueue.length > 0) {
 							resume2(Effect.succeed(lineQueue.shift()!));
-							// resume the stream once the queue drains
 							if (lineQueue.length === 0 && !closed) stdout.resume();
 							return;
 						}
@@ -494,7 +512,7 @@ export const LiveHookExecutor = HookExecutor.of({
 							resume2(Effect.succeed(null));
 							return;
 						}
-						waiters.push((line) => resume2(Effect.succeed(line)));
+						waiters.push((r) => resume2(r));
 						stdout.resume();
 					});
 					resume(Effect.succeed({ pid: child.pid, waitForLine }));

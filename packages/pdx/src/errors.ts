@@ -8,6 +8,7 @@ export type PdxErrorCode =
 	| "HARNESS_ERROR"
 	| "LAUNCH_ERROR"
 	| "FS_ERROR"
+	| "HOOK_OUTPUT_OVERFLOW"
 	| "USER_ERROR"
 	| "NOT_FOUND"
 	| "STALE_TOKEN"

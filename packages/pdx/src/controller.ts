@@ -1176,6 +1176,16 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 					Effect.ensuring(
 						hookExec.kill(handle.pid, "SIGTERM").pipe(Effect.catchAll(() => Effect.void)),
 					),
+					// Absorb read errors (e.g. HOOK_OUTPUT_OVERFLOW) so the outer crash-
+					// tracking loop can log, back off, and restart the hook normally.
+					Effect.catchTag("PdxError", (error) =>
+						log.write({
+							level: "error",
+							span: "pdx.hook",
+							msg: "hook read failed",
+							data: { code: error.code, error: error.message },
+						}),
+					),
 				);
 
 				yield* reportLifecycle({ kind: "hook_removed", pid: handle.pid, reason: "crash" });

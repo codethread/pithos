@@ -127,7 +127,8 @@ pnpm --filter @pdx/spawner start -- preview \
   --cwd "$PWD" | jq .
 ```
 
-If you want preview to use the same user-editable manifest/templates as `pdx`,
-set `PDX_DATA_DIR` and ensure `<data-dir>/templates/` has already been seeded.
+If you want preview to use the same seeded templates plus
+`extensions/templates/` overlay as `pdx`, set `PDX_DATA_DIR` and ensure
+`<data-dir>/templates/` has already been seeded.
 
 Use fake services for deterministic render/launch tests. Do not require live model credentials for package tests.

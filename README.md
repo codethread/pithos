@@ -67,31 +67,32 @@ Requires `~/.local/bin` to be on your `PATH`.
 Repo defaults live in [`./templates/`](./templates/) and are documented in
 [`./templates/README.md`](./templates/README.md).
 
-Run `pdx init` to create the data dir and seed `<data-dir>/templates/`
-before Pandora starts. Edit `<data-dir>/templates/agents.json` to change which
-harness/model/tools each agent runs with.
+Run `pdx init` to create the data dir and seed the bundle-owned
+`<data-dir>/templates/` before Pandora starts. `pdx init` and `pdx open`
+always re-seed that directory from repo defaults.
 
-`pdx open` also reuses the existing data dir and seeds templates only when the
-user copy is missing.
-
-If you also want to change prompts, edit the copied agent `.md` files in the
-same directory.
+Put customisations in `<data-dir>/extensions/templates/`. To change which
+harness/model/tools each agent runs with, override
+`<data-dir>/extensions/templates/agents.json`. To change prompts, add or
+override agent `.md` files there, or use `appends`.
 
 You can also ask an agent to reconfigure Pandora's Box for you:
 
 ```sh
-cd ~/.pdx/templates
+mkdir -p ~/.pdx/extensions/templates
+cd ~/.pdx
 claude
 # or your preferred harness
 ```
 
-That directory includes its own `AGENTS.md` / `CLAUDE.md` guide explaining the
-manifest fields, supported harnesses, tools, and template variables.
+Use `templates/AGENTS.md` / `templates/CLAUDE.md` as the config guide, but put
+actual overrides under `extensions/templates/`.
 
 Useful reset modes:
 
-- `pdx init --update` or `pdx open --update` — keep DB/logs, replace `<data-dir>/templates/` from repo defaults
-- `pdx init --clean` or `pdx open --clean` — wipe the full pdx data dir and start from a blank slate
+- `pdx init` or `pdx open` — re-seed `<data-dir>/templates/`; keep extensions, DB, runs, and logs
+- `pdx init --clean` or `pdx open --clean` — wipe runtime state only (DB, runs, logs); keep templates and extensions
+- `pdx init --nuke` or `pdx open --nuke` — wipe the full pdx data dir and start from a blank slate
 
 ### Uninstall
 

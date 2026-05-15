@@ -306,22 +306,6 @@ const reseedSpawnerTemplates = async (dataDir: string): Promise<void> => {
 	await chmod(targetDir, 0o555);
 };
 
-// Seed-if-missing: used by renderAgent() as a defensive guard when the spawner
-// is invoked without a prior pdx init/open.
-const seedSpawnerTemplatesIfMissing = async (dataDir: string): Promise<void> => {
-	const targetDir = join(dataDir, "templates");
-	const agentsPath = join(targetDir, "agents.json");
-	try {
-		await stat(agentsPath);
-		return;
-	} catch (error) {
-		if (!isNodeErrorCode(error, "ENOENT")) throw error;
-	}
-	await mkdir(targetDir, { recursive: true });
-	await copyBundledTemplates(targetDir);
-	await chmod(targetDir, 0o555);
-};
-
 export const makeSpawnerLive = (config: {
 	readonly dataDir: string;
 	readonly pithosDbPath: string;
@@ -343,11 +327,8 @@ export const makeSpawnerLive = (config: {
 				catch: (error) => spawnerError("spawner template materialize", error),
 			}),
 		renderAgent: (input) =>
-			Effect.tryPromise({
-				try: async () => {
-					await seedSpawnerTemplatesIfMissing(config.dataDir);
-					return renderAgent(input, renderServices);
-				},
+			Effect.try({
+				try: () => renderAgent(input, renderServices),
 				catch: (error) => spawnerError("spawner render", error),
 			}),
 		launchRenderedAgent: (rendered) =>

@@ -631,7 +631,7 @@ describe("pdx substrate", () => {
 		).toBe("[May 9 00:31] error pdx.reconcile attempt=2/3 tmux exploded");
 	});
 
-	it("init creates data dir, pithos DB, runs dir, and editable templates without tmux", async () => {
+	it("init creates data dir, pithos DB, runs dir, and bundle templates without tmux", async () => {
 		const config = await parseConfig("/tmp/pdx-init");
 		const calls: string[] = [];
 		const fs = FileSystem.of({
@@ -737,12 +737,38 @@ describe("pdx substrate", () => {
 		]);
 	});
 
-	it("materializes bundled spawner templates into the data dir before render", async () => {
+	it("render does not implicitly materialize bundled templates", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
 		const spawner = makeSpawnerLive({
 			dataDir,
 			pithosDbPath: join(dataDir, "pithos.sqlite"),
 		});
+		const error = await run(
+			Effect.flip(
+				spawner.renderAgent({
+					agent: "war",
+					mode: "afk",
+					runId: "run_test",
+					sessionId: "123e4567-e89b-12d3-a456-426614174000",
+					scopeId: "scope_repo",
+					cwd: "/tmp/repo",
+				}),
+			),
+		);
+		expect(error.code).toBe("CONFIG_ERROR");
+		expect(error.message).toContain(`${dataDir}/templates/agents.json`);
+		await expect(stat(join(dataDir, "templates", "agents.json"))).rejects.toMatchObject({
+			code: "ENOENT",
+		});
+	});
+
+	it("materializeTemplates seeds bundled spawner templates into the data dir", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
+		const spawner = makeSpawnerLive({
+			dataDir,
+			pithosDbPath: join(dataDir, "pithos.sqlite"),
+		});
+		await run(spawner.materializeTemplates());
 		const error = await run(
 			Effect.flip(
 				spawner.renderAgent({

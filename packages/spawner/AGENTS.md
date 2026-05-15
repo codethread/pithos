@@ -7,7 +7,7 @@ Launcher-only package for rendering and launching Pandora's Box agent harness se
 - Bin: `pandora-spawn`
 - CLI surface: `pandora-spawn preview ...` only
 - Library surface: `renderAgent(input)`, `launchRenderedAgent(rendered)`, `launchAgent(input)`, `renderSessionTranscript(input)`, `LiveSpawnerServices`, `makeFakeSpawnerServices`
-- Config API: repo-root `templates/` defaults are copied into `<PDX_DATA_DIR>/templates/`; when `PDX_DATA_DIR` is set, render reads the user-owned copy there
+- Config API: repo-root `templates/` defaults are copied into bundle-owned `<PDX_DATA_DIR>/templates/`; when `PDX_DATA_DIR` is set, render reads that seeded tree with overlay from `<PDX_DATA_DIR>/extensions/templates/`
 
 ## Manual test
 

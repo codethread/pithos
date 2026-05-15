@@ -440,7 +440,7 @@ const makeCommand = (runtime: RuntimeInput) => {
 					nuke,
 				});
 			}),
-	).pipe(Command.withDescription("Initialize the pdx data dir and editable templates only."));
+	).pipe(Command.withDescription("Initialize the pdx data dir and seeded bundle templates only."));
 
 	const open = Command.make(
 		"open",

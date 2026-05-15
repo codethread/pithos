@@ -34,7 +34,12 @@ import {
 	type SpawnerService,
 } from "../src/services.js";
 import { formatLifecycleEvent } from "../src/lifecycle.js";
-import { FileSystemLive, makePithosClientLive, makeSpawnerLive } from "../src/live.js";
+import {
+	FileSystemLive,
+	LiveHookExecutor,
+	makePithosClientLive,
+	makeSpawnerLive,
+} from "../src/live.js";
 import { makeTmux } from "../src/tmux.js";
 import { makeEngine, type Services as PithosServices } from "@pdx/pithos";
 import {
@@ -4234,5 +4239,56 @@ describe("runInputHookSupervisor", () => {
 
 		// Supervision must have continued past the crash limit (spawned more than 5 times).
 		expect(getSpawnCount()).toBeGreaterThan(5);
+	});
+});
+
+describe("LiveHookExecutor", () => {
+	it("delivers burst output one line at a time in order", async () => {
+		const tmpDir = await mkdtemp(join(tmpdir(), "pdx-hook-live-"));
+		const scriptPath = join(tmpDir, "burst.sh");
+		await writeFile(scriptPath, "#!/bin/sh\necho line1\necho line2\necho line3\n");
+		await chmod(scriptPath, 0o755);
+		const stderrPath = join(tmpDir, "stderr.log");
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const handle = yield* LiveHookExecutor.spawn([scriptPath], stderrPath);
+				expect(yield* handle.waitForLine).toBe("line1");
+				expect(yield* handle.waitForLine).toBe("line2");
+				expect(yield* handle.waitForLine).toBe("line3");
+				expect(yield* handle.waitForLine).toBeNull();
+			}),
+		);
+	});
+
+	it("returns null on first call when the hook emits nothing", async () => {
+		const tmpDir = await mkdtemp(join(tmpdir(), "pdx-hook-live-"));
+		const scriptPath = join(tmpDir, "empty.sh");
+		await writeFile(scriptPath, "#!/bin/sh\n");
+		await chmod(scriptPath, 0o755);
+		const stderrPath = join(tmpDir, "stderr.log");
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const handle = yield* LiveHookExecutor.spawn([scriptPath], stderrPath);
+				expect(yield* handle.waitForLine).toBeNull();
+			}),
+		);
+	});
+
+	it("delivers a trailing partial line that has no newline at EOF", async () => {
+		const tmpDir = await mkdtemp(join(tmpdir(), "pdx-hook-live-"));
+		const scriptPath = join(tmpDir, "notail.sh");
+		await writeFile(scriptPath, "#!/bin/sh\nprintf 'no-newline'");
+		await chmod(scriptPath, 0o755);
+		const stderrPath = join(tmpDir, "stderr.log");
+
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const handle = yield* LiveHookExecutor.spawn([scriptPath], stderrPath);
+				expect(yield* handle.waitForLine).toBe("no-newline");
+				expect(yield* handle.waitForLine).toBeNull();
+			}),
+		);
 	});
 });

@@ -14,8 +14,8 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
-import { createInterface as createReadlineInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import {
 	bundledTemplatesDir,
@@ -428,29 +428,66 @@ export const LiveHookExecutor = HookExecutor.of({
 						);
 						return;
 					}
-					const rl = createReadlineInterface({ input: child.stdout, terminal: false });
-					const lineBuffer: (string | null)[] = [];
+					const stdout = child.stdout;
+					stdout.pause();
+
+					// StringDecoder handles multibyte characters split across chunks.
+					const decoder = new StringDecoder("utf8");
+					let pending = "";
+					const lineQueue: (string | null)[] = [];
 					const waiters: ((line: string | null) => void)[] = [];
 					let closed = false;
-					const push = (line: string | null): void => {
+
+					const deliver = (line: string | null): void => {
 						if (waiters.length > 0) {
 							(waiters.shift() as (line: string | null) => void)(line);
 						} else {
-							lineBuffer.push(line);
-							// backpressure: stop reading until consumer calls waitForLine
-							rl.pause();
+							lineQueue.push(line);
 						}
 					};
-					rl.on("line", push);
-					rl.on("close", () => {
+
+					const drainPendingLines = (): void => {
+						let nl = pending.indexOf("\n");
+						while (nl !== -1) {
+							deliver(pending.slice(0, nl).replace(/\r$/, ""));
+							pending = pending.slice(nl + 1);
+							nl = pending.indexOf("\n");
+						}
+					};
+
+					const onStreamDone = (): void => {
+						if (closed) return;
 						closed = true;
+						pending += decoder.end();
+						drainPendingLines();
+						if (pending.length > 0) {
+							deliver(pending.replace(/\r$/, ""));
+							pending = "";
+						}
 						while (waiters.length > 0) (waiters.shift() as (line: string | null) => void)(null);
 						void stderrFd.close().catch(() => undefined);
+					};
+
+					stdout.on("data", (chunk: Buffer) => {
+						stdout.pause();
+						pending += decoder.write(chunk);
+						drainPendingLines();
+						if (lineQueue.length === 0) {
+							// no complete line yet: resume to accumulate more bytes
+							stdout.resume();
+						}
+						// if lineQueue has lines the stream stays paused until consumer resumes
 					});
+
+					// end fires when all data is consumed; close fires on destroy/kill
+					stdout.on("end", onStreamDone);
+					stdout.on("close", onStreamDone);
+
 					const waitForLine: Effect.Effect<string | null, PdxError> = Effect.async((resume2) => {
-						if (lineBuffer.length > 0) {
-							resume2(Effect.succeed(lineBuffer.shift()!));
-							if (!closed) rl.resume();
+						if (lineQueue.length > 0) {
+							resume2(Effect.succeed(lineQueue.shift()!));
+							// resume the stream once the queue drains
+							if (lineQueue.length === 0 && !closed) stdout.resume();
 							return;
 						}
 						if (closed) {
@@ -458,6 +495,7 @@ export const LiveHookExecutor = HookExecutor.of({
 							return;
 						}
 						waiters.push((line) => resume2(Effect.succeed(line)));
+						stdout.resume();
 					});
 					resume(Effect.succeed({ pid: child.pid, waitForLine }));
 				},

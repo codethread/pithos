@@ -127,24 +127,26 @@ const isMissingProcessError = (error: PdxError): boolean => error.message.includ
 
 export const initPdx = (
 	config: PdxConfig,
-	input: { readonly update: boolean; readonly clean: boolean },
+	input: { readonly clean: boolean; readonly nuke: boolean },
 ) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem;
 		const pithos = yield* PithosClient;
 		const spawner = yield* Spawner;
-		if (input.update && input.clean) {
+		if (input.clean && input.nuke) {
 			yield* Effect.fail(
 				new PdxError({
 					code: "VALIDATION_ERROR",
-					message: "--update and --clean are mutually exclusive",
+					message: "--clean and --nuke are mutually exclusive",
 				}),
 			);
 		}
-		if (input.clean) {
+		if (input.nuke) {
 			yield* fs.removeFile(config.dataDir);
-		} else if (input.update) {
-			yield* fs.removeFile(`${config.dataDir}/templates`);
+		} else if (input.clean) {
+			yield* fs.removeFile(config.pithosDbPath);
+			yield* fs.removeFile(config.runsDir);
+			yield* fs.removeFile(config.logPath);
 		}
 		yield* fs.mkdir(config.dataDir);
 		yield* pithos.init();
@@ -156,15 +158,15 @@ export const openPdx = (
 	config: PdxConfig,
 	maxAfk: number,
 	intervalSeconds: number,
-	input: { readonly update: boolean; readonly clean: boolean },
+	input: { readonly clean: boolean; readonly nuke: boolean },
 ) =>
 	Effect.gen(function* () {
 		const tmux = yield* Tmux;
-		if (input.update && input.clean) {
+		if (input.clean && input.nuke) {
 			yield* Effect.fail(
 				new PdxError({
 					code: "VALIDATION_ERROR",
-					message: "--update and --clean are mutually exclusive",
+					message: "--clean and --nuke are mutually exclusive",
 				}),
 			);
 		}

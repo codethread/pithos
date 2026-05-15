@@ -54,14 +54,14 @@ type CommandInput =
 			readonly dataDir: string | undefined;
 			readonly maxAfk: number;
 			readonly intervalSeconds: number;
-			readonly update: boolean;
 			readonly clean: boolean;
+			readonly nuke: boolean;
 	  }
 	| {
 			readonly command: "init";
 			readonly dataDir: string | undefined;
-			readonly update: boolean;
 			readonly clean: boolean;
+			readonly nuke: boolean;
 	  }
 	| { readonly command: "close"; readonly dataDir: string | undefined }
 	| { readonly command: "daemon.status"; readonly dataDir: string | undefined }
@@ -167,15 +167,15 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 
 		switch (input.command) {
 			case "init":
-				yield* initPdx(config, { update: input.update, clean: input.clean }).pipe(
+				yield* initPdx(config, { clean: input.clean, nuke: input.nuke }).pipe(
 					Effect.provide(provided),
 				);
 				yield* Effect.sync(() => process.stdout.write(`${config.dataDir}\n`));
 				return;
 			case "open":
 				yield* openPdx(config, input.maxAfk, input.intervalSeconds, {
-					update: input.update,
 					clean: input.clean,
+					nuke: input.nuke,
 				}).pipe(Effect.provide(provided));
 				yield* Effect.sync(() => process.stdout.write("tmux attach -t pdx--pandora\n"));
 				return;
@@ -414,30 +414,30 @@ const makeCommand = (runtime: RuntimeInput) => {
 				Options.withDescription("Directory containing Pithos state and pdx supervisor logs."),
 				Options.optional,
 			),
-			update: Options.boolean("update").pipe(
-				Options.withDescription("Replace <data-dir>/templates from the repo bundled defaults."),
-			),
 			clean: Options.boolean("clean").pipe(
 				Options.withDescription(
-					"Wipe the entire pdx data dir before init, including DB, logs, and templates.",
+					"Wipe runtime state only (DB, runs, logs) before init. Templates and extensions are preserved.",
 				),
 			),
+			nuke: Options.boolean("nuke").pipe(
+				Options.withDescription("Wipe the entire pdx data dir before init."),
+			),
 		},
-		({ dataDir, update, clean }) =>
+		({ dataDir, clean, nuke }) =>
 			Effect.gen(function* () {
-				if (update && clean) {
+				if (clean && nuke) {
 					yield* Effect.fail(
 						new PdxError({
 							code: "VALIDATION_ERROR",
-							message: "--update and --clean are mutually exclusive",
+							message: "--clean and --nuke are mutually exclusive",
 						}),
 					);
 				}
 				yield* runCommand(runtime, {
 					command: "init",
 					dataDir: opt(dataDir),
-					update,
 					clean,
+					nuke,
 				});
 			}),
 	).pipe(Command.withDescription("Initialize the pdx data dir and editable templates only."));
@@ -457,26 +457,24 @@ const makeCommand = (runtime: RuntimeInput) => {
 				Options.withDescription("Seconds between pdx reconciliation loops."),
 				Options.withDefault(defaultIntervalSeconds),
 			),
-			update: Options.boolean("update").pipe(
-				Options.withDescription(
-					"Replace <data-dir>/templates from the repo bundled defaults before starting.",
-				),
-			),
 			clean: Options.boolean("clean").pipe(
 				Options.withDescription(
-					"Wipe the entire pdx data dir before starting, including DB, logs, and templates.",
+					"Wipe runtime state only (DB, runs, logs) before starting. Templates and extensions are preserved.",
 				),
 			),
+			nuke: Options.boolean("nuke").pipe(
+				Options.withDescription("Wipe the entire pdx data dir before starting."),
+			),
 		},
-		({ dataDir, maxAfk, intervalSeconds, update, clean }) =>
+		({ dataDir, maxAfk, intervalSeconds, clean, nuke }) =>
 			Effect.gen(function* () {
 				yield* parsePositiveInt(maxAfk, "--max-afk");
 				yield* parsePositiveInt(intervalSeconds, "--interval-seconds");
-				if (update && clean) {
+				if (clean && nuke) {
 					yield* Effect.fail(
 						new PdxError({
 							code: "VALIDATION_ERROR",
-							message: "--update and --clean are mutually exclusive",
+							message: "--clean and --nuke are mutually exclusive",
 						}),
 					);
 				}
@@ -485,8 +483,8 @@ const makeCommand = (runtime: RuntimeInput) => {
 					dataDir: opt(dataDir),
 					maxAfk,
 					intervalSeconds,
-					update,
 					clean,
+					nuke,
 				});
 			}),
 	).pipe(

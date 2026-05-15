@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import {
-	access,
 	appendFile,
+	chmod,
 	mkdir,
 	open,
 	readdir,
@@ -278,29 +278,27 @@ const isNodeErrorCode = (error: unknown, code: string): boolean =>
 
 const materializeSpawnerTemplates = async (dataDir: string): Promise<void> => {
 	const targetDir = join(dataDir, "templates");
-	const targetAgentsPath = join(targetDir, "agents.json");
-	await mkdir(targetDir, { recursive: true });
+	// Make the dir writable so it can be wiped (no-op if it doesn't exist yet)
 	try {
-		await access(targetAgentsPath);
-		return;
+		await chmod(targetDir, 0o755);
 	} catch (error) {
 		if (!isNodeErrorCode(error, "ENOENT")) throw error;
 	}
+	await rm(targetDir, { recursive: true, force: true });
+	await mkdir(targetDir, { recursive: true });
 	const entries = await readdir(bundledTemplatesDir, { withFileTypes: true });
 	for (const entry of entries) {
 		const sourcePath = join(bundledTemplatesDir, entry.name);
 		const targetPath = join(targetDir, entry.name);
-		try {
-			if (entry.isFile()) {
-				const content = await readFile(sourcePath, "utf8");
-				await writeFile(targetPath, content, { encoding: "utf8", flag: "wx" });
-			} else if (entry.isSymbolicLink()) {
-				await symlink(await readlink(sourcePath), targetPath);
-			}
-		} catch (error) {
-			if (!isNodeErrorCode(error, "EEXIST")) throw error;
+		if (entry.isFile()) {
+			const content = await readFile(sourcePath, "utf8");
+			await writeFile(targetPath, content, "utf8");
+			await chmod(targetPath, 0o444);
+		} else if (entry.isSymbolicLink()) {
+			await symlink(await readlink(sourcePath), targetPath);
 		}
 	}
+	await chmod(targetDir, 0o555);
 };
 
 export const makeSpawnerLive = (config: {

@@ -852,7 +852,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 		const log = yield* SupervisorLog;
 		const entries = yield* registry.list;
 		const ready = yield* pithos.briefing();
-		for (const agent of ["toil", "greed", "war", "envy"] as const) {
+		for (const agent of ["envy", "toil", "greed", "war"] as const) {
 			const policy = agentPolicy[agent];
 			const task = ready.find(
 				(candidate) =>
@@ -1157,13 +1157,16 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 								runId: PDX_SYSTEM_RUN_ID,
 							})
 							.pipe(
-								Effect.catchAll((error) =>
+								Effect.tapError((error) =>
 									log.write({
 										level: "error",
 										span: "pdx.hook",
-										msg: "hook enqueue failed",
+										msg: "hook enqueue failed, retrying",
 										data: { error: error.message },
 									}),
+								),
+								Effect.retry(
+									Schedule.union(Schedule.exponential("500 millis"), Schedule.spaced("30 seconds")),
 								),
 							);
 					}
@@ -1199,24 +1202,26 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 
 			const recentExits = yield* Ref.get(recentExitTimesRef);
 			if (recentExits.length >= HOOK_CRASH_LIMIT) {
-				yield* Ref.set(escalatedRef, true);
-				yield* pithos
+				const alertResult = yield* pithos
 					.createRepairAlert({
 						runId: PDX_SYSTEM_RUN_ID,
 						kind: "input_hook_stuck",
 						escalationTitle: "Input hook crash-looping — supervision stopped",
 						escalationBody: hookCrashLoopBody(argv, recentExits.length),
 					})
-					.pipe(
-						Effect.catchAll((error) =>
-							log.write({
-								level: "error",
-								span: "pdx.hook",
-								msg: "failed to create input_hook_stuck repair alert",
-								data: { error: error.message },
-							}),
-						),
-					);
+					.pipe(Effect.either);
+				if (Either.isRight(alertResult)) {
+					yield* Ref.set(escalatedRef, true);
+				} else {
+					yield* log.write({
+						level: "error",
+						span: "pdx.hook",
+						msg: "failed to create input_hook_stuck repair alert",
+						data: { error: alertResult.left.message },
+					});
+					// Sleep before retrying to avoid tight-looping when the alert store is unreachable.
+					yield* Effect.sleep("30 seconds");
+				}
 				continue;
 			}
 

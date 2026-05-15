@@ -126,7 +126,7 @@ const parseConfig = (dataDir: string, envHome = "/tmp/user-home") =>
 interface ReadyTaskInput {
 	readonly id?: string;
 	readonly scope_id: string;
-	readonly capability: "triage" | "design" | "execute" | "escalate";
+	readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 	readonly scope_kind?: "global" | "repo" | "worktree";
 	readonly canonical_path?: string | null;
 }
@@ -2402,6 +2402,33 @@ describe("pdx substrate", () => {
 		);
 	});
 
+	it("reconcile spawns envy before toil when both intake and triage tasks are ready", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const pithosCalls: string[] = [];
+		// Both an intake task (global) and triage tasks are ready.
+		const pithos = makePithos(pithosCalls, [
+			{ scope_id: "global", capability: "intake", scope_kind: "global", canonical_path: null },
+			{ scope_id: "global", capability: "triage", scope_kind: "global", canonical_path: null },
+		]);
+		const launches: unknown[] = [];
+		await runSpawnTick({
+			dataDir,
+			registry,
+			pithos,
+			launches,
+			runId: "run_envy",
+			sessionId: "session_envy",
+		});
+		// Envy must be launched first, not toil.
+		expect(pithosCalls).toContain("runUpsert:envy:run_envy");
+		expect(pithosCalls).not.toContain("runUpsert:toil:run_envy");
+		expect(launches).toEqual([
+			expect.objectContaining({ agent: "envy", mode: "afk", scopeId: "global" }),
+		]);
+	});
+
 	it("missing repo cwd before run creation repairs launch precondition without spawning", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const registry = await run(makeRegistry);
@@ -4066,5 +4093,71 @@ describe("runInputHookSupervisor", () => {
 		);
 		expect(repairAlertCall).toBeDefined();
 		expect(getSpawnCount()).toBe(5);
+	});
+
+	it("retries transient enqueue failure and still delivers the line", async () => {
+		let enqueueAttempts = 0;
+		const { executor } = makeQueueHookExecutor([['{"title":"retry-me","body":"b"}', null]]);
+		// Fail twice then succeed on the third attempt.
+		const pithos = makePithos([], [], {
+			taskEnqueue: () =>
+				Effect.gen(function* () {
+					enqueueAttempts++;
+					if (enqueueAttempts < 3) {
+						return yield* Effect.fail(
+							new PdxError({ code: "INTERNAL_ERROR", message: "transient db error" }),
+						);
+					}
+				}),
+		});
+
+		// Exponential retry uses Effect.sleep — advance TestClock to trigger each retry.
+		const program = Effect.gen(function* () {
+			const fiber = yield* Effect.fork(runInputHookSupervisor(hookTestConfig, ["fake-hook"]));
+			// Advance past the retry delays (500ms, then 1s).
+			for (let i = 0; i < 3; i++) {
+				yield* TestClock.adjust("5 seconds");
+				yield* Effect.yieldNow();
+				yield* Effect.yieldNow();
+				yield* Effect.yieldNow();
+			}
+			yield* Fiber.interrupt(fiber);
+		}).pipe(withHookServices(executor, pithos), Effect.provide(TestContext.TestContext));
+
+		await Effect.runPromise(program);
+
+		// Three attempts: two failures then one success on the third.
+		expect(enqueueAttempts).toBe(3);
+	});
+
+	it("does not permanently halt supervision when crash-loop alert creation fails", async () => {
+		const calls: string[] = [];
+		// Crash-loop executor: each spawn exits immediately.
+		const { executor, getSpawnCount } = makeQueueHookExecutor(
+			Array.from({ length: 20 }, () => [null]),
+		);
+		// createRepairAlert always fails — supervision must not escalate permanently.
+		const pithos = makePithos(calls, [], {
+			createRepairAlert: () =>
+				Effect.fail(new PdxError({ code: "INTERNAL_ERROR", message: "db down" })),
+		});
+
+		const program = Effect.gen(function* () {
+			const fiber = yield* Effect.fork(runInputHookSupervisor(hookTestConfig, ["crash-hook"]));
+			// Advance past crash/backoff cycles and the 30s alert-failure sleep.
+			// Each round: crash × 5 (with exponential backoff) + 30s alert-failure sleep.
+			for (let i = 0; i < 15; i++) {
+				yield* TestClock.adjust("30 seconds");
+				yield* Effect.yieldNow();
+				yield* Effect.yieldNow();
+				yield* Effect.yieldNow();
+			}
+			yield* Fiber.interrupt(fiber);
+		}).pipe(withHookServices(executor, pithos), Effect.provide(TestContext.TestContext));
+
+		await Effect.runPromise(program);
+
+		// Supervision must have continued past the crash limit (spawned more than 5 times).
+		expect(getSpawnCount()).toBeGreaterThan(5);
 	});
 });

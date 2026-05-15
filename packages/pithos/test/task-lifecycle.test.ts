@@ -670,7 +670,7 @@ describe("task lifecycle", () => {
 		db.close();
 
 		const graphText = renderGraphInspectText(
-			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
+			engine.graphInspect({ taskId: undefined, scope: repo, all: false, hideTerminal: false }),
 		);
 
 		// stale failed, dead_letter, and cancelled leaf tasks are hidden
@@ -694,7 +694,12 @@ describe("task lifecycle", () => {
 		);
 
 		const selectedStaleLeafGraphText = renderGraphInspectText(
-			engine.graphInspect({ taskId: staleFailedTask, scope: undefined, all: false }),
+			engine.graphInspect({
+				taskId: staleFailedTask,
+				scope: undefined,
+				all: false,
+				hideTerminal: false,
+			}),
 		);
 		expect(selectedStaleLeafGraphText).toContain(
 			`- ${staleFailedTask} [execute] [failed] stale failed leaf`,

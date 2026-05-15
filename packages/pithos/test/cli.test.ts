@@ -1004,22 +1004,28 @@ describe("pithos cli", () => {
 			return JSON.parse(result.stdout[0] ?? "") as { task: { id: string; token: number } };
 		};
 
-		it("hides failed and done leaf tasks from --all readable and JSON output", async () => {
+		it("hides terminal leaf tasks only when --hide-terminal is set", async () => {
 			const dbPath = tempDb();
 			await runCli(["init", "--fresh"], dbPath);
 			await upsertRun(dbPath, "run_toil");
 
-			const failedLeaf = await enqueueGlobalTriage(
+			const failedSource = await enqueueGlobalTriage(
 				dbPath,
 				"run_toil",
 				"Dead-end failed task",
 				"body",
 			);
+			const doneLeaf = await enqueueGlobalTriage(dbPath, "run_toil", "Dead-end done task", "body");
+			const cancelledLeaf = await enqueueGlobalTriage(
+				dbPath,
+				"run_toil",
+				"Dead-end cancelled task",
+				"body",
+			);
 			const active = await enqueueGlobalTriage(dbPath, "run_toil", "Active queued task", "body");
 
-			// Claim and fail the first task so it becomes a failed leaf
-			const claimed = await claimGlobal(dbPath, "run_toil");
-			expect(claimed.task.id).toBe(failedLeaf);
+			const failedClaim = await claimGlobal(dbPath, "run_toil");
+			expect(failedClaim.task.id).toBe(failedSource);
 			await runCli(
 				[
 					"task",
@@ -1027,25 +1033,58 @@ describe("pithos cli", () => {
 					"--run",
 					"run_toil",
 					"--token",
-					String(claimed.task.token),
+					String(failedClaim.task.token),
 					"--reason",
 					"abandoned",
-					failedLeaf,
+					failedSource,
 				],
 				dbPath,
 			);
 
-			// Without --hide-terminal: both tasks appear
-			const allText = await runCli(["graph", "inspect", "--all"], dbPath);
-			expect(normalizeGeneratedIds(allText.stdout[0] ?? "")).toContain("Dead-end failed task");
-			expect(normalizeGeneratedIds(allText.stdout[0] ?? "")).toContain("Active queued task");
+			const doneClaim = await claimGlobal(dbPath, "run_toil");
+			expect(doneClaim.task.id).toBe(doneLeaf);
+			await runCli(
+				[
+					"task",
+					"complete",
+					"--run",
+					"run_toil",
+					"--token",
+					String(doneClaim.task.token),
+					doneLeaf,
+				],
+				dbPath,
+			);
 
-			// With --hide-terminal: failed leaf is hidden, active task remains
+			await runCli(
+				["task", "cancel", "--run", "run_toil", "--reason", "abandoned", cancelledLeaf],
+				dbPath,
+			);
+
+			const allText = normalizeGeneratedIds(
+				(await runCli(["graph", "inspect", "--all"], dbPath)).stdout[0] ?? "",
+			);
+			expect(allText).toContain("Dead-end failed task");
+			expect(allText).not.toContain("Dead-end done task");
+			expect(allText).toContain("Dead-end cancelled task");
+			expect(allText).toContain("Active queued task");
+
+			const allJson = await runCli(["graph", "inspect", "--all", "--json"], dbPath);
+			const allParsed = JSON.parse(allJson.stdout[0] ?? "") as {
+				ok: boolean;
+				graph: { nodes: { id: string }[] };
+			};
+			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(failedSource);
+			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(doneLeaf);
+			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(cancelledLeaf);
+			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(active);
+
 			const hiddenText = await runCli(["graph", "inspect", "--all", "--hide-terminal"], dbPath);
-			expect(hiddenText.stdout[0] ?? "").not.toContain("Dead-end failed task");
+			expect(hiddenText.stdout[0] ?? "").toContain("Dead-end failed task");
+			expect(hiddenText.stdout[0] ?? "").not.toContain("Dead-end done task");
+			expect(hiddenText.stdout[0] ?? "").not.toContain("Dead-end cancelled task");
 			expect(hiddenText.stdout[0] ?? "").toContain("Active queued task");
 
-			// JSON output is also filtered
 			const hiddenJson = await runCli(
 				["graph", "inspect", "--all", "--hide-terminal", "--json"],
 				dbPath,
@@ -1054,7 +1093,9 @@ describe("pithos cli", () => {
 				ok: boolean;
 				graph: { nodes: { id: string }[] };
 			};
-			expect(parsed.graph.nodes.map((n) => n.id)).not.toContain(failedLeaf);
+			expect(parsed.graph.nodes.map((n) => n.id)).toContain(failedSource);
+			expect(parsed.graph.nodes.map((n) => n.id)).not.toContain(doneLeaf);
+			expect(parsed.graph.nodes.map((n) => n.id)).not.toContain(cancelledLeaf);
 			expect(parsed.graph.nodes.map((n) => n.id)).toContain(active);
 		});
 
@@ -1112,48 +1153,34 @@ describe("pithos cli", () => {
 			expect(parsed.graph.nodes.map((n) => n.id)).toContain(dependent);
 		});
 
-		it("retains the task-rooted task even when it is terminal", async () => {
+		it("retains the task-rooted task even when it is done", async () => {
 			const dbPath = tempDb();
 			await runCli(["init", "--fresh"], dbPath);
 			await upsertRun(dbPath, "run_toil");
 
-			const failedRoot = await enqueueGlobalTriage(
-				dbPath,
-				"run_toil",
-				"Terminal root task",
-				"body",
-			);
+			const doneRoot = await enqueueGlobalTriage(dbPath, "run_toil", "Terminal root task", "body");
 			const claimed = await claimGlobal(dbPath, "run_toil");
+			expect(claimed.task.id).toBe(doneRoot);
 			await runCli(
-				[
-					"task",
-					"fail",
-					"--run",
-					"run_toil",
-					"--token",
-					String(claimed.task.token),
-					"--reason",
-					"abandoned",
-					failedRoot,
-				],
+				["task", "complete", "--run", "run_toil", "--token", String(claimed.task.token), doneRoot],
 				dbPath,
 			);
 
 			const result = await runCli(
-				["graph", "inspect", "--task", failedRoot, "--hide-terminal"],
+				["graph", "inspect", "--task", doneRoot, "--hide-terminal"],
 				dbPath,
 			);
 			expect(result.stdout[0] ?? "").toContain("Terminal root task");
 
 			const jsonResult = await runCli(
-				["graph", "inspect", "--task", failedRoot, "--hide-terminal", "--json"],
+				["graph", "inspect", "--task", doneRoot, "--hide-terminal", "--json"],
 				dbPath,
 			);
 			const parsed = JSON.parse(jsonResult.stdout[0] ?? "") as {
 				ok: boolean;
 				graph: { nodes: { id: string }[] };
 			};
-			expect(parsed.graph.nodes.map((n) => n.id)).toContain(failedRoot);
+			expect(parsed.graph.nodes.map((n) => n.id)).toContain(doneRoot);
 		});
 	});
 

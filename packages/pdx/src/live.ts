@@ -437,6 +437,8 @@ export const LiveHookExecutor = HookExecutor.of({
 							(waiters.shift() as (line: string | null) => void)(line);
 						} else {
 							lineBuffer.push(line);
+							// backpressure: stop reading until consumer calls waitForLine
+							rl.pause();
 						}
 					};
 					rl.on("line", push);
@@ -448,6 +450,7 @@ export const LiveHookExecutor = HookExecutor.of({
 					const waitForLine: Effect.Effect<string | null, PdxError> = Effect.async((resume2) => {
 						if (lineBuffer.length > 0) {
 							resume2(Effect.succeed(lineBuffer.shift()!));
+							if (!closed) rl.resume();
 							return;
 						}
 						if (closed) {

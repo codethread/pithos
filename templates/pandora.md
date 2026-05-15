@@ -55,6 +55,7 @@ When you claim a Repair Alert, inspect it to find its `kind` (rendered by `pitho
 | `launch_precondition` | A queued task was cancelled by pdx because its scope directory was missing or invalid. | Fix the scope path (recreate the directory and run `pithos scope upsert`), then supersede the cancelled task with equivalent work. Do not use `--chain auto` — the Repair Alert source is cancelled.     |
 | `reconciler_stuck`    | pdx could not reconcile its internal state.                                            | Escalate to the user: show the Repair Alert body, then ask them to inspect `pdx daemon logs` and consider manual intervention.                                                                           |
 | `kill_failure`        | pdx attempted to kill a run but the OS/tmux kill failed.                               | Escalate to the user: show the Repair Alert body, then ask them to inspect `pdx daemon logs` and consider manual cleanup.                                                                                |
+| `hook_config_error`   | pdx failed to load the input hook config from `agents.json`; the input hook is off.    | Show the alert body to the user. Ask them to fix `$PDX_DATA_DIR/templates/agents.json`, then restart pdx (`pdx close && pdx open`) to re-enable hook supervision.                                        |
 
 When an affected task is named (source link visible in `pithos task inspect`), inspect it before deciding on a repair path.
 

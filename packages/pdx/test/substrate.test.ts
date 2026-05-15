@@ -1382,6 +1382,81 @@ describe("pdx substrate", () => {
 		expect(existsSync(config.socketPath)).toBe(false);
 	});
 
+	it("daemon creates hook_config_error repair alert when loadHooks fails", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const repairAlerts: Parameters<PithosClientService["createRepairAlert"]>[0][] = [];
+		const logRecords: { readonly level: string; readonly msg: string }[] = [];
+		const pithos = makePithos([], [], {
+			createRepairAlert: (input) =>
+				Effect.sync(() => {
+					repairAlerts.push(input);
+				}),
+		});
+		const log = SupervisorLog.of({
+			write: (record) =>
+				Effect.sync(() => {
+					logRecords.push(record);
+					return { ts: "now", ...record };
+				}),
+		});
+		const spawner = Spawner.of({
+			materializeTemplates: () => Effect.void,
+			renderAgent: (launch) =>
+				Effect.succeed({
+					...launch,
+					logicalName: PANDORA_TARGET,
+					harness: {
+						kind: "pi" as const,
+						argv: ["pi", launch.runId],
+						env: { PITHOS_RUN_ID: launch.runId },
+					},
+					sessionLogPath: `/tmp/${launch.runId}.jsonl`,
+					prompt: "test prompt",
+				}),
+			launchRenderedAgent: (rendered) =>
+				Effect.succeed({
+					...rendered,
+					logicalName: PANDORA_TARGET,
+					harnessKind: rendered.harness.kind,
+					hitl: { tmuxTarget: PANDORA_TARGET, panePid: 1 },
+				}),
+			renderSessionTranscript: () => Effect.succeed("test transcript\n"),
+			loadHooks: () =>
+				Effect.fail(new PdxError({ code: "CONFIG_ERROR", message: "malformed hooks.json" })),
+		});
+		const config = await parseConfig(dataDir);
+		const handle = await run(
+			runDaemon(config, 4, 5).pipe(
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(Registry, await run(makeRegistry)),
+				Effect.provideService(
+					Ids,
+					Ids.of({ nextRunId: Effect.succeed("run_pandora"), nextSessionId: Effect.succeed("s") }),
+				),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+				Effect.provideService(Process, alwaysLiveProcess),
+			),
+		);
+		await run(handle.close);
+		expect(repairAlerts).toHaveLength(1);
+		expect(repairAlerts[0]).toMatchObject({ kind: "hook_config_error", runId: PDX_SYSTEM_RUN_ID });
+		expect(repairAlerts[0]?.escalationTitle).toContain("Input hook disabled");
+		expect(repairAlerts[0]?.escalationBody).toContain("malformed hooks.json");
+		expect(logRecords).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					level: "error",
+					msg: "failed to load hooks config, input hook disabled",
+				}),
+			]),
+		);
+	});
+
 	it("status returns required top-level keys when daemon is down", async () => {
 		const tmux = Tmux.of({
 			hasSession: () => Effect.succeed(false),

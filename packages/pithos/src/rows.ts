@@ -66,6 +66,7 @@ export const RepairAlertKindSchema = Schema.Literal(
 	"reconciler_stuck",
 	"kill_failure",
 	"input_hook_stuck",
+	"hook_config_error",
 );
 export type RepairAlertKind = typeof RepairAlertKindSchema.Type;
 

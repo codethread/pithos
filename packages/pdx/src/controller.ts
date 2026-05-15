@@ -1683,14 +1683,21 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 		// Fork hook supervisor if hooks.input is configured
 		const hooks = yield* spawner.loadHooks().pipe(
 			Effect.catchAll((error) =>
-				log
-					.write({
-						level: "warn",
+				Effect.gen(function* () {
+					yield* log.write({
+						level: "error",
 						span: "pdx.daemon",
-						msg: "failed to load hooks config, skipping input hook",
+						msg: "failed to load hooks config, input hook disabled",
 						data: { error: error.message },
-					})
-					.pipe(Effect.zipRight(Effect.succeed({ input: undefined } as const))),
+					});
+					yield* pithos.createRepairAlert({
+						runId: PDX_SYSTEM_RUN_ID,
+						kind: "hook_config_error",
+						escalationTitle: "Input hook disabled: hook config failed to load",
+						escalationBody: `pdx failed to load the input hook configuration. The input hook is disabled for this daemon session.\n\nError: ${error.message}\n\nSuggested next steps: fix the hook configuration in $PDX_DATA_DIR/templates/agents.json, then restart pdx (pdx close && pdx open) to resume hook supervision.`,
+					});
+					return { input: undefined } as const;
+				}),
 			),
 		);
 		const hookFiber =

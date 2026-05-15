@@ -167,7 +167,8 @@ CREATE TABLE IF NOT EXISTS repair_alerts (
 		'launch_precondition',
 		'reconciler_stuck',
 		'kill_failure',
-		'input_hook_stuck'
+		'input_hook_stuck',
+		'hook_config_error'
 	)),
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -191,6 +192,7 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_source
 	ensureScopesArchivedAtColumn(db);
 	ensureScopesDescriptionColumn(db);
 	ensureRepairAlertsKindMigrated(db);
+	ensureRepairAlertsHookConfigKind(db);
 	seed(db);
 };
 
@@ -230,6 +232,40 @@ const ensureRepairAlertsKindMigrated = (db: Db): void => {
 					'reconciler_stuck',
 					'kill_failure',
 					'input_hook_stuck'
+				)),
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)
+		`).run();
+		db.prepare(sql`INSERT INTO repair_alerts_new SELECT * FROM repair_alerts`).run();
+		db.prepare(sql`DROP TABLE repair_alerts`).run();
+		db.prepare(sql`ALTER TABLE repair_alerts_new RENAME TO repair_alerts`).run();
+	})();
+	db.pragma("foreign_keys = ON");
+};
+
+// SQLite CHECK constraints cannot be altered in place; rebuild the table when the
+// stored DDL is missing the new kind so existing DBs accept 'hook_config_error'.
+const ensureRepairAlertsHookConfigKind = (db: Db): void => {
+	const rows = db
+		.prepare(sql`SELECT sql FROM sqlite_master WHERE type='table' AND name='repair_alerts'`)
+		.all() as { sql: string }[];
+	if (rows.length === 0) return;
+	const tableSql = rows[0]?.sql ?? "";
+	if (tableSql.includes("'hook_config_error'")) return;
+	db.pragma("foreign_keys = OFF");
+	db.transaction(() => {
+		db.prepare(sql`
+			CREATE TABLE repair_alerts_new (
+				task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
+				kind       TEXT NOT NULL CHECK (kind IN (
+					'interrupt',
+					'task_failed',
+					'dead_letter',
+					'launch_precondition',
+					'reconciler_stuck',
+					'kill_failure',
+					'input_hook_stuck',
+					'hook_config_error'
 				)),
 				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 			)

@@ -694,6 +694,7 @@ describe("pdx substrate", () => {
 			renderAgent: () => Effect.die("unexpected render"),
 			launchRenderedAgent: () => Effect.die("unexpected launch"),
 			renderSessionTranscript: () => Effect.die("unexpected transcript"),
+			loadHooks: () => Effect.succeed({}),
 		});
 		await run(
 			initPdx(config, { clean: true, nuke: false }).pipe(
@@ -731,6 +732,7 @@ describe("pdx substrate", () => {
 			renderAgent: () => Effect.die("unexpected render"),
 			launchRenderedAgent: () => Effect.die("unexpected launch"),
 			renderSessionTranscript: () => Effect.die("unexpected transcript"),
+			loadHooks: () => Effect.succeed({}),
 		});
 		await run(
 			initPdx(config, { clean: false, nuke: true }).pipe(

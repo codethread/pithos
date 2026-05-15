@@ -389,11 +389,8 @@ export const makeSpawnerLive = (config: {
 				catch: (error) => spawnerError("spawner transcript", error),
 			}),
 		loadHooks: () =>
-			Effect.tryPromise({
-				try: async () => {
-					await materializeSpawnerTemplates(config.dataDir);
-					return loadHooks(renderServices);
-				},
+			Effect.try({
+				try: () => loadHooks(renderServices),
 				catch: (error) => spawnerError("spawner load hooks", error),
 			}),
 	});

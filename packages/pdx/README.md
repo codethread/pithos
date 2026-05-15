@@ -29,7 +29,7 @@ pdx --help-json
 `pdx` is the local supervisor. It reconciles durable Pithos state with live control-plane resources:
 
 - one long-lived Pandora HITL Agent run
-- AFK mode Agent runs for Toil/War
+- AFK mode Agent runs for Toil/War/Envy
 - HITL mode Agent runs for Greed
 - tmux as the current Control-plane backend
 - a local pdx daemon tmux session and Unix socket

@@ -131,7 +131,7 @@ pdx reconcile loop (each tick settles lifecycle before spawning)
   4. write pdx-paced heartbeat for live HITL entries when due
   5. inspect claimable tasks from Pithos
   6. maintain exactly one live Pandora singleton
-  7. choose at most one ready non-Pandora task in seeded agent order (`toil`, `greed`, `war`)
+  7. choose at most one ready non-Pandora task in seeded agent order (`envy`, `toil`, `greed`, `war`); `envy` is checked first so intake tasks are never starved behind steady triage/design/execute work
   8. validate the chosen task's launch cwd before run creation/render/launch
        global scope -> `<data-dir>` must be present
        repo/worktree scope -> `scope.canonical_path` must exist and be a directory
@@ -186,7 +186,7 @@ Caps are counted from the in-memory registry, including `launching`, `live`, and
 
 Default reconcile interval is 5 seconds. `pdx open --interval-seconds <n>` remains available for tuning. There is no backoff in MVP.
 
-Spawn policy is intentionally simple in MVP: one spawn per reconcile tick, after lifecycle settlement, in seeded agent order (`pandora`, `toil`, `greed`, `war`). `repo` and `worktree` scopes use `scope.canonical_path` as cwd. `global` scope uses `<pdx data-dir>` as cwd.
+Spawn policy is intentionally simple in MVP: one spawn per reconcile tick, after lifecycle settlement, in seeded agent order (`pandora`, `envy`, `toil`, `greed`, `war`). `envy` is checked before `toil`/`greed`/`war` so intake tasks are not starved by steady triage/design/execute backlog. `repo` and `worktree` scopes use `scope.canonical_path` as cwd. `global` scope uses `<pdx data-dir>` as cwd.
 
 Before pdx creates a non-Pandora run, renders a prompt, or calls Spawner, it validates that the selected task's cwd exists and is a directory. pdx performs a final cwd check immediately before `runUpsert`; a missing repo/worktree cwd at either pre-run check calls the atomic Pithos launch-precondition transition and does not create a run.
 

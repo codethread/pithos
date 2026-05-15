@@ -45,6 +45,17 @@
 			},
 			"includes": ["_common.md"],
 			"template": "war.md"
+		},
+		{
+			"agent": "envy",
+			"mode": "afk",
+			"harness": {
+				"kind": "pi",
+				"model": "openai-codex/gpt-5.4",
+				"system_prompt_mode": "append"
+			},
+			"includes": ["_common.md"],
+			"template": "envy.md"
 		}
 	]
 }

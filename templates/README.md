@@ -66,7 +66,7 @@ Top-level shape:
 | Field                        | Required | Contract                                                                                                                                                                                                                                                     |
 | ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `agents`                     | yes      | array of manifest entries                                                                                                                                                                                                                                    |
-| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`                                                                                                                                                                                                                     |
+| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`, `envy`                                                                                                                                                                                                             |
 | `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                                                                                                                                                                                                          |
 | `harness.kind`               | yes      | `claude` or `pi`                                                                                                                                                                                                                                             |
 | `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                                                                                                                                                                                             |
@@ -85,6 +85,7 @@ Current built-in claim/enqueue contract:
 | `toil`     | `afk`      | `triage`   | `triage`, `design`, `execute`, `escalate` |
 | `greed`    | `hitl`     | `design`   | `triage`, `design`, `escalate`            |
 | `war`      | `afk`      | `execute`  | `escalate`                                |
+| `envy`     | `afk`      | `intake`   | `triage`, `design`, `escalate`            |
 
 Built-in claim/enqueue authorization stays in Pithos. If you change Agent kinds or Capabilities, update Pithos built-ins and keep the manifest's agent roster aligned.
 
@@ -128,6 +129,60 @@ copy any custom content out of `<data-dir>/templates/` and into
 individual files wholesale via the overlay. The read-only chmod on
 `<data-dir>/templates/` after seeding surfaces this contract immediately on any
 write attempt.
+
+## `hooks` field
+
+`agents.json` may contain an optional top-level `hooks` block to configure
+pdx-managed external processes:
+
+```json
+{
+  "agents": [...],
+  "hooks": {
+    "input": { "command": ["/path/to/script", "--arg"] }
+  }
+}
+```
+
+### `hooks.input` — NDJSON input hook
+
+When `hooks.input.command` is set, pdx spawns the specified executable as a
+long-running child process. The child emits newline-delimited JSON on stdout;
+pdx reads each line, validates it, and enqueues an `intake` task in global
+scope for Envy to classify.
+
+**Stdout line schema:** each line must be valid JSON with:
+
+- `title: string` — required, non-empty
+- `body: string` — required, non-empty
+
+Lines that fail validation are logged and skipped; the stream continues.
+
+**Command:** argv array — no shell evaluation. Example:
+
+```json
+{ "command": ["node", "/path/to/watcher.js", "--token", "abc"] }
+```
+
+**Lifecycle:**
+
+- pdx spawns the hook after Pandora is live and supervises it independently of
+  the reconcile loop.
+- Hook stdin is closed (producer-only).
+- Hook stdout is piped for NDJSON parsing; stderr is piped to
+  `<data-dir>/runs/hook.stderr.log`.
+- On exit, pdx restarts the hook with exponential backoff
+  (1s → 2s → 4s → 8s → 16s → 30s cap). Backoff resets after 60s of continuous
+  uptime.
+- If the hook exits 5 or more times within a 60s window, pdx stops restarting
+  and creates an `input_hook_stuck` repair alert for Pandora. To recover: fix
+  the script, then restart pdx.
+- On `pdx close`, pdx sends SIGTERM to the hook.
+
+**Envy:** intake tasks created by the input hook are claimed by Envy. Envy
+classifies each signal and enqueues a single downstream task (triage, design,
+or escalate). Workflow knowledge for how to classify specific signals lives in
+`extensions/templates/envy/` in the user data dir.
 
 ## Template contract
 

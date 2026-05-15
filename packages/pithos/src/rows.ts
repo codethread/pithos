@@ -22,7 +22,7 @@ export const RunRowSchema = Schema.Struct({
 export const TaskRowSchema = Schema.Struct({
 	id: NonEmptyString,
 	scope_id: NonEmptyString,
-	capability: Schema.Literal("triage", "design", "execute", "escalate"),
+	capability: Schema.Literal("triage", "design", "execute", "escalate", "intake"),
 	title: Schema.String,
 	body: Schema.String,
 	status: Schema.Literal(
@@ -65,6 +65,7 @@ export const RepairAlertKindSchema = Schema.Literal(
 	"launch_precondition",
 	"reconciler_stuck",
 	"kill_failure",
+	"input_hook_stuck",
 );
 export type RepairAlertKind = typeof RepairAlertKindSchema.Type;
 

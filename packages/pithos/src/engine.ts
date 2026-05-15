@@ -119,7 +119,12 @@ export interface Engine {
 		readonly capability: Capability;
 	}) => {
 		readonly ok: true;
-		readonly task: { readonly id: string; readonly status: "claimed"; readonly token: number };
+		readonly task: {
+			readonly id: string;
+			readonly status: "claimed";
+			readonly token: number;
+			readonly capability: Capability;
+		};
 	};
 	readonly heartbeat: (input: {
 		readonly runId: string | undefined;
@@ -575,7 +580,7 @@ SET status = 'claimed',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?
   AND status = 'queued'
-RETURNING id, fencing_token
+RETURNING id, fencing_token, capability
 `;
 
 const HarnessKindSchema = Schema.Literal("claude", "pi", "system");
@@ -2216,7 +2221,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				if (runRow.changes === 0) fail("VALIDATION_ERROR", "run already holds a task");
 
 				const updated = db.prepare(claimTaskUpdate).get(task.id) as
-					| { id: string; fencing_token: number }
+					| { id: string; fencing_token: number; capability: Capability }
 					| undefined;
 
 				const claimedTask =
@@ -2231,7 +2236,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 
 			return {
 				ok: true,
-				task: { id: claimed.id, status: "claimed", token: claimed.fencing_token },
+				task: {
+					id: claimed.id,
+					status: "claimed",
+					token: claimed.fencing_token,
+					capability: claimed.capability,
+				},
 			};
 		}),
 	heartbeat: ({ runId, taskId, token }) =>
@@ -2793,6 +2803,10 @@ const scopeForCapability = (db: Db, scopeId: string, cap: Capability): ScopeRow 
 
 	if (cap === "escalate" && s.kind !== "global") {
 		fail("VALIDATION_ERROR", `escalate requires global scope; got ${scopeId}`);
+	}
+
+	if (cap === "intake" && s.kind !== "global") {
+		fail("VALIDATION_ERROR", `intake requires global scope; got ${scopeId}`);
 	}
 
 	if (

@@ -7,6 +7,7 @@ import type { PdxConfig } from "./config.js";
 import {
 	Clock,
 	FileSystem,
+	HookExecutor,
 	Ids,
 	PithosClient,
 	Process,
@@ -661,12 +662,13 @@ const agentPolicy = {
 	toil: { capability: "triage", mode: "afk" },
 	greed: { capability: "design", mode: "hitl" },
 	war: { capability: "execute", mode: "afk" },
+	envy: { capability: "intake", mode: "afk" },
 } as const;
 
 const launchPreconditionTitle = (taskId: string): string => `Repair unlaunchable task ${taskId}`;
 
 const launchPreconditionBody = (input: {
-	readonly agent: "toil" | "greed" | "war";
+	readonly agent: "toil" | "greed" | "war" | "envy";
 	readonly taskId: string;
 	readonly scopeId: string;
 	readonly canonicalPath: string;
@@ -675,11 +677,11 @@ const launchPreconditionBody = (input: {
 	`pdx could not launch a queued task because its scope runtime path is not an existing directory.\n\nAgent: ${input.agent}\nTask: ${input.taskId}\nScope: ${input.scopeId}\nPath: ${input.canonicalPath}\nReason: ${input.reason}\n\nSuggested next steps: inspect the cancelled task and repair the broken chain by upserting a valid scope and superseding the task, or replan the work.`;
 
 const escalateLaunchPrecondition = (input: {
-	readonly agent: "toil" | "greed" | "war";
+	readonly agent: "toil" | "greed" | "war" | "envy";
 	readonly task: {
 		readonly id: string;
 		readonly scope_id: string;
-		readonly capability: "triage" | "design" | "execute" | "escalate";
+		readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 		readonly canonical_path: string | null;
 	};
 	readonly cwd: string;
@@ -708,11 +710,11 @@ const escalateLaunchPrecondition = (input: {
 	);
 
 const escalateLaunchPreconditionIfStillMatching = (input: {
-	readonly agent: "toil" | "greed" | "war";
+	readonly agent: "toil" | "greed" | "war" | "envy";
 	readonly task: {
 		readonly id: string;
 		readonly scope_id: string;
-		readonly capability: "triage" | "design" | "execute" | "escalate";
+		readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 		readonly canonical_path: string | null;
 	};
 	readonly cwd: string;
@@ -734,7 +736,7 @@ const escalateLaunchPreconditionIfStillMatching = (input: {
 
 const hasAgentScopeCap = (
 	entries: readonly RegistryEntry[],
-	agent: "toil" | "greed" | "war",
+	agent: "toil" | "greed" | "war" | "envy",
 	scopeId: string,
 ): boolean => entries.some((entry) => entry.agent === agent && entry.scopeId === scopeId);
 
@@ -850,7 +852,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 		const log = yield* SupervisorLog;
 		const entries = yield* registry.list;
 		const ready = yield* pithos.briefing();
-		for (const agent of ["toil", "greed", "war"] as const) {
+		for (const agent of ["toil", "greed", "war", "envy"] as const) {
 			const policy = agentPolicy[agent];
 			const task = ready.find(
 				(candidate) =>
@@ -1055,6 +1057,179 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				pid: launched.afk?.pid,
 			});
 			return;
+		}
+	});
+
+const HOOK_CRASH_WINDOW_MILLIS = 60_000;
+const HOOK_CRASH_LIMIT = 5;
+const HOOK_UPTIME_RESET_MILLIS = 60_000;
+const HOOK_BACKOFF_CAP_SECONDS = 30;
+
+const hookStderrPath = (config: PdxConfig): string => `${config.runsDir}/hook.stderr.log`;
+
+const parseIntakeLine = (raw: string): { title: string; body: string } | null => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+	const rec = parsed as Record<string, unknown>;
+	if (typeof rec.title !== "string" || rec.title.length === 0) return null;
+	if (typeof rec.body !== "string" || rec.body.length === 0) return null;
+	return { title: rec.title, body: rec.body };
+};
+
+const hookCrashLoopBody = (argv: readonly string[], recentExitCount: number): string =>
+	[
+		`The input hook exited ${recentExitCount} times within ${HOOK_CRASH_WINDOW_MILLIS / 1000}s. pdx has stopped restarting it.`,
+		"",
+		`Command: ${JSON.stringify(argv)}`,
+		"",
+		"Suggested next steps: fix the hook script, then restart pdx (pdx close && pdx open) to resume hook supervision.",
+	].join("\n");
+
+export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[]) =>
+	Effect.gen(function* () {
+		const hookExec = yield* HookExecutor;
+		const pithos = yield* PithosClient;
+		const log = yield* SupervisorLog;
+
+		const recentExitTimesRef = yield* Ref.make<readonly number[]>([]);
+		const escalatedRef = yield* Ref.make(false);
+		const consecutiveCrashesRef = yield* Ref.make(0);
+
+		while (true) {
+			const escalated = yield* Ref.get(escalatedRef);
+			if (escalated) {
+				yield* Effect.sleep("30 seconds");
+				continue;
+			}
+
+			const spawnedAt = Date.now();
+
+			// Attempt spawn; on failure log and fall through to crash tracking.
+			const spawnAttempt = yield* hookExec.spawn(argv, hookStderrPath(config)).pipe(
+				Effect.map((handle) => ({ ok: true as const, handle })),
+				Effect.catchAll((error) =>
+					log
+						.write({
+							level: "error",
+							span: "pdx.hook",
+							msg: "hook spawn failed",
+							data: { error: error.message },
+						})
+						.pipe(Effect.map(() => ({ ok: false as const }))),
+				),
+			);
+
+			if (spawnAttempt.ok) {
+				const handle = spawnAttempt.handle;
+				yield* log.write({
+					level: "info",
+					span: "pdx.hook",
+					msg: "hook spawned",
+					data: { pid: handle.pid },
+				});
+				yield* reportLifecycle({ kind: "hook_spawned", pid: handle.pid });
+
+				const readLoop = Effect.gen(function* () {
+					while (true) {
+						const line = yield* handle.waitForLine;
+						if (line === null) return;
+						const item = parseIntakeLine(line);
+						if (item === null) {
+							yield* log.write({
+								level: "warn",
+								span: "pdx.hook",
+								msg: "hook line invalid, skipping",
+								data: { line: line.slice(0, 200) },
+							});
+							continue;
+						}
+						yield* pithos
+							.taskEnqueue({
+								scope: "global",
+								capability: "intake",
+								title: item.title,
+								body: item.body,
+								runId: PDX_SYSTEM_RUN_ID,
+							})
+							.pipe(
+								Effect.catchAll((error) =>
+									log.write({
+										level: "error",
+										span: "pdx.hook",
+										msg: "hook enqueue failed",
+										data: { error: error.message },
+									}),
+								),
+							);
+					}
+				});
+
+				yield* readLoop.pipe(
+					Effect.ensuring(
+						hookExec.kill(handle.pid, "SIGTERM").pipe(Effect.catchAll(() => Effect.void)),
+					),
+				);
+
+				yield* reportLifecycle({ kind: "hook_removed", pid: handle.pid, reason: "crash" });
+			}
+
+			// child exited (or spawn failed) — track crash
+			const now = Date.now();
+			const uptimeMs = now - spawnedAt;
+			yield* log.write({
+				level: "warn",
+				span: "pdx.hook",
+				msg: "hook exited",
+				data: { uptime_ms: uptimeMs },
+			});
+
+			if (uptimeMs >= HOOK_UPTIME_RESET_MILLIS) {
+				yield* Ref.set(recentExitTimesRef, [now]);
+				yield* Ref.set(consecutiveCrashesRef, 1);
+			} else {
+				const cutoff = now - HOOK_CRASH_WINDOW_MILLIS;
+				yield* Ref.update(recentExitTimesRef, (times) => [...times.filter((t) => t > cutoff), now]);
+				yield* Ref.update(consecutiveCrashesRef, (n) => n + 1);
+			}
+
+			const recentExits = yield* Ref.get(recentExitTimesRef);
+			if (recentExits.length >= HOOK_CRASH_LIMIT) {
+				yield* Ref.set(escalatedRef, true);
+				yield* pithos
+					.createRepairAlert({
+						runId: PDX_SYSTEM_RUN_ID,
+						kind: "input_hook_stuck",
+						escalationTitle: "Input hook crash-looping — supervision stopped",
+						escalationBody: hookCrashLoopBody(argv, recentExits.length),
+					})
+					.pipe(
+						Effect.catchAll((error) =>
+							log.write({
+								level: "error",
+								span: "pdx.hook",
+								msg: "failed to create input_hook_stuck repair alert",
+								data: { error: error.message },
+							}),
+						),
+					);
+				continue;
+			}
+
+			// exponential backoff before restart
+			const crashes = yield* Ref.get(consecutiveCrashesRef);
+			const backoffSeconds = Math.min(Math.pow(2, crashes - 1), HOOK_BACKOFF_CAP_SECONDS);
+			yield* log.write({
+				level: "info",
+				span: "pdx.hook",
+				msg: "hook restarting after backoff",
+				data: { backoff_seconds: backoffSeconds, crash_count: crashes },
+			});
+			yield* Effect.sleep(`${backoffSeconds} seconds`);
 		}
 	});
 
@@ -1473,6 +1648,7 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 	Effect.gen(function* () {
 		const fs = yield* FileSystem;
 		const pithos = yield* PithosClient;
+		const spawner = yield* Spawner;
 		const log = yield* SupervisorLog;
 		yield* fs.mkdir(config.runsDir);
 		yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon starting" });
@@ -1498,10 +1674,30 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 			Effect.repeat(Schedule.spaced(`${intervalSeconds} seconds`)),
 			Effect.fork,
 		);
+
+		// Fork hook supervisor if hooks.input is configured
+		const hooks = yield* spawner.loadHooks().pipe(
+			Effect.catchAll((error) =>
+				log
+					.write({
+						level: "warn",
+						span: "pdx.daemon",
+						msg: "failed to load hooks config, skipping input hook",
+						data: { error: error.message },
+					})
+					.pipe(Effect.zipRight(Effect.succeed({ input: undefined } as const))),
+			),
+		);
+		const hookFiber =
+			hooks.input !== undefined
+				? yield* runInputHookSupervisor(config, hooks.input.command).pipe(Effect.fork)
+				: null;
+
 		const shutdown = yield* Deferred.make<void, never>();
 		const stop = Effect.gen(function* () {
 			yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon stopping" });
 			yield* Fiber.interrupt(loop);
+			if (hookFiber !== null) yield* Fiber.interrupt(hookFiber);
 			for (const entry of yield* registry.list) {
 				if (entry.tmuxTarget !== undefined) {
 					yield* tmux

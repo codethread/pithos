@@ -79,7 +79,16 @@ const ManifestSchema = Schema.Struct({
 	appends: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
 	template: Schema.NonEmptyString,
 });
-const AgentsFileSchema = Schema.Struct({ agents: Schema.Array(ManifestSchema) });
+
+const HookCommandSchema = Schema.Array(Schema.NonEmptyString).pipe(Schema.minItems(1));
+const InputHookSchema = Schema.Struct({ command: HookCommandSchema });
+const HooksSchema = Schema.Struct({ input: Schema.optional(InputHookSchema) });
+const AgentsFileSchema = Schema.Struct({
+	agents: Schema.Array(ManifestSchema),
+	hooks: Schema.optionalWith(HooksSchema, { default: () => ({}) }),
+});
+
+export type HooksConfig = Schema.Schema.Type<typeof HooksSchema>;
 type Manifest = Schema.Schema.Type<typeof ManifestSchema>;
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown, path: string): A => {
@@ -146,6 +155,16 @@ const loadManifests = (services: RenderServices = LiveSpawnerServices): readonly
 	const parsed = decode(Schema.parseJson(AgentsFileSchema), agentsContent, paths.agentsPath);
 	for (const manifest of parsed.agents) validateManifestContract(manifest);
 	return parsed.agents;
+};
+
+export const loadHooks = (services: RenderServices = LiveSpawnerServices): HooksConfig => {
+	const paths = templateAssetPaths(services);
+	const parsed = decode(
+		Schema.parseJson(AgentsFileSchema),
+		readText(paths.agentsPath, services),
+		paths.agentsPath,
+	);
+	return parsed.hooks;
 };
 
 const validateManifestContract = (manifest: Manifest): void => {
@@ -274,6 +293,7 @@ const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {
 	toil: ["pithos scope", "pithos task"],
 	greed: ["pithos scope", "pithos task"],
 	pandora: ["pithos scope", "pithos task", "pithos graph", "pithos events", "pithos briefing"],
+	envy: ["pithos scope", "pithos task"],
 };
 
 const PANDORA_PDX_COMMAND_PATHS = ["pdx run transcript", "pdx run show", "pdx task show"] as const;

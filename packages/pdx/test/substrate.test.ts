@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { Effect, Ref } from "effect";
+import { Effect, Fiber, Ref, TestClock, TestContext } from "effect";
 import { parsePdxConfig } from "../src/config.js";
 import { PdxError } from "../src/errors.js";
 import { parseIpcRequest } from "../src/ipc.js";
@@ -15,6 +15,7 @@ import { makeSupervisorLog } from "../src/log.js";
 import {
 	Clock,
 	FileSystem,
+	HookExecutor,
 	Ids,
 	LifecycleReporter,
 	makeRegistry,
@@ -25,6 +26,7 @@ import {
 	SupervisorLog,
 	Tmux,
 	type FileSystemService,
+	type HookExecutorService,
 	type LaunchAgentInput,
 	type LaunchAgentResult,
 	type PithosClientService,
@@ -47,10 +49,12 @@ import {
 	loggedReconcileTick,
 	reconcileTick,
 	runDaemon,
+	runInputHookSupervisor,
 	runShowPdx,
 	statusPdx,
 	taskShowPdx,
 } from "../src/controller.js";
+import { type PdxConfig } from "../src/config.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
@@ -320,6 +324,7 @@ const makeSpawner = (input: {
 			),
 		renderSessionTranscript:
 			input.renderSessionTranscript ?? (() => Effect.succeed("test transcript\n")),
+		loadHooks: () => Effect.succeed({}),
 	});
 
 const upsertPandora = (registry: RegistryService) =>
@@ -649,6 +654,7 @@ describe("pdx substrate", () => {
 			renderAgent: () => Effect.die("unexpected render"),
 			launchRenderedAgent: () => Effect.die("unexpected launch"),
 			renderSessionTranscript: () => Effect.die("unexpected transcript"),
+			loadHooks: () => Effect.succeed({}),
 		});
 		await run(
 			initPdx(config, { clean: false, nuke: false }).pipe(
@@ -3934,5 +3940,131 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(entries).toHaveLength(1);
+	});
+});
+
+describe("runInputHookSupervisor", () => {
+	const hookTestConfig: PdxConfig = {
+		dataDir: "/tmp/pdx-hook-test",
+		socketPath: "/tmp/pdx-hook-test/pdx.sock",
+		logPath: "/tmp/pdx-hook-test/pdx.jsonl",
+		runsDir: "/tmp/pdx-hook-test/runs",
+		daemonEntrypoint: "/tmp/pdx",
+		pithosDbPath: "/tmp/pdx-hook-test/pithos.sqlite",
+	};
+
+	const makeQueueHookExecutor = (linesBySpawn: readonly (readonly (string | null)[])[]) => {
+		let spawnCount = 0;
+		const killedPids: number[] = [];
+
+		const executor: HookExecutorService = {
+			spawn: () =>
+				Effect.gen(function* () {
+					const spawnIndex = spawnCount++;
+					const linesToEmit = linesBySpawn[spawnIndex] ?? [null];
+					const indexRef = yield* Ref.make(0);
+					const pid = 10000 + spawnIndex;
+					return {
+						pid,
+						waitForLine: Ref.getAndUpdate(indexRef, (i) => i + 1).pipe(
+							Effect.map((i) => linesToEmit[i] ?? null),
+						),
+					};
+				}),
+			kill: (pid) =>
+				Effect.sync(() => {
+					killedPids.push(pid);
+				}),
+			isAlive: () => Effect.succeed(false),
+		};
+
+		return { executor, killedPids, getSpawnCount: () => spawnCount };
+	};
+
+	const withHookServices =
+		(hookExec: HookExecutorService, pithos: ReturnType<typeof makePithos>) =>
+		<A, E>(
+			effect: Effect.Effect<A, E, HookExecutor | PithosClient | SupervisorLog | LifecycleReporter>,
+		) =>
+			effect.pipe(
+				Effect.provideService(HookExecutor, hookExec),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(SupervisorLog, testLog),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+			);
+
+	it("enqueues valid intake lines", async () => {
+		const calls: string[] = [];
+		const { executor } = makeQueueHookExecutor([
+			[
+				'{"title":"t1","body":"b1"}',
+				'{"title":"t2","body":"b2"}',
+				'{"title":"t3","body":"b3"}',
+				null,
+			],
+		]);
+
+		const program = Effect.gen(function* () {
+			const fiber = yield* Effect.fork(runInputHookSupervisor(hookTestConfig, ["fake-hook"]));
+			// The readLoop runs synchronously (Effect.sync); one yield lets it complete and reach sleep
+			yield* Effect.yieldNow();
+			yield* Effect.yieldNow();
+			yield* Fiber.interrupt(fiber);
+		}).pipe(withHookServices(executor, makePithos(calls)));
+
+		await Effect.runPromise(program);
+
+		expect(calls.filter((c) => c.startsWith("taskEnqueue:intake:"))).toHaveLength(3);
+		expect(calls).toContain("taskEnqueue:intake:t1");
+		expect(calls).toContain("taskEnqueue:intake:t2");
+		expect(calls).toContain("taskEnqueue:intake:t3");
+	});
+
+	it("skips malformed lines without affecting valid ones", async () => {
+		const calls: string[] = [];
+		const { executor } = makeQueueHookExecutor([
+			['{"title":"ok1","body":"b1"}', "not-json", '{"title":"ok2","body":"b2"}', null],
+		]);
+
+		const program = Effect.gen(function* () {
+			const fiber = yield* Effect.fork(runInputHookSupervisor(hookTestConfig, ["fake-hook"]));
+			yield* Effect.yieldNow();
+			yield* Effect.yieldNow();
+			yield* Fiber.interrupt(fiber);
+		}).pipe(withHookServices(executor, makePithos(calls)));
+
+		await Effect.runPromise(program);
+
+		expect(calls.filter((c) => c.startsWith("taskEnqueue:intake:"))).toHaveLength(2);
+		expect(calls).toContain("taskEnqueue:intake:ok1");
+		expect(calls).toContain("taskEnqueue:intake:ok2");
+	});
+
+	it("creates input_hook_stuck repair alert after 5 rapid crashes", async () => {
+		const calls: string[] = [];
+		const { executor, getSpawnCount } = makeQueueHookExecutor(
+			Array.from({ length: 8 }, () => [null]),
+		);
+
+		const program = Effect.gen(function* () {
+			const fiber = yield* Effect.fork(runInputHookSupervisor(hookTestConfig, ["crash-hook"]));
+			// Advance through crash/backoff cycles: 1s + 2s + 4s + 8s + escalate
+			// Use generous adjustments with multiple yields for scheduler interleaving
+			for (let i = 0; i < 6; i++) {
+				yield* TestClock.adjust("30 seconds");
+				yield* Effect.yieldNow();
+				yield* Effect.yieldNow();
+				yield* Effect.yieldNow();
+			}
+			yield* Fiber.interrupt(fiber);
+		}).pipe(withHookServices(executor, makePithos(calls)), Effect.provide(TestContext.TestContext));
+
+		await Effect.runPromise(program);
+
+		const repairAlertCall = calls.find(
+			(c) => c.includes("createRepairAlert") && c.includes("input_hook_stuck"),
+		);
+		expect(repairAlertCall).toBeDefined();
+		expect(getSpawnCount()).toBe(5);
 	});
 });

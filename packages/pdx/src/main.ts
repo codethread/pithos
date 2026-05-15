@@ -21,6 +21,7 @@ import {
 	ClockLive,
 	FileSystemLive,
 	IdsLive,
+	LiveHookExecutor,
 	makePithosClientLive,
 	makeSpawnerLive,
 	ProcessLive,
@@ -30,6 +31,7 @@ import { makeNoopLifecycleReporter, makeStdoutLifecycleReporter } from "./lifecy
 import {
 	Clock,
 	FileSystem,
+	HookExecutor,
 	Ids,
 	LifecycleReporter,
 	makeRegistry,
@@ -163,6 +165,7 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 			Layer.succeed(Registry, registry),
 			Layer.succeed(PithosClient, makePithosClientLive(config.pithosDbPath)),
 			Layer.succeed(Spawner, makeSpawnerLive(config)),
+			Layer.succeed(HookExecutor, LiveHookExecutor),
 		);
 
 		switch (input.command) {

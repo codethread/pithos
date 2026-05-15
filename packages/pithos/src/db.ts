@@ -166,7 +166,8 @@ CREATE TABLE IF NOT EXISTS repair_alerts (
 		'dead_letter',
 		'launch_precondition',
 		'reconciler_stuck',
-		'kill_failure'
+		'kill_failure',
+		'input_hook_stuck'
 	)),
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -189,6 +190,7 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_source
 `);
 	ensureScopesArchivedAtColumn(db);
 	ensureScopesDescriptionColumn(db);
+	ensureRepairAlertsKindMigrated(db);
 	seed(db);
 };
 
@@ -204,6 +206,39 @@ const ensureScopesDescriptionColumn = (db: Db): void => {
 	if (!columns.some((column) => column.name === "description")) {
 		db.exec(sql`ALTER TABLE scopes ADD COLUMN description TEXT`);
 	}
+};
+
+// SQLite CHECK constraints cannot be altered in place; rebuild the table when the
+// stored DDL is missing the new kind so existing DBs accept 'input_hook_stuck'.
+const ensureRepairAlertsKindMigrated = (db: Db): void => {
+	const rows = db
+		.prepare(sql`SELECT sql FROM sqlite_master WHERE type='table' AND name='repair_alerts'`)
+		.all() as { sql: string }[];
+	if (rows.length === 0) return;
+	const tableSql = rows[0]?.sql ?? "";
+	if (tableSql.includes("'input_hook_stuck'")) return;
+	db.pragma("foreign_keys = OFF");
+	db.transaction(() => {
+		db.prepare(sql`
+			CREATE TABLE repair_alerts_new (
+				task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
+				kind       TEXT NOT NULL CHECK (kind IN (
+					'interrupt',
+					'task_failed',
+					'dead_letter',
+					'launch_precondition',
+					'reconciler_stuck',
+					'kill_failure',
+					'input_hook_stuck'
+				)),
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)
+		`).run();
+		db.prepare(sql`INSERT INTO repair_alerts_new SELECT * FROM repair_alerts`).run();
+		db.prepare(sql`DROP TABLE repair_alerts`).run();
+		db.prepare(sql`ALTER TABLE repair_alerts_new RENAME TO repair_alerts`).run();
+	})();
+	db.pragma("foreign_keys = ON");
 };
 
 const seed = (db: Db): void => {

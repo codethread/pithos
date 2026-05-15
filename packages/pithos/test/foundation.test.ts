@@ -62,13 +62,16 @@ describe("pithos foundation", () => {
 				.prepare("SELECT agent_kind || ':' || capability FROM agent_claims ORDER BY 1")
 				.pluck()
 				.all(),
-		).toEqual(["greed:design", "pandora:escalate", "toil:triage", "war:execute"]);
+		).toEqual(["envy:intake", "greed:design", "pandora:escalate", "toil:triage", "war:execute"]);
 		expect(
 			db
 				.prepare("SELECT agent_kind || ':' || capability FROM agent_enqueues ORDER BY 1")
 				.pluck()
 				.all(),
 		).toEqual([
+			"envy:design",
+			"envy:escalate",
+			"envy:triage",
 			"greed:design",
 			"greed:escalate",
 			"greed:triage",
@@ -76,6 +79,7 @@ describe("pithos foundation", () => {
 			"pandora:escalate",
 			"pandora:triage",
 			"pdx:escalate",
+			"pdx:intake",
 			"toil:design",
 			"toil:escalate",
 			"toil:execute",
@@ -107,8 +111,8 @@ describe("pithos foundation", () => {
 		initEngine(dbPath, true).close();
 		initEngine(dbPath).close();
 		const db = new Database(dbPath);
-		expect(db.prepare("SELECT COUNT(*) FROM agent_kinds").pluck().get()).toBe(5);
-		expect(db.prepare("SELECT COUNT(*) FROM agent_enqueues").pluck().get()).toBe(12);
+		expect(db.prepare("SELECT COUNT(*) FROM agent_kinds").pluck().get()).toBe(6);
+		expect(db.prepare("SELECT COUNT(*) FROM agent_enqueues").pluck().get()).toBe(16);
 	});
 
 	it("exported built-in contract matches seeded rows", () => {

@@ -1,5 +1,6 @@
 import { Context, Effect, SynchronizedRef } from "effect";
 import type { RepairAlertKind, RunOutput as PithosRunOutput } from "@pdx/pithos";
+import type { HooksConfig } from "@pdx/spawner";
 import type { PdxError } from "./errors.js";
 
 export interface ProcessResult {
@@ -74,7 +75,7 @@ export interface PithosReadyTask {
 	readonly scope_id: string;
 	readonly scope_kind: "global" | "repo" | "worktree";
 	readonly canonical_path: string | null;
-	readonly capability: "triage" | "design" | "execute" | "escalate";
+	readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 }
 
 export interface PithosClientService {
@@ -121,7 +122,7 @@ export interface PithosClientService {
 				readonly id: string;
 				readonly status: string;
 				readonly scope_id: string;
-				readonly capability: "triage" | "design" | "execute" | "escalate";
+				readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 				readonly canonical_path: string | null;
 			};
 		},
@@ -130,7 +131,7 @@ export interface PithosClientService {
 	readonly taskHeartbeat: (input: { readonly runId: string }) => Effect.Effect<void, PdxError>;
 	readonly taskEnqueue: (input: {
 		readonly scope: string;
-		readonly capability: "triage" | "design" | "execute" | "escalate";
+		readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 		readonly title: string;
 		readonly body: string;
 		readonly runId?: string;
@@ -140,7 +141,7 @@ export interface PithosClientService {
 		readonly runId: string;
 		readonly expectedTaskId: string;
 		readonly expectedScopeId: string;
-		readonly expectedCapability: "triage" | "design" | "execute" | "escalate";
+		readonly expectedCapability: "triage" | "design" | "execute" | "escalate" | "intake";
 		readonly canonicalPath: string;
 		readonly agentKind: string;
 		readonly reason: string;
@@ -163,7 +164,7 @@ export class PithosClient extends Context.Tag("pdx/PithosClient")<
 >() {}
 
 export interface LaunchAgentInput {
-	readonly agent: "pandora" | "toil" | "greed" | "war";
+	readonly agent: "pandora" | "toil" | "greed" | "war" | "envy";
 	readonly mode: "afk" | "hitl";
 	readonly runId: string;
 	readonly sessionId: string;
@@ -183,7 +184,7 @@ export interface RenderedAgent extends LaunchAgentInput {
 }
 
 export interface LaunchAgentResult {
-	readonly agent: "pandora" | "toil" | "greed" | "war";
+	readonly agent: "pandora" | "toil" | "greed" | "war" | "envy";
 	readonly mode: "afk" | "hitl";
 	readonly runId: string;
 	readonly sessionId: string;
@@ -206,12 +207,31 @@ export interface SpawnerService {
 		readonly sessionLogPath: string;
 		readonly limit: number | undefined;
 	}) => Effect.Effect<string, PdxError>;
+	readonly loadHooks: () => Effect.Effect<HooksConfig, PdxError>;
 }
 export class Spawner extends Context.Tag("pdx/Spawner")<Spawner, SpawnerService>() {}
 
+export interface HookChildHandle {
+	readonly pid: number;
+	readonly waitForLine: Effect.Effect<string | null, PdxError>;
+}
+
+export interface HookExecutorService {
+	readonly spawn: (
+		argv: readonly string[],
+		stderrPath: string,
+	) => Effect.Effect<HookChildHandle, PdxError>;
+	readonly kill: (pid: number, signal: "SIGTERM" | "SIGKILL") => Effect.Effect<void, PdxError>;
+	readonly isAlive: (pid: number) => Effect.Effect<boolean>;
+}
+export class HookExecutor extends Context.Tag("pdx/HookExecutor")<
+	HookExecutor,
+	HookExecutorService
+>() {}
+
 export interface RegistryEntry {
 	readonly runId: string;
-	readonly agent: "pandora" | "toil" | "greed" | "war";
+	readonly agent: "pandora" | "toil" | "greed" | "war" | "envy";
 	readonly scopeId: string;
 	readonly mode: "afk" | "hitl";
 	readonly state: "launching" | "live" | "terminating";
@@ -287,7 +307,7 @@ export type NudgeReason = "claimable_escalate" | "task_failed_alert" | "task_dea
 export type LifecycleEvent =
 	| {
 			readonly kind: "spawned";
-			readonly agent: "pandora" | "toil" | "greed" | "war";
+			readonly agent: "pandora" | "toil" | "greed" | "war" | "envy";
 			readonly mode: "afk" | "hitl";
 			readonly runId: string;
 			readonly scopeId: string;
@@ -297,7 +317,7 @@ export type LifecycleEvent =
 	  }
 	| {
 			readonly kind: "removed";
-			readonly agent: "pandora" | "toil" | "greed" | "war";
+			readonly agent: "pandora" | "toil" | "greed" | "war" | "envy";
 			readonly runId: string;
 			readonly scopeId: string;
 			readonly reason: "terminated" | "natural_death" | "no_claim_timeout";
@@ -316,6 +336,15 @@ export type LifecycleEvent =
 			readonly message: string;
 			readonly attempt: number;
 			readonly maxAttempts: number;
+	  }
+	| {
+			readonly kind: "hook_spawned";
+			readonly pid: number;
+	  }
+	| {
+			readonly kind: "hook_removed";
+			readonly pid: number;
+			readonly reason: "shutdown" | "crash";
 	  };
 
 export interface LifecycleReporterService {

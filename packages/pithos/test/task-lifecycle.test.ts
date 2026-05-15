@@ -252,6 +252,114 @@ describe("task lifecycle", () => {
 		).toThrow(PithosError);
 	});
 
+	it("enforces intake capability authorization: pdx enqueues, envy claims, others rejected", () => {
+		const { engine } = setup();
+		engine.runUpsert({
+			agent: "envy",
+			mode: "afk",
+			scope: "global",
+			cwd: "/tmp",
+			sessionId: "s_envy",
+			harnessKind: "pi",
+			sessionLogPath: "/tmp/s_envy.jsonl",
+			runId: "run_envy",
+		});
+		// pdx system actor can enqueue intake
+		engine.enqueue({
+			scope: "global",
+			capability: "intake",
+			title: "signal from hook",
+			body: "mr ready for review",
+			bodyFile: undefined,
+			runId: "run_pdx_system",
+			dependsOn: [],
+			chain: "none",
+		});
+		// envy can claim intake
+		expect(
+			engine.claim({ runId: "run_envy", scope: "global", capability: "intake" }).task.capability,
+		).toBe("intake");
+		// pdx cannot claim intake (no claim grant)
+		expect(() => engine.claim({ runId: "run_pdx", scope: "global", capability: "intake" })).toThrow(
+			PithosError,
+		);
+		// toil cannot enqueue intake (no enqueue grant)
+		expect(() =>
+			engine.enqueue({
+				scope: "global",
+				capability: "intake",
+				title: "bad",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_toil",
+				dependsOn: [],
+				chain: "none",
+			}),
+		).toThrow(PithosError);
+		// war cannot claim intake
+		expect(() => engine.claim({ runId: "run_war", scope: "global", capability: "intake" })).toThrow(
+			PithosError,
+		);
+	});
+
+	it("rejects intake tasks enqueued in non-global scope", () => {
+		const { engine } = setup();
+		const { scope: repoScope } = engine.scopeUpsert({ kind: "repo", path: "/some/repo" });
+		expect(() =>
+			engine.enqueue({
+				scope: repoScope.id,
+				capability: "intake",
+				title: "bad intake",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_pdx_system",
+				dependsOn: [],
+				chain: "none",
+			}),
+		).toThrow(PithosError);
+	});
+
+	it("repair_alerts accepts input_hook_stuck kind and repair_alerts migration is idempotent", () => {
+		const { dbPath, engine } = setup();
+		// Seed a pdx system run so createRepairAlert can reference it
+		const alertTask = engine.enqueue({
+			scope: "global",
+			capability: "escalate",
+			title: "hook stuck",
+			body: "hook has crashed 5 times",
+			bodyFile: undefined,
+			runId: "run_pdx_system",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+		// Insert into repair_alerts with input_hook_stuck kind — should not throw
+		const db = new Database(dbPath);
+		expect(() =>
+			db
+				.prepare("INSERT INTO repair_alerts (task_id, kind) VALUES (?, ?)")
+				.run(alertTask, "input_hook_stuck"),
+		).not.toThrow();
+		// All existing kinds still accepted
+		const existingTask = engine.enqueue({
+			scope: "global",
+			capability: "escalate",
+			title: "interrupt alert",
+			body: "run was interrupted",
+			bodyFile: undefined,
+			runId: "run_pdx_system",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+		expect(() =>
+			db
+				.prepare("INSERT INTO repair_alerts (task_id, kind) VALUES (?, ?)")
+				.run(existingTask, "interrupt"),
+		).not.toThrow();
+		db.close();
+		// Running migrate again on the same DB is idempotent
+		engine.init({ fresh: false });
+	});
+
 	it("rejects archived scopes in enqueue, claim, and supersede", () => {
 		const { dbPath, engine, repo } = setup();
 		const taskId = engine.enqueue({

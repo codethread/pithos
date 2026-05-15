@@ -14,11 +14,13 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { execFile, spawn } from "node:child_process";
+import { createInterface as createReadlineInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
 	bundledTemplatesDir,
 	launchRenderedAgent,
+	loadHooks,
 	LiveSpawnerServices as liveSpawnerServices,
 	renderAgent,
 	renderSessionTranscript,
@@ -30,10 +32,12 @@ import { PdxError } from "./errors.js";
 import {
 	FileSystem,
 	Clock,
+	HookExecutor,
 	Ids,
 	PithosClient,
 	Process,
 	Spawner,
+	type HookChildHandle,
 	type PithosClientService,
 	type ProcessResult,
 } from "./services.js";
@@ -384,5 +388,104 @@ export const makeSpawnerLive = (config: {
 							),
 				catch: (error) => spawnerError("spawner transcript", error),
 			}),
+		loadHooks: () =>
+			Effect.tryPromise({
+				try: async () => {
+					await materializeSpawnerTemplates(config.dataDir);
+					return loadHooks(renderServices);
+				},
+				catch: (error) => spawnerError("spawner load hooks", error),
+			}),
 	});
 };
+
+export const LiveHookExecutor = HookExecutor.of({
+	spawn: (argv, stderrPath) =>
+		Effect.async<HookChildHandle, PdxError>((resume) => {
+			const [file, ...args] = argv;
+			if (file === undefined) {
+				resume(
+					Effect.fail(new PdxError({ code: "VALIDATION_ERROR", message: "hook command is empty" })),
+				);
+				return;
+			}
+			open(stderrPath, "a").then(
+				(stderrFd) => {
+					const child = spawn(file, args, {
+						stdio: ["ignore", "pipe", stderrFd.fd],
+						detached: false,
+					});
+					if (child.pid === undefined || child.stdout === null) {
+						void stderrFd.close().catch(() => undefined);
+						child.kill("SIGTERM");
+						resume(
+							Effect.fail(
+								new PdxError({
+									code: "PROCESS_ERROR",
+									message: "hook spawn failed: no pid or stdout",
+								}),
+							),
+						);
+						return;
+					}
+					const rl = createReadlineInterface({ input: child.stdout, terminal: false });
+					const lineBuffer: (string | null)[] = [];
+					const waiters: ((line: string | null) => void)[] = [];
+					let closed = false;
+					const push = (line: string | null): void => {
+						if (waiters.length > 0) {
+							(waiters.shift() as (line: string | null) => void)(line);
+						} else {
+							lineBuffer.push(line);
+						}
+					};
+					rl.on("line", push);
+					rl.on("close", () => {
+						closed = true;
+						while (waiters.length > 0) (waiters.shift() as (line: string | null) => void)(null);
+						void stderrFd.close().catch(() => undefined);
+					});
+					const waitForLine: Effect.Effect<string | null, PdxError> = Effect.async((resume2) => {
+						if (lineBuffer.length > 0) {
+							resume2(Effect.succeed(lineBuffer.shift()!));
+							return;
+						}
+						if (closed) {
+							resume2(Effect.succeed(null));
+							return;
+						}
+						waiters.push((line) => resume2(Effect.succeed(line)));
+					});
+					resume(Effect.succeed({ pid: child.pid, waitForLine }));
+				},
+				(err) => {
+					resume(
+						Effect.fail(
+							new PdxError({
+								code: "FS_ERROR",
+								message: `hook stderr open failed: ${String(err)}`,
+							}),
+						),
+					);
+				},
+			);
+		}),
+	kill: (pid, signal) =>
+		Effect.try({
+			try: () => void process.kill(pid, signal),
+			catch: (error) =>
+				new PdxError({
+					code: "PROCESS_ERROR",
+					message: `hook kill ${pid} ${signal} failed: ${String(error)}`,
+				}),
+		}),
+	isAlive: (pid) =>
+		Effect.sync(() => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		}),
+});

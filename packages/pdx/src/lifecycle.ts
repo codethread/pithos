@@ -64,6 +64,10 @@ export const formatLifecycleEvent = (now: Date, event: LifecycleEvent): string =
 		}
 		case "error":
 			return `${timestamp} ${red}error${reset} ${event.span} ${dim}attempt=${event.attempt}/${event.maxAttempts}${reset} ${event.message}`;
+		case "hook_spawned":
+			return `${timestamp} ${green}hook${reset} spawned ${dim}pid=${event.pid}${reset}`;
+		case "hook_removed":
+			return `${timestamp} ${red}hook${reset} removed ${dim}${event.reason}${reset} pid=${event.pid}`;
 	}
 };
 

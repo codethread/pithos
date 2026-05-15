@@ -41,7 +41,7 @@ Each `agents.json` entry has this shape:
 
 Fields:
 
-- `agent`: one of `pandora`, `toil`, `greed`, `war`.
+- `agent`: one of `pandora`, `toil`, `greed`, `war`, `envy`.
 - `mode`: `afk` or `hitl`; must match the mode Pandora's Box launches.
 - `harness.kind`: `claude` or `pi`.
 - `harness.model`: non-empty model string passed to the selected harness CLI.
@@ -118,6 +118,32 @@ appended after the template is fully rendered, so they do not participate in
 
 Templates receive launch/self-claim context only. They do not receive task
 bodies.
+
+## Input hook and Envy customization
+
+`agents.json` accepts an optional top-level `hooks` block. The only hook today
+is `hooks.input`, which points pdx at a long-running executable that emits
+NDJSON on stdout. Each valid line produces an `intake` task claimed by Envy.
+
+```json
+{
+	"agents": [...],
+	"hooks": {
+		"input": { "command": ["/path/to/watcher", "--flag"] }
+	}
+}
+```
+
+`command` is an argv array — no shell evaluation. pdx supervises the process:
+restarts on exit with exponential backoff, escalates after 5 crashes in 60s.
+
+Each NDJSON line must have `title` (string) and `body` (string). pdx enqueues
+the resulting intake task in global scope; all other fields are managed by pdx.
+
+**Envy routing knowledge** lives in `extensions/templates/envy/` in the user
+data dir. Add include files there and reference them from the Envy template
+using `{{extensions/templates/envy/my-rules.md}}` to teach Envy how to
+classify signals specific to your workflow.
 
 ## Safe editing checklist
 

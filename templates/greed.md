@@ -21,6 +21,10 @@ Prioritise code quality, shared understanding, and the right design over speed. 
 - claims: {{claims}}
 - enqueues: {{enqueues}}
 
+{{shared/repo-default-branch-guard.md}}
+
+{{_common-hitl.md}}
+
 ## Required flow
 
 1. Claim exactly one design task.

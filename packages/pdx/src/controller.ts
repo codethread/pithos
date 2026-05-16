@@ -15,6 +15,7 @@ import {
 	Spawner,
 	SupervisorLog,
 	Tmux,
+	type HookExecutorService,
 	type NudgeReason,
 	type RegistryEntry,
 	type TmuxService,
@@ -1067,6 +1068,21 @@ const HOOK_BACKOFF_CAP_SECONDS = 30;
 
 const hookStderrPath = (config: PdxConfig): string => `${config.runsDir}/hook.stderr.log`;
 
+const nowMillis = Clock.pipe(
+	Effect.flatMap((clock) => clock.nowIso),
+	Effect.flatMap((nowIso) => {
+		const millis = Date.parse(nowIso);
+		return Number.isNaN(millis)
+			? Effect.fail(
+					new PdxError({
+						code: "PROCESS_ERROR",
+						message: `clock provided invalid now iso: ${nowIso}`,
+					}),
+				)
+			: Effect.succeed(millis);
+	}),
+);
+
 const parseIntakeLine = (raw: string): { title: string; body: string } | null => {
 	let parsed: unknown;
 	try {
@@ -1090,7 +1106,38 @@ const hookCrashLoopBody = (argv: readonly string[], recentExitCount: number): st
 		"Suggested next steps: fix the hook script, then restart pdx (pdx close && pdx open) to resume hook supervision.",
 	].join("\n");
 
-export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[]) =>
+const killHookIfPresent = (
+	hookExec: HookExecutorService,
+	pid: number,
+	signal: "SIGTERM" | "SIGKILL",
+) =>
+	hookExec
+		.kill(pid, signal)
+		.pipe(
+			Effect.catchAll((error) => (isMissingProcessError(error) ? Effect.void : Effect.fail(error))),
+		);
+
+const terminateHookChild = (hookExec: HookExecutorService, pid: number) =>
+	Effect.gen(function* () {
+		if (!(yield* hookExec.isAlive(pid))) return;
+		yield* killHookIfPresent(hookExec, pid, "SIGTERM");
+		if (!(yield* hookExec.isAlive(pid))) return;
+		yield* killHookIfPresent(hookExec, pid, "SIGKILL");
+		if (yield* hookExec.isAlive(pid)) {
+			yield* Effect.fail(
+				new PdxError({
+					code: "PROCESS_ERROR",
+					message: `hook process ${pid} still alive after SIGKILL`,
+				}),
+			);
+		}
+	});
+
+export const runInputHookSupervisor = (
+	config: PdxConfig,
+	argv: readonly string[],
+	currentPidRef?: Ref.Ref<number | null>,
+) =>
 	Effect.gen(function* () {
 		const hookExec = yield* HookExecutor;
 		const pithos = yield* PithosClient;
@@ -1099,6 +1146,7 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 		const recentExitTimesRef = yield* Ref.make<readonly number[]>([]);
 		const escalatedRef = yield* Ref.make(false);
 		const consecutiveCrashesRef = yield* Ref.make(0);
+		const hookPidRef = currentPidRef ?? (yield* Ref.make<number | null>(null));
 
 		while (true) {
 			const escalated = yield* Ref.get(escalatedRef);
@@ -1107,7 +1155,7 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 				continue;
 			}
 
-			const spawnedAt = Date.now();
+			const spawnedAt = yield* nowMillis;
 
 			// Attempt spawn; on failure log and fall through to crash tracking.
 			const spawnAttempt = yield* hookExec.spawn(argv, hookStderrPath(config)).pipe(
@@ -1126,6 +1174,7 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 
 			if (spawnAttempt.ok) {
 				const handle = spawnAttempt.handle;
+				yield* Ref.set(hookPidRef, handle.pid);
 				yield* log.write({
 					level: "info",
 					span: "pdx.hook",
@@ -1172,10 +1221,11 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 					}
 				});
 
+				const clearHookPidAfterTerminate = terminateHookChild(hookExec, handle.pid).pipe(
+					Effect.zipRight(Ref.set(hookPidRef, null)),
+				);
 				yield* readLoop.pipe(
-					Effect.ensuring(
-						hookExec.kill(handle.pid, "SIGTERM").pipe(Effect.catchAll(() => Effect.void)),
-					),
+					Effect.ensuring(clearHookPidAfterTerminate.pipe(Effect.catchAll(() => Effect.void))),
 					// Absorb read errors (e.g. HOOK_OUTPUT_OVERFLOW) so the outer crash-
 					// tracking loop can log, back off, and restart the hook normally.
 					Effect.catchTag("PdxError", (error) =>
@@ -1187,12 +1237,24 @@ export const runInputHookSupervisor = (config: PdxConfig, argv: readonly string[
 						}),
 					),
 				);
+				if ((yield* Ref.get(hookPidRef)) !== null) {
+					yield* clearHookPidAfterTerminate.pipe(
+						Effect.tapError((error) =>
+							log.write({
+								level: "error",
+								span: "pdx.hook",
+								msg: "hook termination failed",
+								data: { pid: handle.pid, error: error.message },
+							}),
+						),
+					);
+				}
 
 				yield* reportLifecycle({ kind: "hook_removed", pid: handle.pid, reason: "crash" });
 			}
 
 			// child exited (or spawn failed) — track crash
-			const now = Date.now();
+			const now = yield* nowMillis;
 			const uptimeMs = now - spawnedAt;
 			yield* log.write({
 				level: "warn",
@@ -1683,6 +1745,7 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 		const registry = yield* Registry;
 		const tmux = yield* Tmux;
 		const processService = yield* Process;
+		const hookPidRef = yield* Ref.make<number | null>(null);
 		const consecutiveReconcileFailures = yield* Ref.make(0);
 		yield* loggedReconcileTick(config, maxAfk, consecutiveReconcileFailures);
 		const loop = yield* loggedReconcileTick(config, maxAfk, consecutiveReconcileFailures).pipe(
@@ -1704,22 +1767,38 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 						runId: PDX_SYSTEM_RUN_ID,
 						kind: "hook_config_error",
 						escalationTitle: "Input hook disabled: hook config failed to load",
-						escalationBody: `pdx failed to load the input hook configuration. The input hook is disabled for this daemon session.\n\nError: ${error.message}\n\nSuggested next steps: fix the hook configuration in $PDX_DATA_DIR/templates/agents.json, then restart pdx (pdx close && pdx open) to resume hook supervision.`,
+						escalationBody: `pdx failed to load the input hook configuration. The input hook is disabled for this daemon session.\n\nError: ${error.message}\n\nSuggested next steps: fix the agents.json manifest overlay (usually $PDX_DATA_DIR/extensions/templates/agents.json for custom hooks), then restart pdx (pdx close && pdx open) to resume hook supervision.`,
 					});
 					return { input: undefined } as const;
 				}),
 			),
 		);
-		const hookFiber =
-			hooks.input !== undefined
-				? yield* runInputHookSupervisor(config, hooks.input.command).pipe(Effect.fork)
+		const hookCommand = hooks.input?.command;
+		const hookRuntime =
+			hookCommand !== undefined
+				? yield* Effect.gen(function* () {
+						const hookExec = yield* HookExecutor;
+						const fiber = yield* runInputHookSupervisor(config, hookCommand, hookPidRef).pipe(
+							Effect.provideService(HookExecutor, hookExec),
+							Effect.fork,
+						);
+						return { fiber, hookExec } as const;
+					})
 				: null;
 
 		const shutdown = yield* Deferred.make<void, never>();
 		const stop = Effect.gen(function* () {
 			yield* log.write({ level: "info", span: "pdx.daemon", msg: "daemon stopping" });
 			yield* Fiber.interrupt(loop);
-			if (hookFiber !== null) yield* Fiber.interrupt(hookFiber);
+			if (hookRuntime !== null) {
+				yield* Fiber.interrupt(hookRuntime.fiber);
+				const hookPid = yield* Ref.get(hookPidRef);
+				if (hookPid !== null) {
+					yield* terminateHookChild(hookRuntime.hookExec, hookPid).pipe(
+						Effect.zipRight(Ref.set(hookPidRef, null)),
+					);
+				}
+			}
 			for (const entry of yield* registry.list) {
 				if (entry.tmuxTarget !== undefined) {
 					yield* tmux

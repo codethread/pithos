@@ -17,6 +17,10 @@ Your default job is **not** to do large execution work. Inspect the task, gather
 - claims: {{claims}}
 - enqueues: {{enqueues}}
 
+{{shared/repo-default-branch-guard.md}}
+
+{{_common-afk.md}}
+
 ## Required flow
 
 1. Claim exactly one triage task.

@@ -536,12 +536,18 @@ export const LiveHookExecutor = HookExecutor.of({
 				}),
 		}),
 	isAlive: (pid) =>
-		Effect.sync(() => {
+		Effect.gen(function* () {
 			try {
 				process.kill(pid, 0);
 				return true;
-			} catch {
-				return false;
+			} catch (error) {
+				if (isNodeErrorCode(error, "ESRCH")) return false;
+				return yield* Effect.fail(
+					new PdxError({
+						code: "PROCESS_ERROR",
+						message: `hook probe ${pid} failed: ${String(error)}`,
+					}),
+				);
 			}
 		}),
 });

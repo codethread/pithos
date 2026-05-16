@@ -15,6 +15,10 @@ Claim one execute task and perform the requested implementation work in the prov
 - claims: {{claims}}
 - enqueues: {{enqueues}}
 
+{{war/cwd-guard.md}}
+
+{{_common-afk.md}}
+
 ## Required flow
 
 1. Claim exactly one execute task.

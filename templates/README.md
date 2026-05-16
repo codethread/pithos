@@ -34,6 +34,8 @@ is upgraded and `pdx init` or `pdx open` is run.
 - `agents.json` — agent manifest: mode, harness kind/model/tools, include list, appends list, template file
 - `*.md` — prompt templates per agent kind
 - `_common.md` — shared include
+- `_common-afk.md` — AFK-only runtime rules
+- `_common-hitl.md` — HITL-only runtime rules
 - `AGENTS.md` — config-editing guide for direct agent sessions in this directory
 - `CLAUDE.md` — symlink to `AGENTS.md` for Claude Code
 
@@ -55,7 +57,7 @@ Top-level shape:
 				"system_prompt_mode": "append",
 				"tools": ["bash", "read"]
 			},
-			"includes": ["_common.md"],
+			"includes": ["_common.md", "_common-afk.md"],
 			"appends": ["~/my-extensions/war-extra.md"],
 			"template": "war.md"
 		}
@@ -63,19 +65,19 @@ Top-level shape:
 }
 ```
 
-| Field                        | Required | Contract                                                                                                                                                                                                                                                     |
-| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `agents`                     | yes      | array of manifest entries                                                                                                                                                                                                                                    |
-| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`, `envy`                                                                                                                                                                                                             |
-| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                                                                                                                                                                                                          |
-| `harness.kind`               | yes      | `claude` or `pi`                                                                                                                                                                                                                                             |
-| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                                                                                                                                                                                             |
-| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`                                                                                                                                                                                         |
-| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value                                                                                                                                                                                    |
-| `harness.argv`               | optional | verbatim string array; tokens are inserted after the binary name and before all Spawner-managed flags; each element must be non-empty; use for harness features not modeled by other fields, e.g. `["--plugin-dir", "~/my-plugins"]` for Claude Code plugins |
-| `includes`                   | optional | unique template paths resolved through the overlay; relative paths resolve from the templates directory; absolute and `~/` paths are allowed; no recursive rendering                                                                                         |
-| `appends`                    | optional | unique template paths resolved through the overlay; concatenated verbatim **after** the rendered template, joined by `\n\n---\n\n`; same path resolution rules as `includes`                                                                                 |
-| `template`                   | yes      | template path resolved through the overlay; relative paths resolve from the templates directory; absolute and `~/` paths are allowed                                                                                                                         |
+| Field                        | Required | Contract                                                                                                                                                                                                                                                                      |
+| ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents`                     | yes      | array of manifest entries                                                                                                                                                                                                                                                     |
+| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`, `envy`                                                                                                                                                                                                                              |
+| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                                                                                                                                                                                                                           |
+| `harness.kind`               | yes      | `claude` or `pi`                                                                                                                                                                                                                                                              |
+| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                                                                                                                                                                                                              |
+| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`                                                                                                                                                                                                          |
+| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value                                                                                                                                                                                                     |
+| `harness.argv`               | optional | verbatim string array; tokens are inserted after the binary name and before all Spawner-managed flags; each element must be non-empty; use for harness features not modeled by other fields, e.g. `["--plugin-dir", "~/my-plugins"]` for Claude Code plugins                  |
+| `includes`                   | optional | unique template paths resolved through the overlay; relative paths resolve from the templates directory; absolute and `~/` paths are allowed; no recursive rendering. Use includes for pre-claim guard/preamble content that must appear before the template's required flow. |
+| `appends`                    | optional | unique template paths resolved through the overlay; concatenated verbatim **after** the rendered template, joined by `\n\n---\n\n`; same path resolution rules as `includes`                                                                                                  |
+| `template`                   | yes      | template path resolved through the overlay; relative paths resolve from the templates directory; absolute and `~/` paths are allowed                                                                                                                                          |
 
 Current built-in claim/enqueue contract:
 
@@ -181,8 +183,9 @@ Lines that fail validation are logged and skipped; the stream continues.
 
 **Envy:** intake tasks created by the input hook are claimed by Envy. Envy
 classifies each signal and enqueues a single downstream task (triage, design,
-or escalate). Workflow knowledge for how to classify specific signals lives in
-`extensions/templates/envy/` in the user data dir.
+or escalate). Add workflow-specific classification knowledge through Envy
+template overrides or appends, commonly under `extensions/templates/envy/` in
+the user data dir.
 
 ## Template contract
 

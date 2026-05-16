@@ -89,6 +89,7 @@ const AgentsFileSchema = Schema.Struct({
 });
 
 export type HooksConfig = Schema.Schema.Type<typeof HooksSchema>;
+type AgentsFile = Schema.Schema.Type<typeof AgentsFileSchema>;
 type Manifest = Schema.Schema.Type<typeof ManifestSchema>;
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown, path: string): A => {
@@ -144,28 +145,24 @@ const templateAssetPaths = (services: RenderServices) => {
 	};
 };
 
-const loadManifests = (services: RenderServices = LiveSpawnerServices): readonly Manifest[] => {
+const loadAgentsFile = (services: RenderServices = LiveSpawnerServices): AgentsFile => {
 	const paths = templateAssetPaths(services);
-	const agentsContent = resolveWithOverlay(
+	const agentsFile = resolveWithOverlayFile(
 		paths.extensionsTemplatesDir,
 		paths.templatesDir,
 		"agents.json",
 		services,
 	);
-	const parsed = decode(Schema.parseJson(AgentsFileSchema), agentsContent, paths.agentsPath);
+	const parsed = decode(Schema.parseJson(AgentsFileSchema), agentsFile.content, agentsFile.path);
 	for (const manifest of parsed.agents) validateManifestContract(manifest);
-	return parsed.agents;
+	return parsed;
 };
 
-export const loadHooks = (services: RenderServices = LiveSpawnerServices): HooksConfig => {
-	const paths = templateAssetPaths(services);
-	const parsed = decode(
-		Schema.parseJson(AgentsFileSchema),
-		readText(paths.agentsPath, services),
-		paths.agentsPath,
-	);
-	return parsed.hooks;
-};
+const loadManifests = (services: RenderServices = LiveSpawnerServices): readonly Manifest[] =>
+	loadAgentsFile(services).agents;
+
+export const loadHooks = (services: RenderServices = LiveSpawnerServices): HooksConfig =>
+	loadAgentsFile(services).hooks;
 
 const validateManifestContract = (manifest: Manifest): void => {
 	const includeSet = new Set(manifest.includes);
@@ -223,19 +220,20 @@ const isEnoent = (error: unknown): boolean =>
 // extensions/templates/<rel> over templates/<rel> so users can override
 // individual files without modifying the bundle. Only absent files (ENOENT)
 // trigger fallback; permission denied or other IO errors fail loudly.
-const resolveWithOverlay = (
+const resolveWithOverlayFile = (
 	extensionsTemplatesDir: string | undefined,
 	templatesDir: string,
 	path: string,
 	services: RenderServices,
-): string => {
+): { readonly path: string; readonly content: string } => {
 	if (path === "~" || path.startsWith("~/") || path.startsWith("/")) {
-		return readText(resolveTemplateReference(templatesDir, path), services);
+		const resolvedPath = resolveTemplateReference(templatesDir, path);
+		return { path: resolvedPath, content: readText(resolvedPath, services) };
 	}
 	if (extensionsTemplatesDir !== undefined) {
 		const extensionsPath = join(extensionsTemplatesDir, path);
 		try {
-			return services.readText(extensionsPath);
+			return { path: extensionsPath, content: services.readText(extensionsPath) };
 		} catch (error) {
 			if (!isEnoent(error)) {
 				throw new SpawnerError({
@@ -246,8 +244,16 @@ const resolveWithOverlay = (
 			// file absent in extensions layer; fall through to bundle
 		}
 	}
-	return readText(join(templatesDir, path), services);
+	const bundledPath = join(templatesDir, path);
+	return { path: bundledPath, content: readText(bundledPath, services) };
 };
+
+const resolveWithOverlay = (
+	extensionsTemplatesDir: string | undefined,
+	templatesDir: string,
+	path: string,
+	services: RenderServices,
+): string => resolveWithOverlayFile(extensionsTemplatesDir, templatesDir, path, services).content;
 
 const SpawnerConfigSchema = Schema.Struct({
 	pithosDb: Schema.NonEmptyString,

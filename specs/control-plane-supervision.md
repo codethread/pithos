@@ -21,7 +21,7 @@ Agents claim work themselves through Pithos. The daemon never injects task conte
 - Keep spawner as a launcher-only library/module, with at most a dev/internal preview CLI.
 - Use `pdx` as the only supervisor/operator API for status and immediate kill.
 - Replace transcript-scraping completion detection with lifecycle signals: AFK process exit, HITL tmux disappearance, and explicit Pithos task completion/failure.
-- Replace Envy/Worker/`implement` with War/`execute`.
+- Keep War/`execute` as the repo/worktree execution path and add Envy/`intake` only for external signal classification.
 - Make human/Pandora checkpoints explicit queue nodes via the `escalate` capability.
 - Keep the user's initial/human interface as direct chat with the live Pandora singleton; no bootstrap task is seeded.
 - Remove duplicate lifecycle paths: no `pithos sweep`, no `pithos run end`, no `pithos run finish`, no spawner status/nudge/kill/message injection.
@@ -33,7 +33,7 @@ Agents claim work themselves through Pithos. The daemon never injects task conte
 - Distributed or multi-host supervision.
 - Population management beyond simple static caps.
 - Solving live-but-wedged HITL sessions automatically.
-- Reintroducing Envy or worker delegation in MVP.
+- Reintroducing generic worker delegation beyond War/`execute`.
 
 ## 2. Compatibility
 
@@ -206,11 +206,13 @@ scope: global
 agent_kinds:
   pdx       # system actor only; not spawnable, no template, no claims
   pandora
+  envy
   toil
   greed
   war
 
 capabilities:
+  intake
   triage
   design
   execute
@@ -218,13 +220,15 @@ capabilities:
 
 agent_claims:
   pandora -> escalate
+  envy    -> intake
   toil    -> triage
   greed   -> design
   war     -> execute
 
 agent_enqueues:
-  pdx     -> escalate
+  pdx     -> escalate, intake
   pandora -> triage, design, escalate
+  envy    -> triage, design, escalate
   toil    -> triage, design, execute, escalate
   greed   -> triage, design, escalate
   war     -> escalate
@@ -311,6 +315,7 @@ Capability-specific enqueue/supersede validation:
 
 | Capability | Required scope                                      | Body      | Notes                                     |
 | ---------- | --------------------------------------------------- | --------- | ----------------------------------------- |
+| `intake`   | `global`                                            | non-empty | external signal classification            |
 | `triage`   | any active scope                                    | non-empty | decomposition/routing work                |
 | `design`   | any active scope                                    | non-empty | design/research/alignment work            |
 | `execute`  | `repo` or `worktree` with non-null `canonical_path` | non-empty | mutating or repo-local execution work     |
@@ -425,7 +430,7 @@ pithos scope list [--all]
 pithos scope archive <scope-id>
 
 pithos run upsert \
-  --agent <pdx|pandora|toil|greed|war> \
+  --agent <pdx|pandora|envy|toil|greed|war> \
   --mode <afk|hitl> \
   --scope <scope-id> \
   --cwd <path> \
@@ -446,7 +451,7 @@ pithos run inspect <run-id>
 
 pithos task enqueue \
   --scope <scope-id> \
-  --capability <triage|design|execute|escalate> \
+  --capability <intake|triage|design|execute|escalate> \
   --title <text> \
   --stdin \
   [--run <run-id>] \
@@ -457,7 +462,7 @@ pithos task enqueue \
 pithos task claim \
   --run <run-id> \
   --scope <scope-id> \
-  --capability <triage|design|execute|escalate>
+  --capability <intake|triage|design|execute|escalate>
 
 # --scope must match the run's registered scope; the run must not already hold a task.
 
@@ -477,7 +482,7 @@ pithos task supersede \
   --reason <text> \
   [--title <text>] \
   [--scope <scope-id>] \
-  [--capability <triage|design|execute|escalate>] \
+  [--capability <intake|triage|design|execute|escalate>] \
   --stdin
 
 pithos task cancel <task-id> --run <run-id> --reason <text>
@@ -772,7 +777,7 @@ Spawner/template context contains self-claim context, not task content:
 - generated `claim_command`
 - generated, role-filtered command help JSON
 
-Templates do not receive full `pithos --help` by default. Spawner calls `pithos --help-json` and filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`. `pdx run show` and `pdx task show` remain public operator commands, but are not included in Pandora's default filtered command cards. Missing configured help paths or malformed help JSON fail rendering loudly.
+Templates do not receive full `pithos --help` by default. Spawner calls `pithos --help-json` and filters the generated Pithos JSON help tree by role: AFK evils receive the `pithos task` branch, while Pandora receives `pithos task`, `pithos graph`, `pithos events`, and `pithos briefing`. Pandora also receives filtered pdx JSON help for `pdx run transcript`, `pdx run show`, and `pdx task show`. `pdx daemon status` and `pdx daemon logs` remain public operator commands, but are not included in Pandora's default filtered command cards. Missing configured help paths or malformed help JSON fail rendering loudly.
 
 Spawner renders `claim_command` from the built-in claim capability for that agent plus launch context, for example:
 
@@ -864,11 +869,12 @@ pithos task complete <task-id> --run <run-id> --token <token>
 
 `task complete` uses no stdin for the default `{}` result metadata. Use `task complete --stdin` only for JSON object metadata; long-form work products belong in Artifacts.
 
-Pithos invariant: a run may hold at most one active task at a time. After completing/failing a task and clearing `runs.task_id`, the same run may claim another task. `pdx` applies a narrower MVP supervision policy on top: Pandora is long-lived and may repeatedly claim `escalate` tasks sequentially, but supervised non-Pandora HITL sessions are single-task and are reaped after their first observed claim clears. Toil/War AFK runs are also conventionally expected to claim one task and exit/close for context management.
+Pithos invariant: a run may hold at most one active task at a time. After completing/failing a task and clearing `runs.task_id`, the same run may claim another task. `pdx` applies a narrower MVP supervision policy on top: Pandora is long-lived and may repeatedly claim `escalate` tasks sequentially, but supervised non-Pandora HITL sessions are single-task and are reaped after their first observed claim clears. Envy/Toil/War AFK runs are also conventionally expected to claim one task and exit/close for context management.
 
 Per-agent roles and enqueue authority:
 
 - **Pandora** claims `escalate`, discusses with the user, investigates with Pithos state plus `pdx daemon status`, `pdx daemon logs`, and `pdx run transcript`, and decides whether to supersede/cancel/replan/enqueue follow-up. When the user asks to drain escalations, Pandora processes them sequentially because one run may hold only one task at a time. Routine Greed review nudges with an already-attached `design-brief` artifact count as approved design and may be completed without re-asking the user. She may enqueue `triage`, `design`, and `escalate`, but not `execute`; execution goes through Toil.
+- **Envy** claims `intake`, classifies one external signal, and enqueues exactly one downstream `triage`, `design`, or `escalate` task in global scope. Envy does not perform implementation, deep decomposition, or fan-out in MVP.
 - **Toil** claims `triage`, decomposes and routes work, and may enqueue `triage`, `design`, `execute`, and checkpoint `escalate` tasks. Toil may supersede/cancel non-held tasks when repairing a broken chain.
 - **Greed** claims `design`, performs the interactive design review in a live HITL session, and first enqueues a global `escalate` task when ready for the user to review/sign off. Greed attaches the final `design-brief` artifact only after the user signs off directly or Pandora relays explicit sign-off, then completes the held task. Once that task clears, pdx reaps the non-Pandora HITL session. Greed may enqueue `design`, `triage`, and `escalate` when the design session branches or is ready for follow-up. Greed does not enqueue `execute` in MVP.
 - **War** claims `execute`, performs repo/worktree execution, produces `war-completion` artifacts, and may enqueue `escalate` when attention is needed. War does not enqueue further `execute` tasks in MVP.

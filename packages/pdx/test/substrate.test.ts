@@ -4084,7 +4084,7 @@ describe("runInputHookSupervisor", () => {
 				Effect.sync(() => {
 					killedPids.push(pid);
 				}),
-			isAlive: () => Effect.succeed(false),
+			isAlive: (pid) => Effect.succeed(!killedPids.includes(pid)),
 		};
 
 		return { executor, killedPids, getSpawnCount: () => spawnCount };
@@ -4093,13 +4093,18 @@ describe("runInputHookSupervisor", () => {
 	const withHookServices =
 		(hookExec: HookExecutorService, pithos: ReturnType<typeof makePithos>) =>
 		<A, E>(
-			effect: Effect.Effect<A, E, HookExecutor | PithosClient | SupervisorLog | LifecycleReporter>,
+			effect: Effect.Effect<
+				A,
+				E,
+				HookExecutor | PithosClient | SupervisorLog | LifecycleReporter | Clock
+			>,
 		) =>
 			effect.pipe(
 				Effect.provideService(HookExecutor, hookExec),
 				Effect.provideService(PithosClient, pithos),
 				Effect.provideService(SupervisorLog, testLog),
 				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(Clock, testClock),
 			);
 
 	it("enqueues valid intake lines", async () => {

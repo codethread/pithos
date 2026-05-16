@@ -319,7 +319,7 @@ describe("task lifecycle", () => {
 		).toThrow(PithosError);
 	});
 
-	it("repair_alerts accepts input_hook_stuck kind and repair_alerts migration is idempotent", () => {
+	it("repair_alerts accepts input-hook alert kinds and migration is idempotent", () => {
 		const { dbPath, engine } = setup();
 		// Seed a pdx system run so createRepairAlert can reference it
 		const alertTask = engine.enqueue({
@@ -332,14 +332,29 @@ describe("task lifecycle", () => {
 			dependsOn: [],
 			chain: "none",
 		}).task.id;
-		// Insert into repair_alerts with input_hook_stuck kind — should not throw
+		// Insert new input-hook alert kinds — should not throw
 		const db = new Database(dbPath);
 		expect(() =>
 			db
 				.prepare("INSERT INTO repair_alerts (task_id, kind) VALUES (?, ?)")
 				.run(alertTask, "input_hook_stuck"),
 		).not.toThrow();
-		// All existing kinds still accepted
+		const hookConfigTask = engine.enqueue({
+			scope: "global",
+			capability: "escalate",
+			title: "hook config error",
+			body: "hook config failed to load",
+			bodyFile: undefined,
+			runId: "run_pdx_system",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+		expect(() =>
+			db
+				.prepare("INSERT INTO repair_alerts (task_id, kind) VALUES (?, ?)")
+				.run(hookConfigTask, "hook_config_error"),
+		).not.toThrow();
+		// Existing kinds still accepted
 		const existingTask = engine.enqueue({
 			scope: "global",
 			capability: "escalate",
@@ -358,6 +373,67 @@ describe("task lifecycle", () => {
 		db.close();
 		// Running migrate again on the same DB is idempotent
 		engine.init({ fresh: false });
+	});
+
+	it("migrates existing repair_alerts CHECK constraints to current alert kinds", () => {
+		const { dbPath, engine } = setup();
+		const oldAlertTask = engine.enqueue({
+			scope: "global",
+			capability: "escalate",
+			title: "old interrupt alert",
+			body: "run was interrupted",
+			bodyFile: undefined,
+			runId: "run_pdx_system",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+
+		const db = new Database(dbPath);
+		db.pragma("foreign_keys = OFF");
+		db.exec(`
+DROP TABLE repair_alerts;
+CREATE TABLE repair_alerts (
+	task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
+	kind       TEXT NOT NULL CHECK (kind IN (
+		'interrupt',
+		'task_failed',
+		'dead_letter',
+		'launch_precondition',
+		'reconciler_stuck',
+		'kill_failure'
+	)),
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
+		db.prepare("INSERT INTO repair_alerts (task_id, kind) VALUES (?, ?)").run(
+			oldAlertTask,
+			"interrupt",
+		);
+		db.pragma("foreign_keys = ON");
+		db.close();
+
+		engine.init({ fresh: false });
+		const hookConfigTask = engine.enqueue({
+			scope: "global",
+			capability: "escalate",
+			title: "hook config error",
+			body: "hook config failed to load",
+			bodyFile: undefined,
+			runId: "run_pdx_system",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+
+		const migrated = new Database(dbPath);
+		expect(
+			migrated.prepare("SELECT kind FROM repair_alerts WHERE task_id=?").pluck().get(oldAlertTask),
+		).toBe("interrupt");
+		expect(() =>
+			migrated
+				.prepare("INSERT INTO repair_alerts (task_id, kind) VALUES (?, ?)")
+				.run(hookConfigTask, "hook_config_error"),
+		).not.toThrow();
+		migrated.close();
 	});
 
 	it("rejects archived scopes in enqueue, claim, and supersede", () => {

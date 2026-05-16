@@ -7,7 +7,7 @@ import {
 	type AgentKind,
 	type Capability,
 } from "./builtins.js";
-import { decodeRow } from "./rows.js";
+import { REPAIR_ALERT_KINDS, decodeRow } from "./rows.js";
 
 export type Db = Database.Database;
 export type ScopeKind = "global" | "repo" | "worktree";
@@ -29,6 +29,18 @@ export const openDb = (path: string): Db => new Database(path);
 
 export const sql = (strings: TemplateStringsArray, ...values: readonly unknown[]): string =>
 	String.raw({ raw: strings }, ...values);
+
+const repairAlertKindListSql = REPAIR_ALERT_KINDS.map((kind) => `\t\t'${kind}'`).join(",\n");
+
+const repairAlertsTableSql = (tableName: string): string => sql`
+CREATE TABLE ${tableName} (
+	task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
+	kind       TEXT NOT NULL CHECK (kind IN (
+${repairAlertKindListSql}
+	)),
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`;
 
 export const migrate = (db: Db): void => {
 	db.pragma("foreign_keys = ON");
@@ -158,20 +170,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS repair_alerts (
-	task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
-	kind       TEXT NOT NULL CHECK (kind IN (
-		'interrupt',
-		'task_failed',
-		'dead_letter',
-		'launch_precondition',
-		'reconciler_stuck',
-		'kill_failure',
-		'input_hook_stuck',
-		'hook_config_error'
-	)),
-	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+${repairAlertsTableSql("IF NOT EXISTS repair_alerts")}
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_task_id
 	ON runs(task_id)
@@ -191,8 +190,7 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_source
 `);
 	ensureScopesArchivedAtColumn(db);
 	ensureScopesDescriptionColumn(db);
-	ensureRepairAlertsKindMigrated(db);
-	ensureRepairAlertsHookConfigKind(db);
+	ensureRepairAlertsKindConstraint(db);
 	seed(db);
 };
 
@@ -210,71 +208,28 @@ const ensureScopesDescriptionColumn = (db: Db): void => {
 	}
 };
 
-// SQLite CHECK constraints cannot be altered in place; rebuild the table when the
-// stored DDL is missing the new kind so existing DBs accept 'input_hook_stuck'.
-const ensureRepairAlertsKindMigrated = (db: Db): void => {
+// SQLite CHECK constraints cannot be altered in place; rebuild the table when
+// existing DB DDL is missing any current Repair Alert kind.
+const ensureRepairAlertsKindConstraint = (db: Db): void => {
 	const rows = db
 		.prepare(sql`SELECT sql FROM sqlite_master WHERE type='table' AND name='repair_alerts'`)
 		.all() as { sql: string }[];
 	if (rows.length === 0) return;
 	const tableSql = rows[0]?.sql ?? "";
-	if (tableSql.includes("'input_hook_stuck'")) return;
-	db.pragma("foreign_keys = OFF");
-	db.transaction(() => {
-		db.prepare(sql`
-			CREATE TABLE repair_alerts_new (
-				task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
-				kind       TEXT NOT NULL CHECK (kind IN (
-					'interrupt',
-					'task_failed',
-					'dead_letter',
-					'launch_precondition',
-					'reconciler_stuck',
-					'kill_failure',
-					'input_hook_stuck'
-				)),
-				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-			)
-		`).run();
-		db.prepare(sql`INSERT INTO repair_alerts_new SELECT * FROM repair_alerts`).run();
-		db.prepare(sql`DROP TABLE repair_alerts`).run();
-		db.prepare(sql`ALTER TABLE repair_alerts_new RENAME TO repair_alerts`).run();
-	})();
-	db.pragma("foreign_keys = ON");
-};
+	const hasAllKinds = REPAIR_ALERT_KINDS.every((kind) => tableSql.includes(`'${kind}'`));
+	if (hasAllKinds) return;
 
-// SQLite CHECK constraints cannot be altered in place; rebuild the table when the
-// stored DDL is missing the new kind so existing DBs accept 'hook_config_error'.
-const ensureRepairAlertsHookConfigKind = (db: Db): void => {
-	const rows = db
-		.prepare(sql`SELECT sql FROM sqlite_master WHERE type='table' AND name='repair_alerts'`)
-		.all() as { sql: string }[];
-	if (rows.length === 0) return;
-	const tableSql = rows[0]?.sql ?? "";
-	if (tableSql.includes("'hook_config_error'")) return;
 	db.pragma("foreign_keys = OFF");
-	db.transaction(() => {
-		db.prepare(sql`
-			CREATE TABLE repair_alerts_new (
-				task_id    TEXT PRIMARY KEY REFERENCES tasks(id),
-				kind       TEXT NOT NULL CHECK (kind IN (
-					'interrupt',
-					'task_failed',
-					'dead_letter',
-					'launch_precondition',
-					'reconciler_stuck',
-					'kill_failure',
-					'input_hook_stuck',
-					'hook_config_error'
-				)),
-				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-			)
-		`).run();
-		db.prepare(sql`INSERT INTO repair_alerts_new SELECT * FROM repair_alerts`).run();
-		db.prepare(sql`DROP TABLE repair_alerts`).run();
-		db.prepare(sql`ALTER TABLE repair_alerts_new RENAME TO repair_alerts`).run();
-	})();
-	db.pragma("foreign_keys = ON");
+	try {
+		db.transaction(() => {
+			db.prepare(repairAlertsTableSql("repair_alerts_new")).run();
+			db.prepare(sql`INSERT INTO repair_alerts_new SELECT * FROM repair_alerts`).run();
+			db.prepare(sql`DROP TABLE repair_alerts`).run();
+			db.prepare(sql`ALTER TABLE repair_alerts_new RENAME TO repair_alerts`).run();
+		})();
+	} finally {
+		db.pragma("foreign_keys = ON");
+	}
 };
 
 const seed = (db: Db): void => {

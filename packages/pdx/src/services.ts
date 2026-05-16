@@ -222,7 +222,7 @@ export interface HookExecutorService {
 		stderrPath: string,
 	) => Effect.Effect<HookChildHandle, PdxError>;
 	readonly kill: (pid: number, signal: "SIGTERM" | "SIGKILL") => Effect.Effect<void, PdxError>;
-	readonly isAlive: (pid: number) => Effect.Effect<boolean>;
+	readonly isAlive: (pid: number) => Effect.Effect<boolean, PdxError>;
 }
 export class HookExecutor extends Context.Tag("pdx/HookExecutor")<
 	HookExecutor,

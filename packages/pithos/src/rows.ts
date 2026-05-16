@@ -58,7 +58,7 @@ export const EventRowSchema = Schema.Struct({
 	created_at: NonEmptyString,
 });
 
-export const RepairAlertKindSchema = Schema.Literal(
+export const REPAIR_ALERT_KINDS = [
 	"interrupt",
 	"task_failed",
 	"dead_letter",
@@ -67,7 +67,9 @@ export const RepairAlertKindSchema = Schema.Literal(
 	"kill_failure",
 	"input_hook_stuck",
 	"hook_config_error",
-);
+] as const;
+
+export const RepairAlertKindSchema = Schema.Literal(...REPAIR_ALERT_KINDS);
 export type RepairAlertKind = typeof RepairAlertKindSchema.Type;
 
 export type RunRow = typeof RunRowSchema.Type;

@@ -7,6 +7,7 @@ import { SpawnerError } from "./errors.js";
 import { LiveSpawnerServices } from "./services.js";
 import {
 	launchRenderedAgent,
+	loadHooks,
 	renderAgent,
 	renderSessionTranscript,
 	type RenderedAgent,
@@ -382,7 +383,8 @@ describe("bundled agent templates", () => {
 		const templateText = readdirSync(templateDir)
 			.filter(
 				(entry) =>
-					entry === "_common.md" || ["pandora.md", "toil.md", "greed.md", "war.md"].includes(entry),
+					entry === "_common.md" ||
+					["pandora.md", "toil.md", "greed.md", "war.md", "envy.md"].includes(entry),
 			)
 			.map((entry) => readFileSync(join(templateDir, entry), "utf8"))
 			.join("\n");
@@ -907,6 +909,67 @@ describe("renderAgent", () => {
 				),
 			),
 		).toThrow("invalid manifest");
+	});
+
+	it("loadHooks uses the same agents.json overlay as renderAgent", () => {
+		const dataDir = "/tmp/pdx-hooks-overlay";
+		const templatesDir = `${dataDir}/templates`;
+		const extensionsDir = `${dataDir}/extensions/templates`;
+		const hooks = loadHooks({
+			readText: (path: string) => {
+				if (path === `${extensionsDir}/agents.json`) {
+					return JSON.stringify({
+						agents: [
+							{
+								agent: "envy",
+								mode: "afk",
+								harness: {
+									kind: "pi",
+									model: "model",
+									system_prompt_mode: "append",
+								},
+								template: "envy.md",
+							},
+						],
+						hooks: { input: { command: ["/tmp/hook", "--flag"] } },
+					});
+				}
+				if (path === `${templatesDir}/agents.json`) {
+					return JSON.stringify({ agents: [], hooks: {} });
+				}
+				throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+					code: "ENOENT",
+				});
+			},
+			env: (key: string) => {
+				if (key === "PDX_DATA_DIR") return dataDir;
+				if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+				return undefined;
+			},
+			execFile: noopExec,
+		});
+		expect(hooks.input?.command).toEqual(["/tmp/hook", "--flag"]);
+	});
+
+	it("loadHooks reports validation errors against the resolved agents.json overlay", () => {
+		const dataDir = "/tmp/pdx-hooks-invalid-overlay";
+		const extensionsPath = `${dataDir}/extensions/templates/agents.json`;
+		expect(() =>
+			loadHooks({
+				readText: (path: string) => {
+					if (path === extensionsPath) return JSON.stringify({ agents: "not-an-array" });
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
+				},
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: noopExec,
+			}),
+		).toThrow(extensionsPath);
 	});
 
 	it("overlay resolver prefers extensions/templates over templates for includes", () => {

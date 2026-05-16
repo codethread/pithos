@@ -1,6 +1,6 @@
 # Pandora's Box
 
-> A local control plane where you talk to **Pandora** and she releases her Evils — Toil, Greed, War — to do the work.
+> A local control plane where you talk to **Pandora** and she releases her Evils — Envy, Toil, Greed, War — to do the work.
 
 ## About
 
@@ -24,6 +24,7 @@ You don't run shell commands in the loop — Pandora does.
 | Evil    | Mode | Claims     | Role                                                   |
 | ------- | ---- | ---------- | ------------------------------------------------------ |
 | Pandora | HITL | `escalate` | Long-lived. Talks to you. Routes the chain.            |
+| Envy    | AFK  | `intake`   | Classifies external signals into follow-up work.       |
 | Toil    | AFK  | `triage`   | Decomposes incoming work; routes to design or execute. |
 | Greed   | HITL | `design`   | Produces design briefs before execution.               |
 | War     | AFK  | `execute`  | Runs in a repo/worktree and changes code.              |

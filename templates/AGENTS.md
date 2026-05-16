@@ -1,8 +1,7 @@
 # Template config agent guide
 
 The repo-root `templates/` directory is the bundled source. After `pdx init` or
-`pdx open`, `<data-dir>/templates/` holds a read-only copy (files 0444, dirs
-0555) that is **always refreshed** from the bundle. Do not edit files there
+`pdx open`, `<data-dir>/templates/` holds a read-only copy (files 0444, dirs 0555) that is **always refreshed** from the bundle. Do not edit files there
 directly — they will be overwritten on the next init/open.
 
 User customisations live in `<data-dir>/extensions/templates/`. Spawner checks
@@ -15,6 +14,8 @@ extensions layer, not in the bundle-owned templates dir.
 - `agents.json` — render manifest for each agent kind.
 - `*.md` — prompt template for an agent kind.
 - `_common.md` — shared include text used by templates.
+- `_common-afk.md` — AFK-only runtime rules.
+- `_common-hitl.md` — HITL-only runtime rules.
 - `README.md` — operator-facing contract reference.
 - `AGENTS.md` / `CLAUDE.md` — this guide for direct config-editing agents.
 
@@ -33,7 +34,7 @@ Each `agents.json` entry has this shape:
 		"tools": ["bash", "read"],
 		"argv": ["--plugin-dir", "~/my-plugins"]
 	},
-	"includes": ["_common.md"],
+	"includes": ["_common.md", "_common-afk.md"],
 	"appends": ["~/my-extensions/war-extra.md"],
 	"template": "war.md"
 }
@@ -57,7 +58,9 @@ Fields:
   non-empty; no tilde expansion or env substitution is applied.
 - `includes`: optional list of template paths resolved through the overlay.
   Relative paths resolve from the templates directory; absolute and `~/` paths
-  are allowed. No recursive include rendering.
+  are allowed. No recursive include rendering. Use includes for pre-claim
+  guard or preamble content that must appear before the template's required
+  flow.
 - `appends`: optional list of template paths resolved through the overlay.
   Files are concatenated verbatim **after** the rendered template, joined by
   `\n\n---\n\n`. Same path resolution rules as `includes`. Paths must be unique.
@@ -140,10 +143,10 @@ restarts on exit with exponential backoff, escalates after 5 crashes in 60s.
 Each NDJSON line must have `title` (string) and `body` (string). pdx enqueues
 the resulting intake task in global scope; all other fields are managed by pdx.
 
-**Envy routing knowledge** lives in `extensions/templates/envy/` in the user
-data dir. Add include files there and reference them from the Envy template
-using `{{extensions/templates/envy/my-rules.md}}` to teach Envy how to
-classify signals specific to your workflow.
+**Envy routing knowledge** belongs in user-owned Envy template overrides or
+appends, commonly stored under `extensions/templates/envy/`. Reference those
+files from an overridden `agents.json` as `envy/my-rules.md`, then use the
+matching template variable `{{envy/my-rules.md}}` if it is an include.
 
 ## Safe editing checklist
 

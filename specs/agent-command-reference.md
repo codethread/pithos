@@ -1,0 +1,258 @@
+# Agent Command Reference Rendering
+
+**Status:** Planned
+**Last Updated:** 2026-05-16
+
+## 1. Overview
+
+### Purpose
+
+Spawner renders command guidance into Agent prompts so Pandora, Toil, Greed, War, and Envy can operate Pithos/pdx reliably without depending on the human-oriented `--help` output. The current `{{command_cards}}` mechanism was introduced because agents misread the original generated help. This spec proposes keeping that dynamic, role-filtered prompt surface, but replacing raw JSON command-card dumps with a concise agent-oriented Markdown reference generated from the same structured CLI metadata.
+
+This proposal supersedes the raw-JSON command-card portions of [`control-plane-supervision.md`](./control-plane-supervision.md). Until implemented, current code may still render JSON; this document defines the intended next contract.
+
+### Goals
+
+- Preserve the original command-card goal: agents should not need to parse the human `--help` output for routine work.
+- Keep command syntax sourced from the real CLI command tree, not duplicated manually in prompt templates.
+- Render command references as compact Markdown optimized for agent use.
+- Keep role filtering: each Agent kind sees only commands relevant to its responsibilities.
+- Fail loudly when configured command paths disappear, help JSON is malformed, or annotation metadata references unknown commands.
+- Keep hand-authored templates responsible for workflow policy, examples, and domain judgment.
+- Allow human `--help` to improve independently without coupling terminal UX to prompt UX.
+
+### Non-Goals
+
+- Replacing `_common.md` recipes or role-specific prompt policy.
+- Making agents run `pithos --help` / `pdx --help` as the primary command-discovery path.
+- Injecting full CLI help into every prompt.
+- Building a generic documentation site or replacing package READMEs/specs.
+- Encoding authorization policy in templates; Pithos built-ins remain the source of claim/enqueue truth.
+- Maintaining both raw-JSON and Markdown command-card formats long-term.
+
+## 2. Design Decisions
+
+- **Decision:** Keep `{{command_cards}}` as the template variable, but change its rendered content from raw JSON to Markdown.
+  - **Rationale:** Existing bundled templates already depend on this variable. The problem is presentation, not the injection point. Keeping the variable avoids churn in bundled templates while improving agent comprehension. This is still a pre-v1 template-contract break for any user extension that parsed the old raw JSON; migration guidance should say `{{command_cards}}` is prose/reference content, not a stable JSON API.
+
+- **Decision:** Keep `--help-json` as the structural source of command syntax.
+  - **Rationale:** It preserves drift resistance and fail-loud validation. Manually maintaining command syntax in prompts would recreate the stale-doc problem the cards were meant to avoid.
+
+- **Decision:** Do not use human `--help` output as the agent prompt source.
+  - **Rationale:** The cards exist because agents were confused by that output. Human terminal help and agent prompt reference are different products with different formatting constraints.
+
+- **Decision:** Separate generated syntax/reference from hand-authored workflow policy.
+  - **Rationale:** CLI metadata can say a command exists and what flags it accepts. It cannot reliably express when War should escalate instead of enqueueing follow-up work, or when Pandora should supersede versus replan. Those semantics belong in `_common.md` and role templates.
+
+- **Decision:** Add an optional annotation layer keyed by command path.
+  - **Rationale:** Some agent-facing notes are stable but not part of terminal help, such as “use quoted heredocs with `--stdin`” or “use readable inspect output by default.” Keying annotations by command path lets Spawner validate them against the generated tree.
+
+- **Decision:** Keep role filters in Spawner configuration/code, not in templates.
+  - **Rationale:** Filtering is part of the render contract and should fail during preview/render if a command path disappears. Templates should ask for `{{command_cards}}`, not reconstruct command sets.
+
+- **Decision:** Agent cards should be concise and action-oriented.
+  - **Rationale:** Raw JSON is complete but hard to scan. Agents need command path, usage, purpose, and a small number of role-relevant notes/examples.
+
+- **Decision:** Human help improvements may share the command model but not necessarily the renderer.
+  - **Rationale:** Human help should optimize terminal scanability. Agent cards should optimize prompt reliability. Sharing metadata is useful; forcing identical output would compromise one audience.
+
+## 3. Architecture
+
+### Current flow
+
+```text
+Spawner.renderAgent
+  -> load agents.json + templates
+  -> call pithos --help-json
+  -> call pdx --help-json for Pandora
+  -> parse command trees
+  -> filter by Agent kind
+  -> inject raw JSON into {{command_cards}}
+```
+
+### Proposed flow
+
+```text
+Spawner.renderAgent
+  -> load agents.json + templates
+  -> call pithos --help-json
+  -> call pdx --help-json for Pandora
+  -> parse command trees into CommandHelpTree
+  -> validate configured role command paths exist
+  -> validate command annotations reference existing paths
+  -> filter by Agent kind
+  -> render filtered trees as Markdown command reference
+  -> inject Markdown into {{command_cards}}
+```
+
+### Role-filtered command sets
+
+Keep the existing code-level filtering policy unless a later implementation has evidence to narrow it further. This table supersedes the older raw-JSON filter prose in `control-plane-supervision.md`:
+
+| Agent kind | Pithos command paths                                                              | pdx command paths                                     |
+| ---------- | --------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `war`      | `pithos task`                                                                     | none                                                  |
+| `toil`     | `pithos scope`, `pithos task`                                                     | none                                                  |
+| `greed`    | `pithos scope`, `pithos task`                                                     | none                                                  |
+| `envy`     | `pithos scope`, `pithos task`                                                     | none                                                  |
+| `pandora`  | `pithos scope`, `pithos task`, `pithos graph`, `pithos events`, `pithos briefing` | `pdx run transcript`, `pdx run show`, `pdx task show` |
+
+### Render shape
+
+Generated content should be Markdown, not JSON:
+
+````md
+## Generated command reference
+
+This reference is generated from CLI metadata. Use the rendered claim command above for the exact claim invocation for this run.
+
+### Pithos
+
+#### `pithos task claim`
+
+Claim one claimable task for a run and return its fencing token.
+
+Usage:
+
+```sh
+pithos task claim [--run text] --scope text --capability triage | design | execute | escalate | intake
+```
+````
+
+Notes:
+
+- Use the rendered claim command above instead of reconstructing this by hand.
+
+#### `pithos task inspect`
+
+Show an agent-readable task handoff; pass `--json` for structured metadata.
+
+Usage:
+
+```sh
+pithos task inspect [--json] <task-id>
+```
+
+Notes:
+
+- Default output is readable Markdown and should be your normal context.
+- Use `--json` only for exact fields, scripting, or token recovery.
+
+````
+
+For nested commands, render leaf commands by full path. Parent commands may appear as section headings when useful, but parent-only entries should not dominate the prompt.
+
+## 4. Data Model
+
+No database schema changes.
+
+### Command model
+
+Spawner can continue using the existing parsed help tree shape:
+
+```ts
+interface CommandHelpCard {
+  readonly tool: string;
+  readonly name: string;
+  readonly path: string;
+  readonly usage: string;
+  readonly description: string;
+  readonly subcommands: readonly CommandHelpCard[];
+}
+````
+
+The renderer should normalize pdx and Pithos help JSON into this shared shape before filtering/rendering. Extra fields in pdx help JSON remain ignored unless intentionally adopted.
+
+### Annotation model
+
+Annotations are optional render metadata, keyed by full command path:
+
+```ts
+interface CommandAnnotation {
+	readonly notes?: readonly string[];
+	readonly examples?: readonly CommandExample[];
+}
+
+interface CommandExample {
+	readonly title: string;
+	readonly command: string;
+}
+```
+
+Annotation constraints:
+
+- Every annotation key must match a command path in the generated help tree.
+- Examples must be short and use placeholders, not real task IDs.
+- Examples must not duplicate the exact recipes already present in `_common.md` unless they add command-specific flag clarity.
+- Annotation validation failure is a template/render error.
+
+## 5. Interfaces
+
+### Template interface
+
+`{{command_cards}}` remains available and renders Markdown. Templates do not receive raw help JSON by default.
+
+`templates/README.md` and `templates/AGENTS.md` should state explicitly: `{{command_cards}}` is the variable name, and its rendered content is a generated Markdown command reference. They should not imply that `{{command_reference}}` is a supported variable unless that variable is actually added.
+
+### Preview interface
+
+`pandora-spawn preview` should continue to output JSON `RenderedAgent`. The `prompt` field inside that JSON is the primary manual verification surface for the generated command reference.
+
+### CLI help interfaces
+
+`pithos --help-json` and `pdx --help-json` remain machine-readable render inputs.
+
+Human `pithos --help` and `pdx --help` can be improved independently. Agents may still be told to run group-specific help for rare flag details, but the prompt-rendered reference remains the primary path for routine work.
+
+## 6. Implementation Phases
+
+### Phase 1: Repair template renderability
+
+- [ ] Fix missing bundled template placeholders such as `{{shared/repo-default-branch-guard.md}}` and `{{war/cwd-guard.md}}` by choosing the intended guard semantics first. Valid repairs are: inline/remove a placeholder only if the guard is explicitly retired or covered elsewhere, or add the guard file and list that exact path in each affected `agents.json` manifest entry's `includes` list so the variable exists at render time.
+- [ ] Add/adjust preview coverage so bundled templates render for every built-in Agent kind.
+
+### Phase 2: Markdown renderer
+
+- [ ] Add a renderer that turns a filtered `CommandHelpCard` tree into concise Markdown.
+- [ ] Keep existing role filters and missing-command fail-loud checks.
+- [ ] Replace raw JSON output in `renderCommandCards` with Markdown output.
+- [ ] Keep tests that prove War, Toil/Greed/Envy, and Pandora receive the expected command paths.
+- [ ] Update tests that currently assert JSON-specific output.
+
+### Phase 3: Annotation layer
+
+- [ ] Add a small annotation map for agent-facing notes/examples.
+- [ ] Validate annotation paths against the generated tree.
+- [ ] Add initial annotations only for high-value commands: claim, inspect, artifact add, complete, fail, enqueue, supersede/cancel, briefing, graph inspect, run transcript/show, task show.
+- [ ] Keep annotations compact; `_common.md` remains the cookbook.
+
+### Phase 4: Documentation
+
+- [ ] Update `templates/README.md` and `templates/AGENTS.md` to describe Markdown command references.
+- [ ] Update `packages/spawner/README.md` to describe the renderer and its boundary.
+- [ ] Keep `specs/control-plane-supervision.md` aligned if role filters or the render contract change during implementation.
+
+### Phase 5: Optional human-help follow-up
+
+- [ ] Improve human `--help` readability separately if still needed.
+- [ ] Reuse command metadata where practical, but do not force human help and agent cards through the same formatter.
+
+## 7. Code Locations
+
+| File                                   | Change                                                                                    |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `packages/spawner/src/spawner.ts`      | Modify command-card rendering from JSON to Markdown; add annotation validation/rendering. |
+| `packages/spawner/src/spawner.test.ts` | Update prompt-render tests for Markdown output and annotation failures.                   |
+| `templates/*.md`                       | Keep `{{command_cards}}`; fix missing guard placeholders/includes.                        |
+| `templates/README.md`                  | Document generated Markdown command reference behavior.                                   |
+| `templates/AGENTS.md`                  | Update direct config-editing guidance.                                                    |
+| `packages/spawner/README.md`           | Document Spawner command-reference rendering boundary.                                    |
+| `specs/control-plane-supervision.md`   | Keep command-card/filter prose aligned with this proposal.                                |
+
+## 8. Open Questions
+
+- Should the variable eventually be renamed from `command_cards` to `command_reference`, or is keeping the existing name preferable until a larger template contract cleanup?
+- Should annotations live inline in `spawner.ts`, in a separate TypeScript module, or as template-side data files?
+- Should parent command groups render all descendants, or should the renderer show only leaf commands plus compact group headings?
+- How much example content is useful before it duplicates `_common.md` and increases prompt bloat?
+- Should `pandora-spawn preview` offer a focused mode that prints only the command reference for one Agent kind?

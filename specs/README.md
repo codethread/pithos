@@ -4,10 +4,10 @@ Persistent domain specifications. Organized by system area, not feature chronolo
 
 ## Pithos task orchestration
 
-| Spec                                                       | Purpose                                                                                                       | Code                                                                         |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [task-graph.md](./task-graph.md)                           | Define dependency DAGs, supersession history, task inspection handoffs, and graph inspection for Pithos tasks | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md` |
-| [pithos-graph-inspection.md](./pithos-graph-inspection.md) | Plan the graph inspect filter/default-rendering contract that supersedes the current `task-graph.md` section  | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md` |
+| Spec                                                       | Purpose                                                                                                                           | Code                                                                         |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [task-graph.md](./task-graph.md)                           | Authoritative contract for dependency DAGs, supersession history, task inspection handoffs, and graph inspection for Pithos tasks | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md` |
+| [pithos-graph-inspection.md](./pithos-graph-inspection.md) | Implemented graph inspect filter/default-rendering slice record, now folded into `task-graph.md`                                  | `packages/pithos/src/`, `packages/pithos/test/`, `packages/pithos/README.md` |
 
 ## Agent control plane
 

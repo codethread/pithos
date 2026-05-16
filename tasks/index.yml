@@ -25,6 +25,6 @@ tasks:
   - id: 5
     description: Graph inspect docs convergence
     task_file: tasks/005-graph-inspect-docs-convergence.md
-    status: pending
+    status: complete
     blocked_by:
       - 4

@@ -55,3 +55,11 @@ Append notes here. Do not rewrite earlier notes.
 - Added `--since` for `pithos graph inspect` with exact supported forms: `today`, `<n>h`, `<n>d`, `YYYY-MM-DD`, and ISO timestamps with timezone.
 - `today`/date-only cutoffs use local operator-day midnight; relative forms use the injected Pithos clock. The filter matches `created_at`, `updated_at`, or `completed_at` before graph closure, so related context can still appear.
 - Validation: `pnpm verify` passed.
+
+### Task 5: Graph inspect docs convergence — 2026-05-16
+
+- Folded the implemented graph inspect contract into `specs/task-graph.md`: truthful readable output, no `--hide-terminal`, seed-first `--status`/`--search`/`--since` filters, and `briefing` as the agenda surface.
+- Marked `specs/pithos-graph-inspection.md` as implemented/folded and updated the spec index so `task-graph.md` is the authoritative graph-inspection contract.
+- `packages/pithos/README.md` already matched generated-help guidance and truthful graph rendering, so no package README change was needed.
+- Validation: `pnpm verify` passed.
+- Deep-review/YAGNI follow-up aligned `specs/control-plane-supervision.md`, narrowed readable graph wording to avoid claiming readable source-edge rendering, and collapsed `specs/pithos-graph-inspection.md` to a pointer so the graph inspect contract has one authoritative home.

@@ -252,15 +252,15 @@ These are response-contract types, not a directive to mirror them 1:1 in source.
 
 > Note: `control-plane-supervision.md` supersedes the command paths, capability vocabulary, and authorization requirements below. The graph semantics in this spec remain normative, but the post-rewrite public surface uses nested commands such as `pithos task enqueue`, `pithos task claim`, `pithos task inspect`, and `pithos graph inspect`, with capabilities limited to `triage`, `design`, `execute`, and `escalate`.
 
-| Command                           | Change           | Contract                                                                                                                                                                                                                                                                                                                                                                         |
-| --------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pithos task enqueue`             | Modify           | Support repeatable manual `--depends-on <task-id>` plus `--chain auto\|none\|held\|source`. All referenced dependency/source tasks must exist. Duplicate dependency IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, active target scope with current repo/worktree directory when applicable, and `agent_enqueues` authorization. |
-| `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task.                                                                                                                                         |
-| `pithos task inspect <id>`        | Expand output    | Render an agent-readable Markdown handoff by default; `--json` returns full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                                                                                             |
-| `pithos graph inspect`            | New              | Render a readable dependency/source/supersession overview by default for one selector: `--task <id>`, `--scope <scope-id>`, or `--all`; `--json` returns the full closed graph object. `--hide-terminal` omits terminal leaf tasks (done, failed, dead_letter, cancelled) from both readable and JSON output; a task-rooted root is always retained.                             |
-| `pithos task supersede <task-id>` | New              | Create a replacement task with an explicit `--stdin` replacement body, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.                                                                                                                                                |
-| `pithos briefing`                 | Modify output    | Render a readable ready/blocked briefing by default; `--json` returns ready and blocked arrays with blocker task IDs/scopes/statuses.                                                                                                                                                                                                                                            |
-| `pithos tail`                     | New event types  | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows.                                                                                                                                                                                                                                                                                           |
+| Command                           | Change           | Contract                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pithos task enqueue`             | Modify           | Support repeatable manual `--depends-on <task-id>` plus `--chain auto\|none\|held\|source`. All referenced dependency/source tasks must exist. Duplicate dependency IDs fail validation. Requires a resolved run, `--stdin` with non-empty body, known capability, active target scope with current repo/worktree directory when applicable, and `agent_enqueues` authorization.     |
+| `pithos task claim`               | Modify semantics | Claim the oldest queued task matching `--scope` and `--capability` whose dependencies are all `done`. Exit code stays `5` for “no claimable work”. Requires `agent_claims` authorization, matching run scope, and no existing held task.                                                                                                                                             |
+| `pithos task inspect <id>`        | Expand output    | Render an agent-readable Markdown handoff by default; `--json` returns full root task detail, artifacts, direct dependencies, direct dependents, upstream dependency lineage, unresolved blockers, and immediate supersession links.                                                                                                                                                 |
+| `pithos graph inspect`            | New              | Render a readable dependency/supersession overview of the closed graph by default for one selector: `--task <id>`, `--scope <scope-id>`, or `--all`; filters `--status`, `--search`, and `--since` narrow seed selection before closure expansion; `--json` returns the full closed graph object including source edges. Readable output renders the same unpruned node set as JSON. |
+| `pithos task supersede <task-id>` | New              | Create a replacement task with an explicit `--stdin` replacement body, copy the old task’s upstream dependencies, retarget direct queued dependents, record supersession history, and cancel the old task if it was still queued.                                                                                                                                                    |
+| `pithos briefing`                 | Modify output    | Render a readable ready/blocked briefing by default; `--json` returns ready and blocked arrays with blocker task IDs/scopes/statuses.                                                                                                                                                                                                                                                |
+| `pithos tail`                     | New event types  | Surface `task.superseded` and `task.cancelled` events introduced by replacement flows.                                                                                                                                                                                                                                                                                               |
 
 ### `pithos task enqueue`
 
@@ -614,27 +614,49 @@ Requirements:
 
 ### `pithos graph inspect`
 
+`pithos graph inspect` is the durable task-graph interrogation surface. It selects a closed task graph containing tasks connected through dependencies, source links, and supersessions. It is for graph interrogation and audit questions; agenda questions such as “what is ready?” or “what is blocked?” belong to `pithos briefing`.
+
 Selectors are mutually exclusive:
 
-| Selector             | Result                                                                                                                                                                                                      |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--task <id>`        | Transitive closure around that task following dependency, source, and supersession edges both directions                                                                                                    |
-| `--scope <scope-id>` | Seed with all tasks in that scope except `cancelled` tasks completed more than 1 hour ago, then walk dependency, source, and supersession edges in both directions recursively until the response is closed |
-| `--all`              | All tasks except `cancelled` tasks completed more than 1 hour ago, plus all current graph edges and any referenced dependency or source or supersession neighbors needed to keep the response closed        |
+| Selector             | Seed domain before filters                                                                                       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--task <task-id>`   | the named task                                                                                                   |
+| `--scope <scope-id>` | all tasks in the scope, except stale cancelled tasks when no `--status`, `--search`, or `--since` filter is used |
+| `--all`              | all tasks, except stale cancelled tasks when no `--status`, `--search`, or `--since` filter is used              |
+
+Optional filters apply to seed task selection before graph closure. Different filter kinds compose with AND:
+
+| Filter              | Repeatable | Composition | Seed predicate                                                          |
+| ------------------- | ---------- | ----------- | ----------------------------------------------------------------------- |
+| `--status <status>` | yes        | OR          | task status is any provided literal status                              |
+| `--search <text>`   | yes        | AND         | every term is a case-insensitive substring of task `title` or `body`    |
+| `--since <cutoff>`  | no         | AND         | `created_at`, `updated_at`, or `completed_at` is at or after the cutoff |
+
+Supported status values are literal task statuses: `queued`, `claimed`, `running`, `done`, `failed`, `dead_letter`, and `cancelled`. Search terms must be non-empty after trimming. Search does not inspect artifacts, events, scope metadata, paths, runs, transcripts, or supervisor logs.
+
+Accepted `--since` cutoff forms:
+
+| Form                        | Meaning                                      |
+| --------------------------- | -------------------------------------------- |
+| `today`                     | start of the current local day               |
+| `<n>h`                      | N hours before the current Pithos clock time |
+| `<n>d`                      | N days before the current Pithos clock time  |
+| `YYYY-MM-DD`                | local midnight at the start of that date     |
+| ISO timestamp with timezone | exact instant converted to DB timestamp form |
+
+Invalid status values, blank search terms, and invalid cutoffs fail with tagged `VALIDATION_ERROR`; they do not silently behave as no filter. If filters remove every seed, the command succeeds with an empty graph. Missing named task or scope still fails with tagged `NOT_FOUND` behavior.
+
+When no seed filter is provided, `--scope` and `--all` omit cancelled tasks completed more than 1 hour ago from the initial seed set. A stale cancelled task can still appear when closure from a selected task references it. Explicit filters such as `--status cancelled` use the filtered seed contract instead of this default stale-cancelled exclusion.
+
+After seed selection, graph closure follows dependency, source, and supersession edges in both directions recursively until the response is closed. Closure may include related tasks that do not match the filters so blockers, provenance, and replacement history remain understandable.
 
 Output flags:
 
-| Flag              | Effect                                                                                                                                          |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--json`          | Return the full closed graph object instead of the readable overview                                                                            |
-| `--all`           | Selector: inspect every task except `cancelled` tasks completed more than 1 hour ago, plus graph neighbors needed for closure                  |
-| `--hide-terminal` | Additionally omit terminal leaf tasks (done, failed, dead_letter, cancelled) from both readable and JSON output; a task-rooted root is always kept |
+| Flag     | Effect                                                       |
+| -------- | ------------------------------------------------------------ |
+| `--json` | Return the full closed graph object instead of readable text |
 
-Default readable graph output renders dependency edges as an indented tree, includes each task's capability and effective status, and labels queued tasks with unresolved dependencies as `[blocked]`. `--all` is selection, not output format; scripts use `--json`.
-
-Terminal tasks are suppressed from readable output to reduce noise: `done` tasks are always hidden unless they have visible descendants or are part of an active supersession chain. `failed`, `dead_letter`, and `cancelled` tasks that completed more than 1 hour ago are treated the same way; recently-terminal tasks within the hour remain visible. The `--json` output includes every node in the closed graph selected by the command.
-
-`--hide-terminal` further reduces noise by removing terminal leaf tasks from both readable and JSON output. A terminal task is preserved if it is an ancestor of a non-terminal task, the source of still-visible work, or the pinned root of a `--task`-rooted inspect.
+Default readable graph output renders the same selected closed-graph node set returned by `--json`; it does not prune terminal tasks from that closed graph. It renders dependency edges as an indented tree, includes each task's capability and effective status, and labels queued tasks with unresolved dependencies as `[blocked]`. Supersession edges are surfaced through replacement annotations. Explicit source edges and source kinds are available in `--json`. `--all` is selection, not output format; scripts use `--json`.
 
 Graph closure requirement:
 

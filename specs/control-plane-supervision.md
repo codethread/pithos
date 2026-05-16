@@ -499,7 +499,12 @@ pithos task artifact add \
   --title <text> \
   --stdin
 
-pithos graph inspect (--task <task-id> | --scope <scope-id> | --all) [--json]
+pithos graph inspect \
+  (--task <task-id> | --scope <scope-id> | --all) \
+  [--status <queued|claimed|running|done|failed|dead_letter|cancelled>]... \
+  [--search <text>]... \
+  [--since <cutoff>] \
+  [--json]
 
 pithos events tail [--limit <n>]
 

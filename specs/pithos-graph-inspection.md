@@ -1,9 +1,9 @@
 # Pithos Graph Inspection
 
-**Status:** Implemented; folded into [`task-graph.md`](./task-graph.md)
+**Status:** Deprecated
 **Last Updated:** 2026-05-16
 
-`pithos graph inspect` is implemented. The authoritative graph-inspection contract now lives in [`task-graph.md`](./task-graph.md), including:
+`pithos graph inspect` is implemented, and this focused implementation slice has been folded into [`task-graph.md`](./task-graph.md). The authoritative graph-inspection contract now lives there, including:
 
 - selectors: `--task`, `--scope`, and `--all`
 - seed filters: repeatable `--status`, repeatable `--search`, and `--since`

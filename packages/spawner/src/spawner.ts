@@ -424,7 +424,40 @@ const filteredHelpTree = (
 	};
 };
 
-const renderCommandHelpJson = (value: unknown): string => JSON.stringify(value, null, 2);
+const leafCommandCards = (tree: CommandHelpCard): readonly CommandHelpCard[] => {
+	const visit = (card: CommandHelpCard): readonly CommandHelpCard[] => {
+		if (card.subcommands.length === 0) return [card];
+		return card.subcommands.flatMap((child) => visit(child));
+	};
+	return tree.subcommands.flatMap((child) => visit(child));
+};
+
+const fullUsage = (card: CommandHelpCard): string => {
+	if (card.usage === card.path || card.usage.startsWith(`${card.path} `)) return card.usage;
+	if (card.usage === card.name) return card.path;
+	if (card.usage.startsWith(`${card.name} `))
+		return `${card.path} ${card.usage.slice(card.name.length + 1)}`;
+	return `${card.path} ${card.usage}`;
+};
+
+const renderCommandHelpMarkdown = (title: string, tree: CommandHelpCard): string => {
+	const leaves = leafCommandCards(tree);
+	return [
+		`### ${title}`,
+		...leaves.flatMap((card) => [
+			"",
+			`#### \`${card.path}\``,
+			"",
+			card.description,
+			"",
+			"Usage:",
+			"",
+			"```sh",
+			fullUsage(card),
+			"```",
+		]),
+	].join("\n");
+};
 
 const renderCommandCards = (agent: SpawnableAgentKind, services: RenderServices): string => {
 	const pithosHelp = filteredHelpTree(
@@ -434,20 +467,15 @@ const renderCommandCards = (agent: SpawnableAgentKind, services: RenderServices)
 	);
 	const sections = [
 		[
-			"## Generated command help JSON",
-			"This JSON is generated from CLI help; use the rendered claim command above for the exact claim invocation for this run.",
+			"## Generated command reference",
+			"This reference is generated from CLI metadata. Use the rendered claim command above for the exact claim invocation for this run.",
 			"",
-			"### Pithos help JSON",
-			"```json",
-			renderCommandHelpJson(pithosHelp),
-			"```",
+			renderCommandHelpMarkdown("Pithos", pithosHelp),
 		].join("\n"),
 	];
 	if (agent === "pandora") {
 		const pdxHelp = filteredHelpTree(pdxHelpTree(services), PANDORA_PDX_COMMAND_PATHS, "pdx help");
-		sections.push(
-			["### pdx inspection help JSON", "```json", renderCommandHelpJson(pdxHelp), "```"].join("\n"),
-		);
+		sections.push(renderCommandHelpMarkdown("pdx inspection", pdxHelp));
 	}
 	return `${sections.join("\n\n")}\n`;
 };

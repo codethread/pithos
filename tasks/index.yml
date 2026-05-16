@@ -36,7 +36,7 @@ tasks:
   - id: 7
     description: Markdown command cards
     task_file: tasks/007-markdown-command-cards.md
-    status: pending
+    status: complete
     blocked_by:
       - 6
   - id: 8

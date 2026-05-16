@@ -85,3 +85,10 @@ Append notes here. Do not rewrite earlier notes.
 
 - Added tasks 11–12 at the end of the queue per follow-up request. Task 11 is an explicit spec/code alignment pass for the new command-reference feature; Task 12 is the final generated prompt readability preview.
 - Both are AFK because the acceptance criteria are deterministic: compare implementation to specs/docs/tests, preview bundled prompts in an isolated context, and make only small alignment/readability fixes.
+
+### Task 7: Markdown command cards — 2026-05-16
+
+- Replaced raw `{{command_cards}}` JSON fences with generated Markdown command references built from the same role-filtered `pithos --help-json` and Pandora pdx `--help-json` paths.
+- Leaf commands now render by full command path, description, and shell usage; parent groups remain traversal/filter inputs rather than nested JSON shown to agents.
+- Tests cover War, Toil/Greed/Envy, and Pandora Markdown prompt references, absence of raw help JSON markers/fences, and Pandora's continued exclusion of `pdx daemon status` / `pdx daemon logs`.
+- Validation: `pnpm verify` passed.

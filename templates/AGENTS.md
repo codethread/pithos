@@ -107,7 +107,7 @@ Available variables:
 - `scope_id`
 - `cwd`
 - `claim_command`
-- `command_cards`
+- `command_cards` — generated Markdown command reference; keep this variable as prose/reference content, not JSON
 - `claims`
 - `enqueues`
 - `model`

@@ -582,7 +582,7 @@ describe("renderAgent", () => {
 		expect(rendered.harness.argv).toContain("bash");
 	});
 
-	it("renders War prompt with generated Pithos command cards", () => {
+	it("renders War prompt with generated Markdown Pithos command reference", () => {
 		const rendered = renderAgent(
 			{ ...base, agent: "war", mode: "afk" },
 			fakeRenderServices(
@@ -593,18 +593,30 @@ describe("renderAgent", () => {
 				}),
 			),
 		);
-		expect(rendered.prompt).toContain("pithos task claim");
-		expect(rendered.prompt).toContain("pithos task artifact add");
-		expect(rendered.prompt).toContain("pithos task complete");
-		expect(rendered.prompt).toContain("pithos task fail");
+		expect(rendered.prompt).toContain("## Generated command reference");
+		expect(rendered.prompt).toContain("#### `pithos task claim`");
+		expect(rendered.prompt).toContain("#### `pithos task artifact add`");
+		expect(rendered.prompt).toContain("#### `pithos task complete`");
+		expect(rendered.prompt).toContain("#### `pithos task fail`");
+		expect(rendered.prompt).toContain(
+			"```sh\npithos task claim [--run text] --scope text --capability triage | design | execute | escalate\n```",
+		);
+
 		expect(rendered.prompt).toContain(
 			"pithos task claim --run run_test --scope scope_repo --capability execute",
 		);
+		expect(rendered.prompt).not.toContain("pithos scope list");
+		expect(rendered.prompt).not.toContain("pithos graph inspect");
+		expect(rendered.prompt).not.toContain("pithos events tail");
+		expect(rendered.prompt).not.toContain("pithos briefing");
+		expect(rendered.prompt).not.toContain("### Pithos help JSON");
+		expect(rendered.prompt).not.toContain("```json");
+		expect(rendered.prompt).not.toContain('"subcommands"');
 		expect(rendered.prompt).not.toContain("Use Pithos task commands for inspect");
 	});
 
-	it("renders scope command cards for routing agents", () => {
-		for (const agent of ["toil", "greed"] as const) {
+	it("renders scope command reference for routing agents", () => {
+		for (const agent of ["toil", "greed", "envy"] as const) {
 			const rendered = renderAgent(
 				{ ...base, agent, mode: "afk" },
 				fakeRenderServices(
@@ -615,12 +627,18 @@ describe("renderAgent", () => {
 					}),
 				),
 			);
-			expect(rendered.prompt).toContain("pithos scope");
-			expect(rendered.prompt).toContain("pithos task");
+			expect(rendered.prompt).toContain("#### `pithos scope list`");
+			expect(rendered.prompt).toContain("#### `pithos scope upsert`");
+			expect(rendered.prompt).toContain("#### `pithos task claim`");
+			expect(rendered.prompt).not.toContain("#### `pithos graph inspect`");
+			expect(rendered.prompt).not.toContain("#### `pithos events tail`");
+			expect(rendered.prompt).not.toContain("#### `pithos briefing`");
+			expect(rendered.prompt).not.toContain("### Pithos help JSON");
+			expect(rendered.prompt).not.toContain("```json");
 		}
 	});
 
-	it("renders Pandora prompt with generated Pithos and pdx command cards", () => {
+	it("renders Pandora prompt with generated Markdown Pithos and pdx command reference", () => {
 		const rendered = renderAgent(
 			{ ...base, agent: "pandora", mode: "hitl" },
 			fakeRenderServices(
@@ -631,15 +649,22 @@ describe("renderAgent", () => {
 				}),
 			),
 		);
-		expect(rendered.prompt).toContain("pithos scope");
-		expect(rendered.prompt).toContain("pithos briefing");
-		expect(rendered.prompt).toContain("pithos graph inspect");
-		expect(rendered.prompt).toContain("pithos events tail");
+		expect(rendered.prompt).toContain("### Pithos");
+		expect(rendered.prompt).toContain("### pdx inspection");
+		expect(rendered.prompt).toContain("#### `pithos scope list`");
+		expect(rendered.prompt).toContain("#### `pithos briefing`");
+		expect(rendered.prompt).toContain("#### `pithos graph inspect`");
+		expect(rendered.prompt).toContain("#### `pithos events tail`");
 		expect(rendered.prompt).not.toContain("pdx daemon status");
 		expect(rendered.prompt).not.toContain("pdx daemon logs");
-		expect(rendered.prompt).toContain("pdx run transcript");
-		expect(rendered.prompt).toContain("pdx run show");
-		expect(rendered.prompt).toContain("pdx task show");
+		expect(rendered.prompt).toContain("#### `pdx run transcript`");
+		expect(rendered.prompt).toContain("#### `pdx run show`");
+		expect(rendered.prompt).toContain("#### `pdx task show`");
+
+		expect(rendered.prompt).not.toContain("### Pithos help JSON");
+		expect(rendered.prompt).not.toContain("### pdx inspection help JSON");
+		expect(rendered.prompt).not.toContain("```json");
+		expect(rendered.prompt).not.toContain('"subcommands"');
 	});
 
 	it("fails loudly when configured pdx command cards are missing", () => {

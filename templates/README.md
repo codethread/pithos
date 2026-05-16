@@ -218,7 +218,7 @@ Available template variables:
 - `scope_id`
 - `cwd`
 - `claim_command`
-- `command_cards`
+- `command_cards` — generated Markdown command reference sourced from role-filtered `pithos --help-json` and, for Pandora, selected `pdx --help-json` inspection commands
 - `claims` (derived from built-in Pithos authorization)
 - `enqueues` (derived from built-in Pithos authorization)
 - `model`

@@ -54,7 +54,7 @@ tasks:
   - id: 10
     description: Command reference docs convergence
     task_file: tasks/010-command-reference-docs-convergence.md
-    status: pending
+    status: complete
     blocked_by:
       - 9
   - id: 11

@@ -106,3 +106,12 @@ Append notes here. Do not rewrite earlier notes.
 - Graph guidance now covers selector exclusivity, status/search/since filters, seed-before-closure behavior, readable-vs-JSON usage, and the `repair_source` scope-closure exception.
 - Kept the bundled Pandora sitrep flow unchanged because it already orders `pithos briefing --agent pandora` before broad `pithos graph inspect --all` interrogation.
 - Validation: `pnpm verify` passed.
+
+### Task 10: Command reference docs convergence — 2026-05-16
+
+- Documented `command_cards` as generated Markdown reference content in template operator and direct-editing docs, including the pre-v1 migration break for extensions that parsed the old raw JSON.
+- Clarified that `{{command_reference}}` is not currently a supported template variable.
+- Updated Spawner README to describe role filtering, annotation validation, fail-loud help/annotation checks, and the boundary that syntax still comes from `--help-json` while human `--help` remains a separate surface.
+- Marked `specs/agent-command-reference.md` implemented and updated the spec index; `specs/control-plane-supervision.md` already matched the implemented filter/render contract.
+- YAGNI follow-up removed historical raw-JSON flow and implementation-location planning sections from the implemented command-reference spec, leaving the durable contract only.
+- Validation: `pnpm verify` passed.

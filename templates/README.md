@@ -134,6 +134,11 @@ individual files wholesale via the overlay. The read-only chmod on
 `<data-dir>/templates/` after seeding surfaces this contract immediately on any
 write attempt.
 
+Pre-v1 command-card rendering changed `{{command_cards}}` from raw help JSON to
+generated Markdown reference content. User extension templates that parsed the
+old raw JSON must treat `command_cards` as prose/reference content instead, or
+replace the affected template wholesale with their own command-reference source.
+
 ## `hooks` field
 
 `agents.json` may contain an optional top-level `hooks` block to configure
@@ -218,12 +223,15 @@ Available template variables:
 - `scope_id`
 - `cwd`
 - `claim_command`
-- `command_cards` — generated Markdown command reference sourced from role-filtered `pithos --help-json` and, for Pandora, selected `pdx --help-json` inspection commands
+- `command_cards` — generated Markdown command reference sourced from role-filtered `pithos --help-json` and, for Pandora, selected `pdx --help-json` inspection commands; this is prose/reference content, not raw JSON
 - `claims` (derived from built-in Pithos authorization)
 - `enqueues` (derived from built-in Pithos authorization)
 - `model`
 - `tools_csv`
 - one variable per include path exactly as listed, for example `{{_common.md}}`, `{{snippets/common.md}}`, or `{{~/agent/common.md}}`
+
+`{{command_reference}}` is not a supported variable. Keep the variable name
+`{{command_cards}}` unless Spawner explicitly adds and documents a new one.
 
 Templates receive launch/self-claim context only. They do not receive task bodies.
 

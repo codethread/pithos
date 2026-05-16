@@ -78,7 +78,7 @@ Exported from `@pdx/spawner`:
 - `makeFakeSpawnerServices(input)` — deterministic service implementation for tests.
 - `bundledTemplatesDir` — repo-root bundled default template directory used when `PDX_DATA_DIR` is unset and by `pdx` when seeding a fresh data dir.
 
-`RenderedAgent` is the important API object: it contains `logicalName`, `harness.kind`, `harness.argv`, `harness.env`, `sessionLogPath`, and `prompt`. `prompt` includes a generated Markdown command reference from `pithos --help-json` and, for Pandora, the role-filtered pdx inspection commands from `pdx --help-json`. Spawner also attaches compact built-in notes to selected command paths after validating those paths against the generated help tree. Malformed help JSON, configured command paths missing from help, or annotation paths missing from help fail render loudly. `LaunchResult` intentionally contains runtime metadata only: pid for AFK mode or tmux target/pane pid for HITL mode.
+`RenderedAgent` is the important API object: it contains `logicalName`, `harness.kind`, `harness.argv`, `harness.env`, `sessionLogPath`, and `prompt`. `prompt` includes a generated Markdown command reference for the `{{command_cards}}` template variable. Spawner sources syntax from structured CLI metadata (`pithos --help-json` and, for Pandora, selected `pdx --help-json` inspection commands), applies role filters, validates configured command paths, validates built-in command annotations against the generated help tree, then renders concise Markdown. Human `pithos --help` / `pdx --help` and the agent command reference are separate surfaces that share structured CLI metadata; Spawner does not copy terminal help text into prompts. Malformed help JSON, configured command paths missing from help, or annotation paths missing from help fail render loudly. `LaunchResult` intentionally contains runtime metadata only: pid for AFK mode or tmux target/pane pid for HITL mode.
 
 ## Manifest/template config
 
@@ -89,7 +89,7 @@ Spawner intentionally keeps the render contract in the repo-root
 Use that doc for:
 
 - `agents.json` schema and the built-in Pithos claim/enqueue contract Spawner derives at render time
-- template variables and include rules
+- template variables and include rules, including `command_cards` as generated Markdown rather than raw JSON
 - `PDX_DATA_DIR` loading behavior
 - user-editable config guidance
 

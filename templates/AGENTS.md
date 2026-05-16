@@ -107,7 +107,17 @@ Available variables:
 - `scope_id`
 - `cwd`
 - `claim_command`
-- `command_cards` — generated Markdown command reference; keep this variable as prose/reference content, not JSON
+- `command_cards` — generated Markdown command reference sourced from role-filtered CLI metadata; keep this variable as prose/reference content, not JSON
+
+`{{command_reference}}` is not a supported template variable. Keep using the exact
+`{{command_cards}}` variable unless Spawner explicitly adds and documents a new
+variable.
+
+Pre-v1 migration impact: older user extension templates that parsed raw JSON from
+`{{command_cards}}` must stop treating it as a JSON API. Either consume it as
+human-readable reference prose or replace the affected template wholesale with a
+custom command-reference source.
+
 - `claims`
 - `enqueues`
 - `model`

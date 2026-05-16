@@ -49,3 +49,9 @@ Append notes here. Do not rewrite earlier notes.
 - Added repeatable `--search` filters for `pithos graph inspect`; whitespace-only terms fail before DB config is loaded with tagged `VALIDATION_ERROR` JSON.
 - Search filters only seed from task title/body text and compose with repeated-term AND plus existing selector/status filters. Closure still adds non-matching dependency/source/supersession context.
 - Validation: `pnpm verify` passed.
+
+### Task 4: Graph since seed filter — 2026-05-16
+
+- Added `--since` for `pithos graph inspect` with exact supported forms: `today`, `<n>h`, `<n>d`, `YYYY-MM-DD`, and ISO timestamps with timezone.
+- `today`/date-only cutoffs use local operator-day midnight; relative forms use the injected Pithos clock. The filter matches `created_at`, `updated_at`, or `completed_at` before graph closure, so related context can still appear.
+- Validation: `pnpm verify` passed.

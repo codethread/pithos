@@ -983,6 +983,34 @@ describe("pithos cli", () => {
 			},
 		});
 
+		const stale = await enqueueGlobalTriage(dbPath, "run_toil", "Stale triage", "stale body");
+		const db = new Database(dbPath);
+		try {
+			db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+				"2026-05-06 00:00:00",
+				"2026-05-06 00:00:00",
+				ready,
+			);
+			db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+				"2026-05-07 01:00:00",
+				"2026-05-07 01:00:00",
+				blocked,
+			);
+			db.prepare(
+				"UPDATE tasks SET status='cancelled', created_at=?, updated_at=?, completed_at=? WHERE id=?",
+			).run("2026-05-06 00:00:00", "2026-05-06 00:00:00", "2026-05-06 00:00:00", stale);
+		} finally {
+			db.close();
+		}
+		const sinceGraphJson = await runCli(
+			["graph", "inspect", "--all", "--since", "24h", "--json"],
+			dbPath,
+		);
+		const sinceNodeIds = (
+			JSON.parse(sinceGraphJson.stdout[0] ?? "") as { graph: { nodes: { id: string }[] } }
+		).graph.nodes.map((node) => node.id);
+		expect(sinceNodeIds.sort()).toEqual([ready, blocked].sort());
+
 		const briefingText = await runCli(["briefing", "--agent", "toil"], dbPath);
 		expect(normalizeGeneratedIds(briefingText.stdout[0] ?? "")).toMatchInlineSnapshot(`
 			"# Briefing
@@ -1085,6 +1113,24 @@ describe("pithos cli", () => {
 					error: {
 						code: "VALIDATION_ERROR",
 						message: "--search must be non-empty",
+					},
+				},
+			]);
+			expect(result.exitCode).toBe(2);
+		});
+
+		it("rejects invalid graph since filters with tagged validation", async () => {
+			const dbPath = tempDb();
+			await runCli(["init", "--fresh"], dbPath);
+			const result = await runCli(["graph", "inspect", "--all", "--since", "yesterday"], dbPath);
+
+			expect(result.stdout).toEqual([]);
+			expect(result.stderr.map((line) => JSON.parse(line) as unknown)).toEqual([
+				{
+					ok: false,
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "invalid --since cutoff",
 					},
 				},
 			]);
@@ -1685,6 +1731,9 @@ describe("pithos cli", () => {
 		);
 		expect(commands.find((command) => command.path === "pithos graph inspect")?.usage).toContain(
 			"--search",
+		);
+		expect(commands.find((command) => command.path === "pithos graph inspect")?.usage).toContain(
+			"--since",
 		);
 		expect(commands.find((command) => command.path === "pithos briefing")?.usage).toContain(
 			"--json",

@@ -19,7 +19,7 @@ tasks:
   - id: 4
     description: Graph since seed filter
     task_file: tasks/004-graph-since-seed-filter.md
-    status: pending
+    status: complete
     blocked_by:
       - 3
   - id: 5

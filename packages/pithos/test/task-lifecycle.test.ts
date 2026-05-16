@@ -14,6 +14,7 @@ import {
 	type Engine,
 	type Services,
 } from "../src/index.js";
+import { parseGraphSinceCutoff } from "../src/engine.js";
 
 const tempDb = () => join(mkdtempSync(join(tmpdir(), "pithos-task-")), "pithos.db");
 
@@ -113,6 +114,19 @@ const enqueueTask = (
 		dependsOn: input.dependsOn ?? [],
 		chain: input.chain ?? "auto",
 	});
+
+const sinceCutoff = (dbTimestamp: string) => ({ dbTimestamp });
+const parseSinceCutoff = (value: string, nowIso = "2026-05-08T12:00:00.000Z") =>
+	parseGraphSinceCutoff(value, nowIso);
+
+const testDbTimestamp = (date: Date): string =>
+	date
+		.toISOString()
+		.replace("T", " ")
+		.replace(/\.\d{3}Z$/, "");
+
+const localDateAt = (year: number, month: number, day: number, hour = 0): string =>
+	testDbTimestamp(new Date(year, month - 1, day, hour, 0, 0, 0));
 
 const upsertPandoraRun = (engine: Engine): void => {
 	engine.runUpsert({
@@ -834,6 +848,166 @@ CREATE TABLE repair_alerts (
 		expect(graph.graph.nodes.map((node) => node.id)).toEqual([claimedAuth]);
 		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(queuedAuth);
 		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(claimedOther);
+	});
+
+	it("filters graph seeds by since cutoff before closure expansion", () => {
+		const { dbPath, engine, repo } = setup();
+		const oldBlocker = enqueueTask(engine, {
+			title: "old blocker context",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const todaySeed = enqueueTask(engine, {
+			title: "today seed",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [oldBlocker],
+			chain: "none",
+		}).task.id;
+		const relativeSeed = enqueueTask(engine, {
+			title: "relative seed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const isoSeed = enqueueTask(engine, {
+			title: "iso seed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const completedSeed = enqueueTask(engine, {
+			title: "completed seed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const oldNonMatch = enqueueTask(engine, {
+			title: "old non-match",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+
+		const db = new Database(dbPath);
+		db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+			"2026-05-06 08:00:00",
+			"2026-05-06 08:00:00",
+			oldBlocker,
+		);
+		db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+			"2026-05-08 01:00:00",
+			"2026-05-08 01:00:00",
+			todaySeed,
+		);
+		db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+			"2026-05-07 13:00:00",
+			"2026-05-07 13:00:00",
+			relativeSeed,
+		);
+		db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+			"2026-05-07 11:30:00",
+			"2026-05-07 11:30:00",
+			isoSeed,
+		);
+		db.prepare(
+			"UPDATE tasks SET status='done', created_at=?, updated_at=?, completed_at=? WHERE id=?",
+		).run("2026-05-06 08:00:00", "2026-05-06 08:00:00", "2026-05-08 02:00:00", completedSeed);
+		db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+			"2026-05-06 00:00:00",
+			"2026-05-06 00:00:00",
+			oldNonMatch,
+		);
+		db.close();
+
+		const graph = engine.graphInspect({
+			taskId: undefined,
+			scope: repo,
+			all: false,
+			sinceCutoff: sinceCutoff("2026-05-07 12:00:00"),
+		});
+		expect(graph.graph.nodes.map((node) => node.id).sort()).toEqual(
+			[oldBlocker, todaySeed, relativeSeed, completedSeed].sort(),
+		);
+		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(isoSeed);
+		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(oldNonMatch);
+	});
+
+	it("composes graph since with status and search filters", () => {
+		const { dbPath, engine, repo } = setup();
+		const matching = enqueueTask(engine, {
+			title: "auth fresh claimed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const stale = enqueueTask(engine, {
+			title: "auth stale claimed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const wrongStatus = enqueueTask(engine, {
+			title: "auth fresh queued",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const wrongSearch = enqueueTask(engine, {
+			title: "fresh claimed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const db = new Database(dbPath);
+		db.prepare("UPDATE tasks SET status='claimed' WHERE id IN (?, ?, ?)").run(
+			matching,
+			stale,
+			wrongSearch,
+		);
+		db.prepare("UPDATE tasks SET created_at=?, updated_at=? WHERE id=?").run(
+			"2026-05-06 00:00:00",
+			"2026-05-06 00:00:00",
+			stale,
+		);
+		db.close();
+
+		const graph = engine.graphInspect({
+			taskId: undefined,
+			scope: repo,
+			all: false,
+			status: ["claimed"],
+			search: ["AUTH"],
+			sinceCutoff: sinceCutoff("2026-05-08 00:00:00"),
+		});
+
+		expect(graph.graph.nodes.map((node) => node.id)).toEqual([matching]);
+		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(stale);
+		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(wrongStatus);
+		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(wrongSearch);
+	});
+
+	it("parses graph since cutoff forms", () => {
+		const today = new Date("2026-05-08T12:00:00.000Z");
+		expect(parseSinceCutoff("today")).toEqual({
+			dbTimestamp: localDateAt(today.getFullYear(), today.getMonth() + 1, today.getDate()),
+		});
+		expect(parseSinceCutoff("24h")).toEqual({ dbTimestamp: "2026-05-07 12:00:00" });
+		expect(parseSinceCutoff("1d")).toEqual({ dbTimestamp: "2026-05-07 12:00:00" });
+		expect(parseSinceCutoff("2026-05-07")).toEqual({
+			dbTimestamp: localDateAt(2026, 5, 7),
+		});
+		expect(parseSinceCutoff("2026-05-07T12:30:00+01:00")).toEqual({
+			dbTimestamp: "2026-05-07 11:30:00",
+		});
+	});
+
+	it("rejects invalid graph since cutoffs at the parser boundary", () => {
+		expect(() => parseSinceCutoff("yesterday")).toThrow(PithosError);
+		expect(() => parseSinceCutoff("2026-02-31")).toThrow("invalid --since cutoff");
+		expect(() => parseSinceCutoff("2026-02-31T12:00:00Z")).toThrow("invalid --since cutoff");
+		expect(() => parseSinceCutoff("2026-05-08T12:00:00")).toThrow("invalid --since cutoff");
 	});
 
 	it("lets graph search seed older cancelled tasks", () => {

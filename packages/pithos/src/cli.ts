@@ -7,6 +7,7 @@ import { NodeContext } from "@effect/platform-node";
 import type { Config } from "./config.js";
 import {
 	makeEngine,
+	parseGraphSinceCutoff,
 	renderBriefingText,
 	renderGraphInspectText,
 	renderTaskInspectMarkdown,
@@ -127,6 +128,7 @@ type CommandInput =
 			readonly all: boolean;
 			readonly status: readonly string[];
 			readonly search: readonly string[];
+			readonly since: string | undefined;
 			readonly json: boolean;
 	  }
 	| { readonly command: "briefing"; readonly agent: string | undefined; readonly json: boolean };
@@ -388,6 +390,13 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 			input.command === "graph.inspect"
 				? yield* fromEngine(() => parseTaskStatuses(input.status))
 				: undefined;
+		const graphSince = input.command === "graph.inspect" ? input.since : undefined;
+		const graphSinceCutoff =
+			graphSince === undefined
+				? undefined
+				: yield* fromEngine(() =>
+						parseGraphSinceCutoff(graphSince, Effect.runSync(ctx.services.clock.nowIso())),
+					);
 		const enqueueBody =
 			input.command === "task.enqueue"
 				? yield* readRequiredStdinBody(ctx, "task enqueue", input.stdin)
@@ -457,7 +466,11 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "task.supersede":
 					return engine.supersede({ ...input, body: supersedeBody, bodyFile: undefined });
 				case "graph.inspect": {
-					const graphOutput = engine.graphInspect({ ...input, status: graphStatuses! });
+					const graphOutput = engine.graphInspect({
+						...input,
+						status: graphStatuses!,
+						sinceCutoff: graphSinceCutoff,
+					});
 					return input.json ? graphOutput : renderGraphInspectText(graphOutput);
 				}
 				case "briefing": {
@@ -920,6 +933,12 @@ export const makePithosCommand = (ctx: CliContext) => {
 				),
 				Options.repeated,
 			),
+			since: Options.text("since").pipe(
+				Options.withDescription(
+					"Seed from tasks touched at or after cutoff: today, <n>h, <n>d, YYYY-MM-DD, or ISO timestamp with timezone.",
+				),
+				Options.optional,
+			),
 			json: Options.boolean("json").pipe(
 				Options.withDescription("Return the full structured graph object as JSON."),
 			),
@@ -932,6 +951,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				all: o.all,
 				status: o.status,
 				search: o.search,
+				since: opt(o.since),
 				json: o.json,
 			}),
 	).pipe(

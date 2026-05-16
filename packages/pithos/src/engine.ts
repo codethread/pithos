@@ -162,6 +162,7 @@ export interface Engine {
 		readonly all: boolean;
 		readonly status?: readonly TaskStatus[];
 		readonly search?: readonly string[];
+		readonly sinceCutoff?: GraphSinceCutoff | undefined;
 	}) => GraphInspectOutput;
 	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
 	readonly supersede: (input: {
@@ -1372,6 +1373,95 @@ const searchFilterSql = (search: readonly string[]): string =>
 const searchFilterParams = (search: readonly string[]): readonly string[] =>
 	search.flatMap((term) => [term, term]);
 
+interface GraphSinceCutoff {
+	readonly dbTimestamp: string;
+}
+
+const sinceFilterSql = (since: GraphSinceCutoff | undefined): string =>
+	since === undefined ? "" : " AND (created_at >= ? OR updated_at >= ? OR completed_at >= ?)";
+
+const sinceFilterParams = (since: GraphSinceCutoff | undefined): readonly string[] =>
+	since === undefined ? [] : [since.dbTimestamp, since.dbTimestamp, since.dbTimestamp];
+
+const toDbTimestamp = (date: Date): string => {
+	if (Number.isNaN(date.getTime())) fail("VALIDATION_ERROR", "invalid --since cutoff");
+	return date
+		.toISOString()
+		.replace("T", " ")
+		.replace(/\.\d{3}Z$/, "");
+};
+
+const startOfLocalDay = (date: Date): Date =>
+	new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+
+export const parseGraphSinceCutoff = (raw: string, nowIso: string): GraphSinceCutoff => {
+	const value = requireNonEmpty(raw.trim(), "--since");
+	const now = new Date(nowIso);
+	if (Number.isNaN(now.getTime())) {
+		fail("INTERNAL_ERROR", `clock returned invalid ISO timestamp: ${nowIso}`);
+	}
+	if (value === "today") return { dbTimestamp: toDbTimestamp(startOfLocalDay(now)) };
+	const relative = /^(\d+)([hd])$/.exec(value);
+	if (relative !== null) {
+		const amount = Number(relative[1]);
+		if (!Number.isSafeInteger(amount) || amount < 1) {
+			fail("VALIDATION_ERROR", "invalid --since cutoff");
+		}
+		const unit = relative[2];
+		const millis = amount * (unit === "h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000);
+		return { dbTimestamp: toDbTimestamp(new Date(now.getTime() - millis)) };
+	}
+	const localDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+	if (localDate !== null) {
+		const year = Number(localDate[1]);
+		const month = Number(localDate[2]);
+		const day = Number(localDate[3]);
+		const cutoff = new Date(year, month - 1, day, 0, 0, 0, 0);
+		if (
+			cutoff.getFullYear() !== year ||
+			cutoff.getMonth() !== month - 1 ||
+			cutoff.getDate() !== day
+		) {
+			fail("VALIDATION_ERROR", "invalid --since cutoff");
+		}
+		return { dbTimestamp: toDbTimestamp(cutoff) };
+	}
+	const isoTimestamp =
+		/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/.exec(
+			value,
+		);
+	if (isoTimestamp !== null) {
+		const parsed = new Date(value);
+		if (Number.isNaN(parsed.getTime())) fail("VALIDATION_ERROR", "invalid --since cutoff");
+		const offset = isoTimestamp[8] ?? fail("INTERNAL_ERROR", "missing ISO timestamp offset");
+		const offsetMinutes =
+			offset === "Z" ? 0 : Number(offset.slice(1, 3)) * 60 + Number(offset.slice(4, 6));
+		const localInstant = new Date(
+			parsed.getTime() + (offset.startsWith("-") ? -offsetMinutes : offsetMinutes) * 60_000,
+		);
+		const [year, month, day, hour, minute, second] = [
+			localInstant.getUTCFullYear(),
+			localInstant.getUTCMonth() + 1,
+			localInstant.getUTCDate(),
+			localInstant.getUTCHours(),
+			localInstant.getUTCMinutes(),
+			localInstant.getUTCSeconds(),
+		];
+		if (
+			year !== Number(isoTimestamp[1]) ||
+			month !== Number(isoTimestamp[2]) ||
+			day !== Number(isoTimestamp[3]) ||
+			hour !== Number(isoTimestamp[4]) ||
+			minute !== Number(isoTimestamp[5]) ||
+			second !== Number(isoTimestamp[6])
+		) {
+			fail("VALIDATION_ERROR", "invalid --since cutoff");
+		}
+		return { dbTimestamp: toDbTimestamp(parsed) };
+	}
+	return fail("VALIDATION_ERROR", "invalid --since cutoff");
+};
+
 const graphForIds = (
 	db: Db,
 	selector: GraphSelectorOutput,
@@ -2362,7 +2452,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				repair_alert_kind: repairAlertKind,
 			};
 		}),
-	graphInspect: ({ taskId, scope, all, status = [], search = [] }) =>
+	graphInspect: ({ taskId, scope, all, status = [], search = [], sinceCutoff }) =>
 		withDb(ctx, (db) => {
 			const searchTerms = requireNonEmptySearchTerms(search);
 			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
@@ -2371,12 +2461,17 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			if (selectorCount !== 1) fail("VALIDATION_ERROR", "provide exactly one graph selector");
 
 			const defaultVisibility =
-				status.length === 0 && searchTerms.length === 0
+				status.length === 0 && searchTerms.length === 0 && sinceCutoff === undefined
 					? " AND (status <> 'cancelled' OR completed_at > datetime('now', '-1 hour'))"
 					: "";
 			const statusClause = statusFilterSql(status);
 			const searchClause = searchFilterSql(searchTerms);
-			const filterParams = [...status, ...searchFilterParams(searchTerms)];
+			const sinceClause = sinceFilterSql(sinceCutoff);
+			const filterParams = [
+				...status,
+				...searchFilterParams(searchTerms),
+				...sinceFilterParams(sinceCutoff),
+			];
 
 			if (taskId !== undefined) {
 				taskSummary(db, taskId);
@@ -2391,6 +2486,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 								WHERE id=?
 								  ${statusClause}
 								  ${searchClause}
+								  ${sinceClause}
 							`)
 							.all(taskId, ...filterParams) as { id: string }[]
 					).map((r) => r.id),
@@ -2412,6 +2508,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 								  ${defaultVisibility}
 								  ${statusClause}
 								  ${searchClause}
+								  ${sinceClause}
 							`)
 							.all(scope, ...filterParams) as { id: string }[]
 					).map((r) => r.id),
@@ -2430,6 +2527,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							  ${defaultVisibility}
 							  ${statusClause}
 							  ${searchClause}
+							  ${sinceClause}
 						`)
 						.all(...filterParams) as { id: string }[]
 				).map((r) => r.id),

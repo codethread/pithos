@@ -126,6 +126,7 @@ type CommandInput =
 			readonly scope: string | undefined;
 			readonly all: boolean;
 			readonly status: readonly string[];
+			readonly search: readonly string[];
 			readonly json: boolean;
 	  }
 	| { readonly command: "briefing"; readonly agent: string | undefined; readonly json: boolean };
@@ -259,6 +260,22 @@ export const renderPithosHelpJson = <Name extends string, R, E, A>(
 	command: Command.Command<Name, R, E, A>,
 ): string => json(renderHelpCommand(command.descriptor as unknown as CommandDescriptorNode, []));
 
+const writeValidationError = (ctx: CliContext, message: string): Effect.Effect<boolean> =>
+	ctx.services.output
+		.writeError(
+			json({
+				ok: false,
+				error: {
+					code: "VALIDATION_ERROR",
+					message,
+				},
+			}),
+		)
+		.pipe(
+			Effect.zipRight(Effect.sync(() => void (process.exitCode = exitCodeFor("VALIDATION_ERROR")))),
+			Effect.as(true),
+		);
+
 const handleHelpJson = <Name extends string, R, E, A>(
 	ctx: CliContext,
 	args: readonly string[],
@@ -267,24 +284,23 @@ const handleHelpJson = <Name extends string, R, E, A>(
 	const cliArgs = args.slice(2);
 	if (!cliArgs.includes("--help-json")) return Effect.succeed(false);
 	if (cliArgs.length !== 1) {
-		return ctx.services.output
-			.writeError(
-				json({
-					ok: false,
-					error: {
-						code: "VALIDATION_ERROR",
-						message: "--help-json must be the only pithos argument",
-					},
-				}),
-			)
-			.pipe(
-				Effect.zipRight(
-					Effect.sync(() => void (process.exitCode = exitCodeFor("VALIDATION_ERROR"))),
-				),
-				Effect.as(true),
-			);
+		return writeValidationError(ctx, "--help-json must be the only pithos argument");
 	}
 	return ctx.services.output.write(renderPithosHelpJson(command)).pipe(Effect.as(true));
+};
+
+const handleEmptySearchArg = (ctx: CliContext, args: readonly string[]): Effect.Effect<boolean> => {
+	const cliArgs = args.slice(2);
+	for (let index = 0; index < cliArgs.length; index += 1) {
+		const arg = cliArgs[index];
+		if (arg === "--search" && cliArgs[index + 1] === "") {
+			return writeValidationError(ctx, "--search must be non-empty");
+		}
+		if (arg === "--search=") {
+			return writeValidationError(ctx, "--search must be non-empty");
+		}
+	}
+	return Effect.succeed(false);
 };
 
 const resolveConfig = (config: Config | (() => Config)): Config =>
@@ -898,6 +914,12 @@ export const makePithosCommand = (ctx: CliContext) => {
 				),
 				Options.repeated,
 			),
+			search: Options.text("search").pipe(
+				Options.withDescription(
+					"Seed from tasks whose title or body contains this case-insensitive text; repeat for AND.",
+				),
+				Options.repeated,
+			),
 			json: Options.boolean("json").pipe(
 				Options.withDescription("Return the full structured graph object as JSON."),
 			),
@@ -909,6 +931,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				scope: opt(o.scope),
 				all: o.all,
 				status: o.status,
+				search: o.search,
 				json: o.json,
 			}),
 	).pipe(
@@ -952,6 +975,8 @@ export const runPithosCli = (ctx: CliContext, args: readonly string[]) => {
 	return Effect.gen(function* () {
 		const handledHelpJson = yield* handleHelpJson(ctx, args, command);
 		if (handledHelpJson) return;
+		const handledEmptySearchArg = yield* handleEmptySearchArg(ctx, args);
+		if (handledEmptySearchArg) return;
 		const cli = Command.run(command, { name: "Pithos", version: "0.1.0", executable: "pithos" });
 		yield* cli(args);
 	}).pipe(

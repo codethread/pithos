@@ -1073,6 +1073,24 @@ describe("pithos cli", () => {
 			expect(result.exitCode).toBe(2);
 		});
 
+		it("rejects empty graph search filters with tagged validation", async () => {
+			const dbPath = tempDb();
+			const result = await runCli(["graph", "inspect", "--all", "--search", ""], dbPath);
+
+			expect(result.stdout).toEqual([]);
+			expect(result.configRead).toBe(false);
+			expect(result.stderr.map((line) => JSON.parse(line) as unknown)).toEqual([
+				{
+					ok: false,
+					error: {
+						code: "VALIDATION_ERROR",
+						message: "--search must be non-empty",
+					},
+				},
+			]);
+			expect(result.exitCode).toBe(2);
+		});
+
 		it("preserves tagged selector validation failures", async () => {
 			const dbPath = tempDb();
 			await runCli(["init", "--fresh"], dbPath);
@@ -1664,6 +1682,9 @@ describe("pithos cli", () => {
 		);
 		expect(commands.find((command) => command.path === "pithos graph inspect")?.usage).toContain(
 			"--status",
+		);
+		expect(commands.find((command) => command.path === "pithos graph inspect")?.usage).toContain(
+			"--search",
 		);
 		expect(commands.find((command) => command.path === "pithos briefing")?.usage).toContain(
 			"--json",

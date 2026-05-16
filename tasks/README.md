@@ -43,3 +43,9 @@ Append notes here. Do not rewrite earlier notes.
 - Added repeatable literal `--status` filters for `pithos graph inspect`; invalid values fail before DB config is loaded with tagged `VALIDATION_ERROR` JSON.
 - Status filters apply only to seed selection. Dependency/source/supersession closure still includes related non-matching context nodes.
 - Validation: `pnpm verify` passed.
+
+### Task 3: Graph search seed filter — 2026-05-16
+
+- Added repeatable `--search` filters for `pithos graph inspect`; whitespace-only terms fail before DB config is loaded with tagged `VALIDATION_ERROR` JSON.
+- Search filters only seed from task title/body text and compose with repeated-term AND plus existing selector/status filters. Closure still adds non-matching dependency/source/supersession context.
+- Validation: `pnpm verify` passed.

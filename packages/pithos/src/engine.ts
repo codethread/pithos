@@ -161,6 +161,7 @@ export interface Engine {
 		readonly scope: string | undefined;
 		readonly all: boolean;
 		readonly status?: readonly TaskStatus[];
+		readonly search?: readonly string[];
 	}) => GraphInspectOutput;
 	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
 	readonly supersede: (input: {
@@ -1360,6 +1361,17 @@ const createRepairAlertTask = (
 const statusFilterSql = (statuses: readonly TaskStatus[]): string =>
 	statuses.length === 0 ? "" : ` AND status IN (${statuses.map(() => "?").join(",")})`;
 
+const requireNonEmptySearchTerms = (search: readonly string[]): readonly string[] =>
+	search.map((term) => requireNonEmpty(term.trim(), "--search"));
+
+const searchFilterSql = (search: readonly string[]): string =>
+	search
+		.map(() => " AND (instr(lower(title), lower(?)) > 0 OR instr(lower(body), lower(?)) > 0)")
+		.join("");
+
+const searchFilterParams = (search: readonly string[]): readonly string[] =>
+	search.flatMap((term) => [term, term]);
+
 const graphForIds = (
 	db: Db,
 	selector: GraphSelectorOutput,
@@ -2350,24 +2362,41 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				repair_alert_kind: repairAlertKind,
 			};
 		}),
-	graphInspect: ({ taskId, scope, all, status = [] }) =>
+	graphInspect: ({ taskId, scope, all, status = [], search = [] }) =>
 		withDb(ctx, (db) => {
+			const searchTerms = requireNonEmptySearchTerms(search);
 			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
 				(v) => v !== undefined,
 			).length;
 			if (selectorCount !== 1) fail("VALIDATION_ERROR", "provide exactly one graph selector");
 
-			if (taskId !== undefined) {
-				const task = taskSummary(db, taskId);
-				const seedIds = status.length === 0 || status.includes(task.status) ? [task.id] : [];
-				return graphForIds(db, { kind: "task", value: taskId }, seedIds);
-			}
-
 			const defaultVisibility =
-				status.length === 0
+				status.length === 0 && searchTerms.length === 0
 					? " AND (status <> 'cancelled' OR completed_at > datetime('now', '-1 hour'))"
 					: "";
 			const statusClause = statusFilterSql(status);
+			const searchClause = searchFilterSql(searchTerms);
+			const filterParams = [...status, ...searchFilterParams(searchTerms)];
+
+			if (taskId !== undefined) {
+				taskSummary(db, taskId);
+				return graphForIds(
+					db,
+					{ kind: "task", value: taskId },
+					(
+						db
+							.prepare(sql`
+								SELECT id
+								FROM tasks
+								WHERE id=?
+								  ${statusClause}
+								  ${searchClause}
+							`)
+							.all(taskId, ...filterParams) as { id: string }[]
+					).map((r) => r.id),
+				);
+			}
+
 			if (scope !== undefined) {
 				const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id=?`).get(scope);
 				if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
@@ -2382,8 +2411,9 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 								WHERE scope_id=?
 								  ${defaultVisibility}
 								  ${statusClause}
+								  ${searchClause}
 							`)
-							.all(scope, ...status) as { id: string }[]
+							.all(scope, ...filterParams) as { id: string }[]
 					).map((r) => r.id),
 				);
 			}
@@ -2399,8 +2429,9 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							WHERE 1=1
 							  ${defaultVisibility}
 							  ${statusClause}
+							  ${searchClause}
 						`)
-						.all(...status) as { id: string }[]
+						.all(...filterParams) as { id: string }[]
 				).map((r) => r.id),
 			);
 		}),

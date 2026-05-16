@@ -697,6 +697,174 @@ CREATE TABLE repair_alerts (
 		});
 	});
 
+	it("filters graph seeds by repeated search terms before closure expansion", () => {
+		const { engine, repo } = setup();
+		const blocker = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "generic blocker",
+			body: "does not mention the matching words",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+		const authTokenSeed = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "AUTH integration",
+			body: "rotate the token safely",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [blocker],
+			chain: "none",
+		}).task.id;
+		const authOnly = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "auth docs",
+			body: "describe login setup",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+		const artifactOnly = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "session storage",
+			body: "plain task body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+		engine.artifactAdd({
+			taskId: artifactOnly,
+			runId: "run_toil",
+			kind: "note",
+			title: "auth token evidence",
+			body: "auth token appears only in the artifact",
+		});
+
+		const authGraph = engine.graphInspect({
+			taskId: undefined,
+			scope: repo,
+			all: false,
+			search: ["auth"],
+		});
+		expect(authGraph.graph.nodes.map((node) => node.id).sort()).toEqual(
+			[blocker, authTokenSeed, authOnly].sort(),
+		);
+		expect(authGraph.graph.nodes.map((node) => node.id)).not.toContain(artifactOnly);
+		expect(authGraph.graph.edges).toContainEqual({
+			kind: "depends_on",
+			from_task_id: authTokenSeed,
+			to_task_id: blocker,
+			satisfied: false,
+		});
+
+		const authTokenGraph = engine.graphInspect({
+			taskId: undefined,
+			scope: repo,
+			all: false,
+			search: ["auth", "TOKEN"],
+		});
+		expect(authTokenGraph.graph.nodes.map((node) => node.id).sort()).toEqual(
+			[blocker, authTokenSeed].sort(),
+		);
+	});
+
+	it("rejects empty graph search terms at the engine boundary", () => {
+		const { engine, repo } = setup();
+
+		expect(() =>
+			engine.graphInspect({
+				taskId: undefined,
+				scope: repo,
+				all: false,
+				search: [""],
+			}),
+		).toThrow(PithosError);
+		expect(() =>
+			engine.graphInspect({
+				taskId: undefined,
+				scope: repo,
+				all: false,
+				search: ["  "],
+			}),
+		).toThrow("--search must be non-empty");
+	});
+
+	it("composes graph search with status filters", () => {
+		const { dbPath, engine, repo } = setup();
+		const queuedAuth = enqueueTask(engine, {
+			title: "auth queued",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const claimedAuth = enqueueTask(engine, {
+			title: "auth claimed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const claimedOther = enqueueTask(engine, {
+			title: "other claimed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const db = new Database(dbPath);
+		db.prepare("UPDATE tasks SET status='claimed' WHERE id IN (?, ?)").run(
+			claimedAuth,
+			claimedOther,
+		);
+		db.close();
+
+		const graph = engine.graphInspect({
+			taskId: undefined,
+			scope: repo,
+			all: false,
+			status: ["claimed"],
+			search: ["AUTH"],
+		});
+
+		expect(graph.graph.nodes.map((node) => node.id)).toEqual([claimedAuth]);
+		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(queuedAuth);
+		expect(graph.graph.nodes.map((node) => node.id)).not.toContain(claimedOther);
+	});
+
+	it("lets graph search seed older cancelled tasks", () => {
+		const { dbPath, engine, repo } = setup();
+		const cancelled = engine.enqueue({
+			scope: repo,
+			capability: "execute",
+			title: "auth cancelled seed",
+			body: "body",
+			bodyFile: undefined,
+			runId: "run_toil",
+			dependsOn: [],
+			chain: "none",
+		}).task.id;
+		engine.cancel({ taskId: cancelled, runId: "run_toil", reason: "not needed" });
+		const db = new Database(dbPath);
+		db.prepare("UPDATE tasks SET completed_at='2026-01-01 00:00:00' WHERE id=?").run(cancelled);
+		db.close();
+
+		expect(
+			engine
+				.graphInspect({ taskId: undefined, scope: repo, all: false })
+				.graph.nodes.map((node) => node.id),
+		).not.toContain(cancelled);
+		expect(
+			engine
+				.graphInspect({ taskId: undefined, scope: repo, all: false, search: ["auth"] })
+				.graph.nodes.map((node) => node.id),
+		).toEqual([cancelled]);
+	});
+
 	it("lets explicit cancelled status seed older cancelled tasks", () => {
 		const { dbPath, engine, repo } = setup();
 		const cancelled = enqueueTask(engine, {

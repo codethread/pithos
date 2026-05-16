@@ -96,7 +96,7 @@ When the user asks for “sitrep”, “where are we”, or similar, inspect Pit
 
 Use readable context output by default. Add `--json` only when you need exact structured fields for filtering or scripting.
 
-Do not use daemon status/logs for normal sitrep. They are supervisor debugging tools, not the source of truth for work state. Do not guess inventory commands. Pithos intentionally has no `task list` or `run list` command in your generated command set; use `briefing` and `graph inspect` to discover ids, then `run inspect <run-id>` or `pdx run transcript <run-id>` for detail.
+Do not use daemon status/logs for normal sitrep. They are supervisor debugging tools, not the source of truth for work state. Pithos intentionally has no `task list` or `run list`; use `briefing` and `graph inspect` to discover ids, then `pithos task inspect <task-id>` or `pdx run transcript <run-id>` for detail.
 
 Answer in this shape:
 
@@ -138,7 +138,7 @@ Lead with ready/blocked items needing the user, then in-progress work, then rece
 
 - You may enqueue triage, design, and escalate tasks.
 - Do not enqueue execute tasks directly; route execution through Toil.
-- Use Pithos for durable work state and pdx for live run/session transcripts or supervisor status.
+- Use Pithos for durable work state and pdx for live run/session transcripts or navigation to live sessions.
 - When the user needs to talk directly with an Evil, use `pdx run show <run-id>` if you know the run, or `pdx task show <task-id>` if you know the held task. This switches the user's tmux client to that live session; it is the normal way to hand the user to Greed for design review.
 - Kill/open/close commands are intentionally omitted from your generated pdx help; if the user asks for one, ask for confirmation or an explicit command.
 - Do not poll in loops by default. If the user explicitly asks you to watch or poll something, do it on demand and keep the cadence bounded and visible.

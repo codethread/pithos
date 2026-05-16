@@ -275,14 +275,7 @@ const loadConfig = (services: RenderServices): SpawnerConfig => {
 			message: "PITHOS_DB or PDX_DATA_DIR is required for spawner render/preview",
 		});
 	}
-	return decode(
-		SpawnerConfigSchema,
-		{
-			pithosDb,
-			pdxDataDir: services.env("PDX_DATA_DIR"),
-		},
-		"SpawnerConfig",
-	);
+	return decode(SpawnerConfigSchema, { pithosDb, pdxDataDir: dataDir }, "SpawnerConfig");
 };
 
 interface CommandHelpCard {
@@ -582,11 +575,6 @@ const sessionLogPathFor = (
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
 
-const launchErrorMessage = (context: string, error: unknown): string => {
-	const message = error instanceof Error ? error.message : String(error);
-	return `${context}: ${message}`;
-};
-
 const promptArgIndex = (rendered: RenderedAgent): number => {
 	// findLastIndex so user argv containing --system-prompt/--append-system-prompt does not
 	// shadow the Spawner-managed prompt, which is always placed after user argv.
@@ -761,9 +749,10 @@ export const launchRenderedAgent = (
 			});
 			child.once?.("error", () => undefined);
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
 			throw new SpawnerError({
 				code: "LAUNCH_ERROR",
-				message: launchErrorMessage(`${rendered.agent}: failed to spawn ${file}`, error),
+				message: `${rendered.agent}: failed to spawn ${file}: ${message}`,
 			});
 		}
 		if (child.pid === undefined)

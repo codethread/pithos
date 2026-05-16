@@ -117,3 +117,10 @@ Append notes here. Do not rewrite earlier notes.
 - Both are AFK because the acceptance criteria are deterministic: compare implementation to specs/docs/tests, preview bundled prompts in an isolated context, and make only small alignment/readability fixes.
 - Alignment pass found `specs/agent-command-reference.md`, the Spawner section of `specs/control-plane-supervision.md`, `templates/README.md`, `templates/AGENTS.md`, `packages/spawner/README.md`, and the implementation already agree on `{{command_cards}}` as generated Markdown sourced from `pithos --help-json` / selected `pdx --help-json`.
 - Added explicit Spawner regression coverage for configured Pithos command-path disappearance; existing coverage already covered bundled template renderability, Markdown command references, annotations, annotation validation failure, Pandora graph guidance, role-filter exclusions, malformed help JSON, and missing pdx command paths.
+
+### Task 12: Generated prompt readability preview — 2026-05-16
+
+- Isolated preview context: `PDX_DATA_DIR=$(mktemp -d)/pdx`, `PITHOS_DB=$PDX_DATA_DIR/pithos.sqlite`; ran `pithos init --fresh`, `pdx init --data-dir "$PDX_DATA_DIR"`, then `pandora-spawn preview` for `pandora:hitl`, `toil:afk`, `greed:hitl`, `war:afk`, and `envy:afk` with bundled templates.
+- Preview verdict: all five bundled prompts render; `{{command_cards}}` is concise Markdown, not raw JSON; command usage is discoverable from generated cards; Pandora gets briefing/graph/pdx inspection guidance; non-Pandora roles do not get Pandora-only graph/pdx inspection guidance.
+- Small readability fix: Pandora sitrep wording now points from discovered ids to `pithos task inspect <task-id>` or `pdx run transcript <run-id>`, and narrows pdx boundary language to transcripts/live-session navigation instead of vague supervisor status.
+- Validation: `pnpm --filter @pdx/spawner test -- --run` passed; `pnpm verify` passed.

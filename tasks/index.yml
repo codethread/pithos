@@ -66,6 +66,6 @@ tasks:
   - id: 12
     description: Generated prompt readability preview
     task_file: tasks/012-generated-prompt-readability-preview.md
-    status: pending
+    status: complete
     blocked_by:
       - 11

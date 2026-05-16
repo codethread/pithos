@@ -971,6 +971,18 @@ describe("pithos cli", () => {
 			},
 		});
 
+		const filteredGraphJson = await runCli(
+			["graph", "inspect", "--all", "--status", "queued", "--json"],
+			dbPath,
+		);
+		expect(JSON.parse(filteredGraphJson.stdout[0] ?? "")).toMatchObject({
+			ok: true,
+			graph: {
+				selector: { kind: "all" },
+				nodes: [expect.objectContaining({ id: ready }), expect.objectContaining({ id: blocked })],
+			},
+		});
+
 		const briefingText = await runCli(["briefing", "--agent", "toil"], dbPath);
 		expect(normalizeGeneratedIds(briefingText.stdout[0] ?? "")).toMatchInlineSnapshot(`
 			"# Briefing
@@ -1040,6 +1052,25 @@ describe("pithos cli", () => {
 			await expect(
 				runCli(["graph", "inspect", "--all", "--hide-terminal"], dbPath),
 			).rejects.toThrow("hide-terminal");
+		});
+
+		it("rejects invalid graph status filters with tagged validation", async () => {
+			const dbPath = tempDb();
+			const result = await runCli(["graph", "inspect", "--all", "--status", "active"], dbPath);
+
+			expect(result.stdout).toEqual([]);
+			expect(result.configRead).toBe(false);
+			expect(result.stderr.map((line) => JSON.parse(line) as unknown)).toEqual([
+				{
+					ok: false,
+					error: {
+						code: "VALIDATION_ERROR",
+						message:
+							"Invalid --status value: 'active'. Valid values: queued, claimed, running, done, failed, dead_letter, cancelled",
+					},
+				},
+			]);
+			expect(result.exitCode).toBe(2);
 		});
 
 		it("preserves tagged selector validation failures", async () => {
@@ -1630,6 +1661,9 @@ describe("pithos cli", () => {
 		);
 		expect(commands.find((command) => command.path === "pithos graph inspect")?.usage).toContain(
 			"--json",
+		);
+		expect(commands.find((command) => command.path === "pithos graph inspect")?.usage).toContain(
+			"--status",
 		);
 		expect(commands.find((command) => command.path === "pithos briefing")?.usage).toContain(
 			"--json",

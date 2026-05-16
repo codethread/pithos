@@ -37,3 +37,9 @@ Append notes here. Do not rewrite earlier notes.
 - Readable graph rendering now emits every node in the selected closed graph. Existing seed selection still excludes stale cancelled tasks for `--scope`/`--all`; task-rooted inspection remains available for those nodes.
 - Validation: `pnpm verify` passed.
 - Deep-review noted readable output still does not label source-link edges; that is pre-existing graph text structure rather than terminal-node pruning and should be considered with the later graph inspect docs/convergence work if product wants source edges rendered explicitly.
+
+### Task 2: Graph status seed filter — 2026-05-16
+
+- Added repeatable literal `--status` filters for `pithos graph inspect`; invalid values fail before DB config is loaded with tagged `VALIDATION_ERROR` JSON.
+- Status filters apply only to seed selection. Dependency/source/supersession closure still includes related non-matching context nodes.
+- Validation: `pnpm verify` passed.

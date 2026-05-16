@@ -16,14 +16,17 @@ export type HarnessKind = "claude" | "pi" | "system";
 export type SourceKind = "chain_source" | "repair_source";
 export type { AgentKind, Capability };
 
-export type TaskStatus =
-	| "queued"
-	| "claimed"
-	| "running"
-	| "done"
-	| "failed"
-	| "dead_letter"
-	| "cancelled";
+export const TASK_STATUSES = [
+	"queued",
+	"claimed",
+	"running",
+	"done",
+	"failed",
+	"dead_letter",
+	"cancelled",
+] as const;
+
+export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const openDb = (path: string): Db => new Database(path);
 

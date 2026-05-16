@@ -13,7 +13,14 @@ import {
 } from "./engine.js";
 import { exitCodeFor, PithosError } from "./errors.js";
 import type { ChainPolicy } from "./chain-policy.js";
-import type { Capability, HarnessKind, Mode, ScopeKind } from "./db.js";
+import {
+	TASK_STATUSES,
+	type Capability,
+	type HarnessKind,
+	type Mode,
+	type ScopeKind,
+	type TaskStatus,
+} from "./db.js";
 import type { Services } from "./services.js";
 
 export interface CliContext {
@@ -118,6 +125,7 @@ type CommandInput =
 			readonly taskId: string | undefined;
 			readonly scope: string | undefined;
 			readonly all: boolean;
+			readonly status: readonly string[];
 			readonly json: boolean;
 	  }
 	| { readonly command: "briefing"; readonly agent: string | undefined; readonly json: boolean };
@@ -360,6 +368,10 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 			input.command === "task.enqueue"
 				? yield* fromEngine(() => parseChainPolicy(input.chain))
 				: undefined;
+		const graphStatuses =
+			input.command === "graph.inspect"
+				? yield* fromEngine(() => parseTaskStatuses(input.status))
+				: undefined;
 		const enqueueBody =
 			input.command === "task.enqueue"
 				? yield* readRequiredStdinBody(ctx, "task enqueue", input.stdin)
@@ -429,7 +441,7 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				case "task.supersede":
 					return engine.supersede({ ...input, body: supersedeBody, bodyFile: undefined });
 				case "graph.inspect": {
-					const graphOutput = engine.graphInspect(input);
+					const graphOutput = engine.graphInspect({ ...input, status: graphStatuses! });
 					return input.json ? graphOutput : renderGraphInspectText(graphOutput);
 				}
 				case "briefing": {
@@ -478,6 +490,15 @@ const parseChainPolicy = (value: string): ChainPolicy => {
 		message: `Invalid --chain value: '${value}'. Valid values: auto, none, held, source`,
 	});
 };
+
+const parseTaskStatuses = (values: readonly string[]): readonly TaskStatus[] =>
+	values.map((value) => {
+		if (TASK_STATUSES.includes(value as TaskStatus)) return value as TaskStatus;
+		throw new PithosError({
+			code: "VALIDATION_ERROR",
+			message: `Invalid --status value: '${value}'. Valid values: ${TASK_STATUSES.join(", ")}`,
+		});
+	});
 
 export const makePithosCommand = (ctx: CliContext) => {
 	const init = Command.make(
@@ -871,6 +892,12 @@ export const makePithosCommand = (ctx: CliContext) => {
 					"Inspect the global graph selection, excluding stale cancelled tasks unless needed for closure.",
 				),
 			),
+			status: Options.text("status").pipe(
+				Options.withDescription(
+					"Seed from tasks with this exact status: queued, claimed, running, done, failed, dead_letter, or cancelled; repeat for OR.",
+				),
+				Options.repeated,
+			),
 			json: Options.boolean("json").pipe(
 				Options.withDescription("Return the full structured graph object as JSON."),
 			),
@@ -881,6 +908,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 				taskId: opt(o.taskId),
 				scope: opt(o.scope),
 				all: o.all,
+				status: o.status,
 				json: o.json,
 			}),
 	).pipe(

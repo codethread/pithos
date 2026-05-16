@@ -160,6 +160,7 @@ export interface Engine {
 		readonly taskId: string | undefined;
 		readonly scope: string | undefined;
 		readonly all: boolean;
+		readonly status?: readonly TaskStatus[];
 	}) => GraphInspectOutput;
 	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
 	readonly supersede: (input: {
@@ -1356,6 +1357,9 @@ const createRepairAlertTask = (
 	);
 };
 
+const statusFilterSql = (statuses: readonly TaskStatus[]): string =>
+	statuses.length === 0 ? "" : ` AND status IN (${statuses.map(() => "?").join(",")})`;
+
 const graphForIds = (
 	db: Db,
 	selector: GraphSelectorOutput,
@@ -2346,19 +2350,28 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				repair_alert_kind: repairAlertKind,
 			};
 		}),
-	graphInspect: ({ taskId, scope, all }) =>
+	graphInspect: ({ taskId, scope, all, status = [] }) =>
 		withDb(ctx, (db) => {
 			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
 				(v) => v !== undefined,
 			).length;
 			if (selectorCount !== 1) fail("VALIDATION_ERROR", "provide exactly one graph selector");
-			let result: GraphInspectOutput;
+
 			if (taskId !== undefined) {
-				result = graphForIds(db, { kind: "task", value: taskId }, [taskSummary(db, taskId).id]);
-			} else if (scope !== undefined) {
+				const task = taskSummary(db, taskId);
+				const seedIds = status.length === 0 || status.includes(task.status) ? [task.id] : [];
+				return graphForIds(db, { kind: "task", value: taskId }, seedIds);
+			}
+
+			const defaultVisibility =
+				status.length === 0
+					? " AND (status <> 'cancelled' OR completed_at > datetime('now', '-1 hour'))"
+					: "";
+			const statusClause = statusFilterSql(status);
+			if (scope !== undefined) {
 				const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id=?`).get(scope);
 				if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
-				result = graphForIds(
+				return graphForIds(
 					db,
 					{ kind: "scope", value: scope },
 					(
@@ -2367,27 +2380,29 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 								SELECT id
 								FROM tasks
 								WHERE scope_id=?
-								  AND (status <> 'cancelled' OR completed_at > datetime('now', '-1 hour'))
+								  ${defaultVisibility}
+								  ${statusClause}
 							`)
-							.all(scope) as { id: string }[]
-					).map((r) => r.id),
-				);
-			} else {
-				result = graphForIds(
-					db,
-					{ kind: "all" },
-					(
-						db
-							.prepare(sql`
-								SELECT id
-								FROM tasks
-								WHERE status <> 'cancelled' OR completed_at > datetime('now', '-1 hour')
-							`)
-							.all() as { id: string }[]
+							.all(scope, ...status) as { id: string }[]
 					).map((r) => r.id),
 				);
 			}
-			return result;
+
+			return graphForIds(
+				db,
+				{ kind: "all" },
+				(
+					db
+						.prepare(sql`
+							SELECT id
+							FROM tasks
+							WHERE 1=1
+							  ${defaultVisibility}
+							  ${statusClause}
+						`)
+						.all(...status) as { id: string }[]
+				).map((r) => r.id),
+			);
 		}),
 	briefing: ({ agent }) =>
 		withDb(ctx, (db) => {

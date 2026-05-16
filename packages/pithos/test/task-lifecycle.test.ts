@@ -639,6 +639,89 @@ CREATE TABLE repair_alerts (
 		);
 	});
 
+	it("filters graph seeds by repeated task status before closure expansion", () => {
+		const { dbPath, engine, repo } = setup();
+		const blocker = enqueueTask(engine, {
+			title: "done blocker context",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const blockerClaim = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
+		engine.complete({
+			taskId: blocker,
+			runId: "run_war",
+			token: blockerClaim.task.token,
+			resultJson: "{}",
+		});
+		const claimedSeed = enqueueTask(engine, {
+			title: "claimed seed",
+			capability: "execute",
+			scope: repo,
+			dependsOn: [blocker],
+			chain: "none",
+		}).task.id;
+		const runningSeed = enqueueTask(engine, {
+			title: "running seed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		const queuedNonMatch = enqueueTask(engine, {
+			title: "queued non-match",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+
+		const db = new Database(dbPath);
+		db.prepare("UPDATE tasks SET status='claimed' WHERE id=?").run(claimedSeed);
+		db.prepare("UPDATE tasks SET status='running' WHERE id=?").run(runningSeed);
+		db.close();
+
+		const graph = engine.graphInspect({
+			taskId: undefined,
+			scope: repo,
+			all: false,
+			status: ["claimed", "running"],
+		});
+		const nodeIds = graph.graph.nodes.map((node) => node.id).sort();
+
+		expect(nodeIds).toEqual([blocker, claimedSeed, runningSeed].sort());
+		expect(nodeIds).not.toContain(queuedNonMatch);
+		expect(graph.graph.edges).toContainEqual({
+			kind: "depends_on",
+			from_task_id: claimedSeed,
+			to_task_id: blocker,
+			satisfied: true,
+		});
+	});
+
+	it("lets explicit cancelled status seed older cancelled tasks", () => {
+		const { dbPath, engine, repo } = setup();
+		const cancelled = enqueueTask(engine, {
+			title: "old cancelled seed",
+			capability: "execute",
+			scope: repo,
+			chain: "none",
+		}).task.id;
+		engine.cancel({ taskId: cancelled, runId: "run_toil", reason: "not needed" });
+		const db = new Database(dbPath);
+		db.prepare("UPDATE tasks SET completed_at='2026-01-01 00:00:00' WHERE id=?").run(cancelled);
+		db.close();
+
+		expect(
+			engine
+				.graphInspect({ taskId: undefined, scope: repo, all: false })
+				.graph.nodes.map((node) => node.id),
+		).not.toContain(cancelled);
+		expect(
+			engine
+				.graphInspect({ taskId: undefined, scope: repo, all: false, status: ["cancelled"] })
+				.graph.nodes.map((node) => node.id),
+		).toEqual([cancelled]);
+	});
+
 	it("deduplicates shared nodes in readable graph view for fan-in (diamond) dependencies", () => {
 		const { engine, repo } = setup();
 		const root = enqueueTask(engine, { title: "root task", capability: "triage", scope: repo }).task

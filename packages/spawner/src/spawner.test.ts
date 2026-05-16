@@ -96,6 +96,14 @@ const pithosHelpTree = {
 				},
 				{
 					tool: "pithos",
+					name: "inspect",
+					path: "pithos task inspect",
+					usage: "inspect [--json] <task-id>",
+					description: "Show an agent-readable task handoff.",
+					subcommands: [],
+				},
+				{
+					tool: "pithos",
 					name: "artifact",
 					path: "pithos task artifact",
 					usage: "artifact <command>",
@@ -125,6 +133,31 @@ const pithosHelpTree = {
 					path: "pithos task fail",
 					usage: "fail [--run text] --token integer --reason text <task-id>",
 					description: "Fail a held task using its current fencing token.",
+					subcommands: [],
+				},
+				{
+					tool: "pithos",
+					name: "enqueue",
+					path: "pithos task enqueue",
+					usage:
+						"enqueue [--run text] --scope text --capability triage | design | execute | escalate --title text [--stdin] [--chain auto | none]",
+					description: "Create a new queued task.",
+					subcommands: [],
+				},
+				{
+					tool: "pithos",
+					name: "supersede",
+					path: "pithos task supersede",
+					usage: "supersede --run text --scope text --title text [--stdin] <task-id>",
+					description: "Replace a task with corrected work while preserving history.",
+					subcommands: [],
+				},
+				{
+					tool: "pithos",
+					name: "cancel",
+					path: "pithos task cancel",
+					usage: "cancel --run text --reason text <task-id>",
+					description: "Abandon a non-held task that should not continue.",
 					subcommands: [],
 				},
 			],
@@ -255,6 +288,14 @@ const pdxHelpTree = {
 	],
 } as const;
 const pdxHelpJson = JSON.stringify(pdxHelpTree);
+
+const commandSection = (prompt: string, commandPath: string): string => {
+	const heading = `#### \`${commandPath}\``;
+	const start = prompt.indexOf(heading);
+	expect(start).toBeGreaterThanOrEqual(0);
+	const next = prompt.indexOf("\n#### `", start + heading.length);
+	return next === -1 ? prompt.slice(start) : prompt.slice(start, next);
+};
 
 const agentsFile = (input: {
 	agent: string;
@@ -595,9 +636,40 @@ describe("renderAgent", () => {
 		);
 		expect(rendered.prompt).toContain("## Generated command reference");
 		expect(rendered.prompt).toContain("#### `pithos task claim`");
+		expect(rendered.prompt).toContain("#### `pithos task inspect`");
 		expect(rendered.prompt).toContain("#### `pithos task artifact add`");
 		expect(rendered.prompt).toContain("#### `pithos task complete`");
 		expect(rendered.prompt).toContain("#### `pithos task fail`");
+		expect(rendered.prompt).toContain("#### `pithos task enqueue`");
+		expect(rendered.prompt).toContain("#### `pithos task supersede`");
+		expect(rendered.prompt).toContain("#### `pithos task cancel`");
+		expect(rendered.prompt).toContain(
+			"- Use the rendered claim command above instead of reconstructing it by hand.",
+		);
+		expect(rendered.prompt).toContain("- Readable Markdown is the normal task context.");
+		expect(rendered.prompt).toContain(
+			"- Use `--stdin` with a quoted heredoc (`<<'EOF'`) for artifact body content.",
+		);
+		expect(rendered.prompt).toContain("- Default completion sends no stdin");
+		expect(rendered.prompt).toContain("- Include a concise reason plus relevant evidence");
+		expect(rendered.prompt).toContain("- Omit `--chain` for ordinary follow-up");
+		const inspectSection = commandSection(rendered.prompt, "pithos task inspect");
+		expect(inspectSection).toContain("- Readable Markdown is the normal task context.");
+		expect(inspectSection).toContain(
+			"- Use `--json` only for exact fields, scripting, or lost-token recovery.",
+		);
+		expect(inspectSection).not.toContain("- Default completion sends no stdin");
+		const supersedeSection = commandSection(rendered.prompt, "pithos task supersede");
+		expect(supersedeSection).toContain(
+			"- Use for graph repair/replacement, not normal successful completion.",
+		);
+		expect(supersedeSection).not.toContain(
+			"- Use to abandon non-held work, not normal successful completion.",
+		);
+		const cancelSection = commandSection(rendered.prompt, "pithos task cancel");
+		expect(cancelSection).toContain(
+			"- Use to abandon non-held work, not normal successful completion.",
+		);
 		expect(rendered.prompt).toContain(
 			"```sh\npithos task claim [--run text] --scope text --capability triage | design | execute | escalate\n```",
 		);
@@ -665,6 +737,34 @@ describe("renderAgent", () => {
 		expect(rendered.prompt).not.toContain("### pdx inspection help JSON");
 		expect(rendered.prompt).not.toContain("```json");
 		expect(rendered.prompt).not.toContain('"subcommands"');
+	});
+
+	it("fails loudly when command annotations reference unknown help paths", () => {
+		const taskWithoutInspect = {
+			...pithosHelpTree.subcommands[3],
+			subcommands: pithosHelpTree.subcommands[3].subcommands.filter(
+				(command) => command.path !== "pithos task inspect",
+			),
+		};
+		const helpWithoutInspect = JSON.stringify({
+			...pithosHelpTree,
+			subcommands: pithosHelpTree.subcommands.map((command) =>
+				command.path === "pithos task" ? taskWithoutInspect : command,
+			),
+		});
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "war", mode: "afk" },
+				fakeRenderServices(
+					agentsFile({
+						agent: "war",
+						mode: "afk",
+						harnessKind: "pi",
+					}),
+					{ pithosStdout: helpWithoutInspect },
+				),
+			),
+		).toThrow("command annotation references unknown generated help path: pithos task inspect");
 	});
 
 	it("fails loudly when configured pdx command cards are missing", () => {

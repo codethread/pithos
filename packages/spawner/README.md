@@ -78,7 +78,7 @@ Exported from `@pdx/spawner`:
 - `makeFakeSpawnerServices(input)` — deterministic service implementation for tests.
 - `bundledTemplatesDir` — repo-root bundled default template directory used when `PDX_DATA_DIR` is unset and by `pdx` when seeding a fresh data dir.
 
-`RenderedAgent` is the important API object: it contains `logicalName`, `harness.kind`, `harness.argv`, `harness.env`, `sessionLogPath`, and `prompt`. `prompt` includes a generated Markdown command reference from `pithos --help-json` and, for Pandora, the role-filtered pdx inspection commands from `pdx --help-json`; malformed help JSON or configured command paths missing from help fail render loudly. `LaunchResult` intentionally contains runtime metadata only: pid for AFK mode or tmux target/pane pid for HITL mode.
+`RenderedAgent` is the important API object: it contains `logicalName`, `harness.kind`, `harness.argv`, `harness.env`, `sessionLogPath`, and `prompt`. `prompt` includes a generated Markdown command reference from `pithos --help-json` and, for Pandora, the role-filtered pdx inspection commands from `pdx --help-json`. Spawner also attaches compact built-in notes to selected command paths after validating those paths against the generated help tree. Malformed help JSON, configured command paths missing from help, or annotation paths missing from help fail render loudly. `LaunchResult` intentionally contains runtime metadata only: pid for AFK mode or tmux target/pane pid for HITL mode.
 
 ## Manifest/template config
 

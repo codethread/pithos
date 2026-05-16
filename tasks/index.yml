@@ -42,7 +42,7 @@ tasks:
   - id: 8
     description: Validated command annotations
     task_file: tasks/008-validated-command-annotations.md
-    status: pending
+    status: complete
     blocked_by:
       - 7
   - id: 9

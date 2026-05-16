@@ -294,6 +294,32 @@ interface CommandHelpCard {
 	readonly subcommands: readonly CommandHelpCard[];
 }
 
+const COMMAND_ANNOTATIONS: Readonly<Record<string, readonly string[]>> = {
+	"pithos task claim": [
+		"Use the rendered claim command above instead of reconstructing it by hand.",
+	],
+	"pithos task inspect": [
+		"Readable Markdown is the normal task context.",
+		"Use `--json` only for exact fields, scripting, or lost-token recovery.",
+	],
+	"pithos task artifact add": [
+		"Use `--stdin` with a quoted heredoc (`<<'EOF'`) for artifact body content.",
+	],
+	"pithos task complete": [
+		"Default completion sends no stdin and records empty metadata.",
+		"Use `--stdin` only for JSON object metadata.",
+	],
+	"pithos task fail": [
+		"Include a concise reason plus relevant evidence in an artifact or the reason text.",
+	],
+	"pithos task enqueue": [
+		"Omit `--chain` for ordinary follow-up on the current task chain.",
+		"Use `--chain none` only for intentionally unrelated work or manual graph repair.",
+	],
+	"pithos task supersede": ["Use for graph repair/replacement, not normal successful completion."],
+	"pithos task cancel": ["Use to abandon non-held work, not normal successful completion."],
+};
+
 const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {
 	war: ["pithos task"],
 	toil: ["pithos scope", "pithos task"],
@@ -440,6 +466,24 @@ const fullUsage = (card: CommandHelpCard): string => {
 	return `${card.path} ${card.usage}`;
 };
 
+const validateCommandAnnotations = (tree: CommandHelpCard): void => {
+	const commandPaths = flattenHelpTree(tree);
+	for (const path of Object.keys(COMMAND_ANNOTATIONS)) {
+		if (!commandPaths.has(path)) {
+			throw new SpawnerError({
+				code: "TEMPLATE_ERROR",
+				message: `command annotation references unknown generated help path: ${path}`,
+			});
+		}
+	}
+};
+
+const annotationLines = (path: string): readonly string[] => {
+	const notes = COMMAND_ANNOTATIONS[path];
+	if (notes === undefined) return [];
+	return ["", "Notes:", "", ...notes.map((note) => `- ${note}`)];
+};
+
 const renderCommandHelpMarkdown = (title: string, tree: CommandHelpCard): string => {
 	const leaves = leafCommandCards(tree);
 	return [
@@ -455,16 +499,15 @@ const renderCommandHelpMarkdown = (title: string, tree: CommandHelpCard): string
 			"```sh",
 			fullUsage(card),
 			"```",
+			...annotationLines(card.path),
 		]),
 	].join("\n");
 };
 
 const renderCommandCards = (agent: SpawnableAgentKind, services: RenderServices): string => {
-	const pithosHelp = filteredHelpTree(
-		pithosHelpTree(services),
-		PITHOS_TOP_LEVEL_PATHS[agent],
-		"pithos help",
-	);
+	const rawPithosHelp = pithosHelpTree(services);
+	validateCommandAnnotations(rawPithosHelp);
+	const pithosHelp = filteredHelpTree(rawPithosHelp, PITHOS_TOP_LEVEL_PATHS[agent], "pithos help");
 	const sections = [
 		[
 			"## Generated command reference",

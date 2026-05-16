@@ -92,3 +92,10 @@ Append notes here. Do not rewrite earlier notes.
 - Leaf commands now render by full command path, description, and shell usage; parent groups remain traversal/filter inputs rather than nested JSON shown to agents.
 - Tests cover War, Toil/Greed/Envy, and Pandora Markdown prompt references, absence of raw help JSON markers/fences, and Pandora's continued exclusion of `pdx daemon status` / `pdx daemon logs`.
 - Validation: `pnpm verify` passed.
+
+### Task 8: Validated command annotations — 2026-05-16
+
+- Added built-in command annotations keyed by full command path and validated against generated help before prompt rendering.
+- Initial notes cover claim, inspect, artifact add, complete, fail, enqueue, supersede, and cancel. They render only when role filtering includes the matching leaf command.
+- Tests cover rendered lifecycle annotations and fail-loud behavior when an annotation path disappears from generated help.
+- Validation: `pnpm verify` passed.

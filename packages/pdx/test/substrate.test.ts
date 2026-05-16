@@ -799,6 +799,12 @@ describe("pdx substrate", () => {
 			'"agent": "pandora"',
 		);
 		expect(await readFile(join(dataDir, "templates", "war.md"), "utf8")).not.toHaveLength(0);
+		expect(
+			await readFile(join(dataDir, "templates", "shared", "repo-default-branch-guard.md"), "utf8"),
+		).toContain("Repository default-branch guard");
+		expect(await readFile(join(dataDir, "templates", "war", "cwd-guard.md"), "utf8")).toContain(
+			"cwd/scope guard",
+		);
 		expect(await readlink(join(dataDir, "templates", "CLAUDE.md"))).toBe("AGENTS.md");
 	});
 

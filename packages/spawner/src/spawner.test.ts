@@ -379,6 +379,38 @@ const makeLaunchServices = (
 	}) as const;
 
 describe("bundled agent templates", () => {
+	it.each([
+		["pandora", "hitl", [] as readonly string[]],
+		["toil", "afk", ["Repository default-branch guard"]],
+		["greed", "hitl", ["Repository default-branch guard"]],
+		["war", "afk", ["cwd/scope guard"]],
+		["envy", "afk", [] as readonly string[]],
+	] as const)("render %s bundled template", (agent, mode, expectedGuards) => {
+		const rendered = renderAgent(
+			{ ...base, agent, mode },
+			{
+				readText: (path: string) => readFileSync(path, "utf8"),
+				env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
+				execFile: (file: string, args: readonly string[]) => {
+					const basename = file.split("/").at(-1);
+					if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					if (basename === "pdx" && args.length === 1 && args[0] === "--help-json") {
+						return { status: 0, stdout: pdxHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+
+		for (const guard of ["Repository default-branch guard", "cwd/scope guard"]) {
+			expect(rendered.prompt.includes(guard)).toBe(
+				expectedGuards.some((expected) => expected === guard),
+			);
+		}
+	});
+
 	it("document the stdin payload contract", () => {
 		const templateText = readdirSync(templateDir)
 			.filter(

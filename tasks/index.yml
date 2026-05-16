@@ -31,7 +31,7 @@ tasks:
   - id: 6
     description: Template guard renderability
     task_file: tasks/006-template-guard-renderability.md
-    status: pending
+    status: complete
     blocked_by: []
   - id: 7
     description: Markdown command cards

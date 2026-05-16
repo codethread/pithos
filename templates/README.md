@@ -36,6 +36,8 @@ is upgraded and `pdx init` or `pdx open` is run.
 - `_common.md` — shared include
 - `_common-afk.md` — AFK-only runtime rules
 - `_common-hitl.md` — HITL-only runtime rules
+- `shared/repo-default-branch-guard.md` — Toil/Greed guard against direct implementation edits on repo default branches
+- `war/cwd-guard.md` — War guard requiring cwd/scope verification before file edits
 - `AGENTS.md` — config-editing guide for direct agent sessions in this directory
 - `CLAUDE.md` — symlink to `AGENTS.md` for Claude Code
 

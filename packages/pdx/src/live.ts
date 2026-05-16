@@ -280,12 +280,24 @@ const spawnerError = (operation: string, error: unknown) => {
 const isNodeErrorCode = (error: unknown, code: string): boolean =>
 	typeof error === "object" && error !== null && "code" in error && error.code === code;
 
-const copyBundledTemplates = async (targetDir: string): Promise<void> => {
-	const entries = await readdir(bundledTemplatesDir, { withFileTypes: true });
+const chmodTree = async (path: string, mode: number): Promise<void> => {
+	const entries = await readdir(path, { withFileTypes: true });
 	for (const entry of entries) {
-		const sourcePath = join(bundledTemplatesDir, entry.name);
+		if (entry.isDirectory()) await chmodTree(join(path, entry.name), mode);
+	}
+	await chmod(path, mode);
+};
+
+const copyBundledTemplates = async (sourceDir: string, targetDir: string): Promise<void> => {
+	const entries = await readdir(sourceDir, { withFileTypes: true });
+	for (const entry of entries) {
+		const sourcePath = join(sourceDir, entry.name);
 		const targetPath = join(targetDir, entry.name);
-		if (entry.isFile()) {
+		if (entry.isDirectory()) {
+			await mkdir(targetPath, { recursive: true });
+			await copyBundledTemplates(sourcePath, targetPath);
+			await chmod(targetPath, 0o555);
+		} else if (entry.isFile()) {
 			const content = await readFile(sourcePath, "utf8");
 			await writeFile(targetPath, content, "utf8");
 			await chmod(targetPath, 0o444);
@@ -300,13 +312,13 @@ const reseedSpawnerTemplates = async (dataDir: string): Promise<void> => {
 	const targetDir = join(dataDir, "templates");
 	// Make the dir writable before wiping so rm -rf can remove files from it
 	try {
-		await chmod(targetDir, 0o755);
+		await chmodTree(targetDir, 0o755);
 	} catch (error) {
 		if (!isNodeErrorCode(error, "ENOENT")) throw error;
 	}
 	await rm(targetDir, { recursive: true, force: true });
 	await mkdir(targetDir, { recursive: true });
-	await copyBundledTemplates(targetDir);
+	await copyBundledTemplates(bundledTemplatesDir, targetDir);
 	await chmod(targetDir, 0o555);
 };
 

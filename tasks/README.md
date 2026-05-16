@@ -76,6 +76,10 @@ Append notes here. Do not rewrite earlier notes.
 
 - Added tasks 6–12 as a new AFK follow-up plan after graph inspection tasks 1–5 completed. The new slices implement `specs/agent-command-reference.md`, explicitly carry the implemented graph-inspection semantics into Pandora's generated command reference, then finish with spec/code and rendered-prompt alignment checks.
 - The existing graph-inspection Developer Notes above are preserved as history for completed tasks.
+- Added bundled guard includes for `shared/repo-default-branch-guard.md` and `war/cwd-guard.md`, and listed them only on Toil/Greed and War manifest entries respectively.
+- Added Spawner coverage that renders every built-in Agent prompt from bundled templates and checks the new guards stay scoped to the agents that reference them.
+- Smoke preview found pdx template seeding did not copy nested template directories; fixed recursive materialization/re-seeding so bundled include subdirectories are present in data-dir templates.
+- Validation: `pnpm verify` passed.
 
 ### Task 11: Command reference spec-code alignment — 2026-05-16
 

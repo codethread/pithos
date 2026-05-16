@@ -60,7 +60,7 @@ tasks:
   - id: 11
     description: Command reference spec-code alignment
     task_file: tasks/011-command-reference-spec-code-alignment.md
-    status: pending
+    status: complete
     blocked_by:
       - 10
   - id: 12

@@ -81,11 +81,6 @@ Append notes here. Do not rewrite earlier notes.
 - Smoke preview found pdx template seeding did not copy nested template directories; fixed recursive materialization/re-seeding so bundled include subdirectories are present in data-dir templates.
 - Validation: `pnpm verify` passed.
 
-### Task 11: Command reference spec-code alignment — 2026-05-16
-
-- Added tasks 11–12 at the end of the queue per follow-up request. Task 11 is an explicit spec/code alignment pass for the new command-reference feature; Task 12 is the final generated prompt readability preview.
-- Both are AFK because the acceptance criteria are deterministic: compare implementation to specs/docs/tests, preview bundled prompts in an isolated context, and make only small alignment/readability fixes.
-
 ### Task 7: Markdown command cards — 2026-05-16
 
 - Replaced raw `{{command_cards}}` JSON fences with generated Markdown command references built from the same role-filtered `pithos --help-json` and Pandora pdx `--help-json` paths.
@@ -115,3 +110,10 @@ Append notes here. Do not rewrite earlier notes.
 - Marked `specs/agent-command-reference.md` implemented and updated the spec index; `specs/control-plane-supervision.md` already matched the implemented filter/render contract.
 - YAGNI follow-up removed historical raw-JSON flow and implementation-location planning sections from the implemented command-reference spec, leaving the durable contract only.
 - Validation: `pnpm verify` passed.
+
+### Task 11: Command reference spec-code alignment — 2026-05-16
+
+- Added tasks 11–12 at the end of the queue per follow-up request. Task 11 is an explicit spec/code alignment pass for the new command-reference feature; Task 12 is the final generated prompt readability preview.
+- Both are AFK because the acceptance criteria are deterministic: compare implementation to specs/docs/tests, preview bundled prompts in an isolated context, and make only small alignment/readability fixes.
+- Alignment pass found `specs/agent-command-reference.md`, the Spawner section of `specs/control-plane-supervision.md`, `templates/README.md`, `templates/AGENTS.md`, `packages/spawner/README.md`, and the implementation already agree on `{{command_cards}}` as generated Markdown sourced from `pithos --help-json` / selected `pdx --help-json`.
+- Added explicit Spawner regression coverage for configured Pithos command-path disappearance; existing coverage already covered bundled template renderability, Markdown command references, annotations, annotation validation failure, Pandora graph guidance, role-filter exclusions, malformed help JSON, and missing pdx command paths.

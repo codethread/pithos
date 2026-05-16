@@ -805,24 +805,47 @@ describe("renderAgent", () => {
 		).toThrow("command annotation references unknown generated help path: pithos task inspect");
 	});
 
-	it("fails loudly when configured pdx command cards are missing", () => {
-		const missingTranscriptHelp = JSON.stringify({
-			...pdxHelpTree,
-			subcommands: [pdxHelpTree.subcommands[0]],
-		});
+	it.each([
+		{
+			name: "Pithos",
+			agent: "toil" as const,
+			mode: "afk" as const,
+			stdout: {
+				pithosStdout: JSON.stringify({
+					...pithosHelpTree,
+					subcommands: pithosHelpTree.subcommands.filter(
+						(command) => command.path !== "pithos scope",
+					),
+				}),
+			},
+			error: "configured command path missing from generated help tree: pithos scope",
+		},
+		{
+			name: "pdx",
+			agent: "pandora" as const,
+			mode: "hitl" as const,
+			stdout: {
+				pdxStdout: JSON.stringify({
+					...pdxHelpTree,
+					subcommands: [pdxHelpTree.subcommands[0]],
+				}),
+			},
+			error: "configured command path missing from generated help tree: pdx run transcript",
+		},
+	])("fails loudly when configured $name command cards are missing", (input) => {
 		expect(() =>
 			renderAgent(
-				{ ...base, agent: "pandora", mode: "hitl" },
+				{ ...base, agent: input.agent, mode: input.mode },
 				fakeRenderServices(
 					agentsFile({
-						agent: "pandora",
-						mode: "hitl",
+						agent: input.agent,
+						mode: input.mode,
 						harnessKind: "pi",
 					}),
-					{ pdxStdout: missingTranscriptHelp },
+					input.stdout,
 				),
 			),
-		).toThrow("configured command path missing from generated help tree: pdx run transcript");
+		).toThrow(input.error);
 	});
 
 	it("fails loudly when Pithos help JSON is malformed", () => {

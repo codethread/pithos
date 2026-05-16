@@ -318,6 +318,19 @@ const COMMAND_ANNOTATIONS: Readonly<Record<string, readonly string[]>> = {
 	],
 	"pithos task supersede": ["Use for graph repair/replacement, not normal successful completion."],
 	"pithos task cancel": ["Use to abandon non-held work, not normal successful completion."],
+	"pithos briefing": [
+		"Owns agenda-style ready/blocked summaries and user-facing next actions.",
+		"Run `pithos briefing --agent pandora` before broad graph interrogation for sitrep.",
+	],
+	"pithos graph inspect": [
+		"Use for task inventory, dependency shape, provenance, audit questions, and drill-down task ids.",
+		"`--task`, `--scope`, and `--all` are mutually exclusive selectors.",
+		"Repeat `--status` to OR literal task statuses; repeat `--search` to AND terms over task title/body only.",
+		"`--since` accepts `today`, `<n>h`, `<n>d`, `YYYY-MM-DD`, and ISO timestamps with timezone.",
+		"Filters narrow seed selection before graph closure; closure may include related non-matching tasks so blockers, provenance, and supersessions remain understandable.",
+		"Readable output is the normal agent surface; use `--json` for source edges, exact fields, or scripting.",
+		"Scope graph views do not pull global Repair Alerts into repo/worktree views through reverse `repair_source` closure; inspect a named task or use `--all` when that provenance matters.",
+	],
 };
 
 const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {

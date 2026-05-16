@@ -99,3 +99,10 @@ Append notes here. Do not rewrite earlier notes.
 - Initial notes cover claim, inspect, artifact add, complete, fail, enqueue, supersede, and cancel. They render only when role filtering includes the matching leaf command.
 - Tests cover rendered lifecycle annotations and fail-loud behavior when an annotation path disappears from generated help.
 - Validation: `pnpm verify` passed.
+
+### Task 9: Pandora graph command guidance — 2026-05-16
+
+- Added Pandora-visible command annotations for `pithos briefing` and `pithos graph inspect`; because non-Pandora role filters do not include those commands, the notes stay Pandora-only at render time.
+- Graph guidance now covers selector exclusivity, status/search/since filters, seed-before-closure behavior, readable-vs-JSON usage, and the `repair_source` scope-closure exception.
+- Kept the bundled Pandora sitrep flow unchanged because it already orders `pithos briefing --agent pandora` before broad `pithos graph inspect --all` interrogation.
+- Validation: `pnpm verify` passed.

@@ -48,7 +48,7 @@ tasks:
   - id: 9
     description: Pandora graph command guidance
     task_file: tasks/009-pandora-graph-command-guidance.md
-    status: pending
+    status: complete
     blocked_by:
       - 8
   - id: 10

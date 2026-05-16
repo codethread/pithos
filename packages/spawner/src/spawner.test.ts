@@ -173,7 +173,8 @@ const pithosHelpTree = {
 					tool: "pithos",
 					name: "inspect",
 					path: "pithos graph inspect",
-					usage: "inspect [--task text] [--scope text] [--all] [--json]",
+					usage:
+						"inspect [--task text] [--scope text] [--all] [--status text] [--search text] [--since text] [--json]",
 					description:
 						"Render a readable dependency graph; pass --json for structured graph metadata.",
 					subcommands: [],
@@ -450,6 +451,43 @@ describe("bundled agent templates", () => {
 				expectedGuards.some((expected) => expected === guard),
 			);
 		}
+	});
+
+	it("keeps bundled Pandora sitrep flow aligned with briefing before graph inspect", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "pandora", mode: "hitl" },
+			{
+				readText: (path: string) => readFileSync(path, "utf8"),
+				env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
+				execFile: (file: string, args: readonly string[]) => {
+					const basename = file.split("/").at(-1);
+					if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					if (basename === "pdx" && args.length === 1 && args[0] === "--help-json") {
+						return { status: 0, stdout: pdxHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		expect(rendered.prompt).toContain(
+			"1. `pithos briefing --agent pandora` for claimable/blocked work, user-facing next actions",
+		);
+		expect(rendered.prompt).toContain(
+			"2. `pithos graph inspect --all` for task inventory, dependency shape",
+		);
+		const briefingSection = commandSection(rendered.prompt, "pithos briefing");
+		expect(briefingSection).toContain("agenda-style ready/blocked summaries");
+		const graphSection = commandSection(rendered.prompt, "pithos graph inspect");
+		expect(graphSection).toContain("inventory, dependency shape, provenance, audit questions");
+		expect(graphSection).toContain("`--task`, `--scope`, and `--all` are mutually exclusive");
+		expect(graphSection).toContain("`--status` to OR literal task statuses");
+		expect(graphSection).toContain("`--search` to AND terms over task title/body only");
+		expect(graphSection).toContain("`--since` accepts `today`, `<n>h`, `<n>d`, `YYYY-MM-DD`");
+		expect(graphSection).toContain("Filters narrow seed selection before graph closure");
+		expect(graphSection).toContain("Readable output is the normal agent surface");
+		expect(graphSection).toContain("reverse `repair_source` closure");
 	});
 
 	it("document the stdin payload contract", () => {

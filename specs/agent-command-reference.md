@@ -99,7 +99,7 @@ Keep the existing code-level filtering policy unless a later implementation has 
 
 ### Render shape
 
-Generated content should be Markdown, not JSON:
+Generated content should be Markdown, not JSON. Example excerpt, showing Pandora-only `pithos graph inspect` guidance:
 
 ````md
 ## Generated command reference
@@ -117,7 +117,6 @@ Usage:
 ```sh
 pithos task claim [--run text] --scope text --capability triage | design | execute | escalate | intake
 ```
-````
 
 Notes:
 
@@ -138,6 +137,21 @@ Notes:
 - Default output is readable Markdown and should be your normal context.
 - Use `--json` only for exact fields, scripting, or token recovery.
 
+#### `pithos graph inspect`
+
+Render a readable dependency/source/supersession graph for Pandora sitrep and audit.
+
+Usage:
+
+```sh
+pithos graph inspect [--task text] [--scope text] [--all] --status text... --search text... [--since text] [--json]
+```
+
+Notes:
+
+- Use `pithos briefing --agent pandora` for agenda questions like what is ready or blocked.
+- Use graph inspect for inventory, dependency shape, provenance, and task ids to inspect next.
+- Prefer readable output; use `--json` when source-edge details or exact graph fields matter.
 ````
 
 For nested commands, render leaf commands by full path. Parent commands may appear as section headings when useful, but parent-only entries should not dominate the prompt.
@@ -152,14 +166,14 @@ Spawner can continue using the existing parsed help tree shape:
 
 ```ts
 interface CommandHelpCard {
-  readonly tool: string;
-  readonly name: string;
-  readonly path: string;
-  readonly usage: string;
-  readonly description: string;
-  readonly subcommands: readonly CommandHelpCard[];
+	readonly tool: string;
+	readonly name: string;
+	readonly path: string;
+	readonly usage: string;
+	readonly description: string;
+	readonly subcommands: readonly CommandHelpCard[];
 }
-````
+```
 
 The renderer should normalize pdx and Pithos help JSON into this shared shape before filtering/rendering. Extra fields in pdx help JSON remain ignored unless intentionally adopted.
 
@@ -185,6 +199,15 @@ Annotation constraints:
 - Examples must be short and use placeholders, not real task IDs.
 - Examples must not duplicate the exact recipes already present in `_common.md` unless they add command-specific flag clarity.
 - Annotation validation failure is a template/render error.
+
+Pandora graph-inspection annotations are required because graph views are central to sitrep and repair work. The `pithos graph inspect` annotation should summarize the implemented contract from [`task-graph.md`](./task-graph.md):
+
+- `pithos briefing --agent pandora` owns agenda-style ready/blocked summaries; graph inspect owns graph inventory, audit, provenance, and drill-down ids.
+- `--task`, `--scope`, and `--all` are mutually exclusive selectors.
+- `--status` is repeatable OR; `--search` is repeatable AND over task title/body; `--since` accepts `today`, `<n>h`, `<n>d`, `YYYY-MM-DD`, and ISO timestamps with timezone.
+- Filters narrow seed selection before closure; closure may include related tasks that do not match filters so blockers, provenance, and supersessions remain understandable.
+- Readable output is the normal agent surface; `--json` is for source edges, exact fields, and scripting.
+- Scope graph views intentionally do not pull global Repair Alerts into repo/worktree views through reverse `repair_source` closure; inspect a named task or use `--all` when Pandora needs that provenance.
 
 ## 5. Interfaces
 

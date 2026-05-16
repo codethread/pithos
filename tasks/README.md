@@ -1,30 +1,38 @@
-# Graph inspect AFK task plan
+# AFK task plan
 
 ## Problem statement / MVP goal
 
-Implement the planned `pithos graph inspect` contract in `specs/pithos-graph-inspection.md` as a small, deterministic MVP: graph text output is truthful by default, `--hide-terminal` is removed, and seed filters support literal task statuses, repeated AND search terms, and recent task activity via `--since`.
+Tasks 1–5 completed the graph-inspection MVP. The active follow-up is to implement the planned Agent command-reference rendering contract in `specs/agent-command-reference.md`: keep dynamic `{{command_cards}}`, stop injecting raw JSON, render concise role-filtered Markdown from CLI metadata, and include Pandora-facing guidance for the implemented graph views.
+
+The MVP should make bundled templates render, preserve fail-loud help/annotation validation, and give Pandora enough generated prompt context to use `pithos briefing` and `pithos graph inspect` correctly during sitrep and repair work.
 
 ## Important references
 
-- `specs/pithos-graph-inspection.md` — planned graph inspect filter/default-rendering contract for this task plan.
-- `specs/task-graph.md` — implemented task graph semantics; the new spec supersedes only the graph inspect interface/visibility portion.
-- `packages/pithos/src/cli.ts` — CLI command parsing and generated help surface.
-- `packages/pithos/src/engine.ts` — graph seed selection, closure expansion, node metadata, and readable renderer.
-- `packages/pithos/test/cli.test.ts` — CLI output/help/snapshot contracts.
-- `packages/pithos/test/task-lifecycle.test.ts` — task graph behavior and rendering coverage.
-- Existing `tasks/task-*` files are historical archive material and are not part of this active AFK queue; `tasks/index.yml` is the queue for this plan.
+- `specs/agent-command-reference.md` — planned command-reference rendering contract and annotation requirements.
+- `specs/task-graph.md` — authoritative graph-inspection contract, including filters, seed-before-closure behavior, readable output, and the `repair_source` scope-graph exception.
+- `specs/control-plane-supervision.md` — control-plane template context and role-filtered command reference contract.
+- `templates/README.md` — template manifest, include, overlay, and variable contract.
+- `templates/AGENTS.md` — direct template-config editing guide.
+- `templates/pandora.md` — Pandora sitrep and graph/briefing prompt flow.
+- `templates/agents.json` — built-in Agent manifest and include lists.
+- `packages/spawner/README.md` — Spawner package boundary and preview behavior.
+- `packages/spawner/src/spawner.ts` — current command-card render pipeline and role filters.
+- `packages/spawner/src/spawner.test.ts` — render/launch/manifest behavior tests.
+- `packages/pithos/src/cli.ts` and `packages/pdx/src/main.ts` — `--help-json` producers consumed by Spawner.
 
 ## Task strategy
 
-The slices are intentionally linear because each task touches the same `graph inspect` command path and should leave the CLI in a coherent state for the next AFK run.
+Tasks 1–5 are complete historical graph-inspection slices and remain in the queue for provenance. Tasks 6–12 add the command-reference implementation as a new linear AFK follow-up:
 
-1. First make graph rendering truthful and remove the old terminal-hiding surface. This establishes the new baseline and removes the main surprising behavior.
-2. Add status filtering as the smallest seed-filter path through CLI parsing, engine selection, graph closure, and tests.
-3. Add search filtering using the same seed-filter path, with repeated terms narrowing via AND.
-4. Add time filtering with `--since`, including fail-loud cutoff parsing and deterministic tests.
-5. Fold the implemented behavior back into durable docs so the planned spec, implemented task graph spec, and generated help guidance do not contradict each other.
+1. Restore bundled template renderability by resolving missing guard includes before changing command-card behavior.
+2. Replace raw JSON command-card output with generated Markdown while keeping role filters and fail-loud path validation.
+3. Add validated command annotations for core task lifecycle commands.
+4. Add Pandora-specific graph/briefing guidance so the new graph views are visible in her generated prompt reference.
+5. Converge templates, package docs, and specs after the code matches the planned contract.
+6. Run an explicit spec/code alignment pass so the durable specs tell the truth about the implemented feature.
+7. Preview all generated built-in prompts and make small readability fixes so the command reference supports each Agent role and Pandora's graph/sitrep work.
 
-No HITL slices are required. The product decisions are already captured in `specs/pithos-graph-inspection.md`; each implementation task has deterministic acceptance criteria and local validation.
+No HITL slices are required. The remaining choices are already constrained by `specs/agent-command-reference.md` and `specs/task-graph.md`; each slice has deterministic local validation through Spawner tests and docs formatting.
 
 ## Developer Notes
 
@@ -63,3 +71,13 @@ Append notes here. Do not rewrite earlier notes.
 - `packages/pithos/README.md` already matched generated-help guidance and truthful graph rendering, so no package README change was needed.
 - Validation: `pnpm verify` passed.
 - Deep-review/YAGNI follow-up aligned `specs/control-plane-supervision.md`, narrowed readable graph wording to avoid claiming readable source-edge rendering, and collapsed `specs/pithos-graph-inspection.md` to a pointer so the graph inspect contract has one authoritative home.
+
+### Task 6: Template guard renderability — 2026-05-16
+
+- Added tasks 6–12 as a new AFK follow-up plan after graph inspection tasks 1–5 completed. The new slices implement `specs/agent-command-reference.md`, explicitly carry the implemented graph-inspection semantics into Pandora's generated command reference, then finish with spec/code and rendered-prompt alignment checks.
+- The existing graph-inspection Developer Notes above are preserved as history for completed tasks.
+
+### Task 11: Command reference spec-code alignment — 2026-05-16
+
+- Added tasks 11–12 at the end of the queue per follow-up request. Task 11 is an explicit spec/code alignment pass for the new command-reference feature; Task 12 is the final generated prompt readability preview.
+- Both are AFK because the acceptance criteria are deterministic: compare implementation to specs/docs/tests, preview bundled prompts in an isolated context, and make only small alignment/readability fixes.

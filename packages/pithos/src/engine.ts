@@ -160,7 +160,6 @@ export interface Engine {
 		readonly taskId: string | undefined;
 		readonly scope: string | undefined;
 		readonly all: boolean;
-		readonly hideTerminal: boolean;
 	}) => GraphInspectOutput;
 	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
 	readonly supersede: (input: {
@@ -1175,49 +1174,6 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 		successorBySuperseded.set(edge.to_task_id, edge.from_task_id);
 		successorIds.add(edge.from_task_id);
 	}
-	const ONE_HOUR_MS = 60 * 60 * 1000;
-	const now = Date.now();
-	// SQLite CURRENT_TIMESTAMP is "YYYY-MM-DD HH:MM:SS" with no timezone suffix; treat as UTC.
-	const parseSqliteUtcMs = (s: string): number => Date.parse(`${s.replace(" ", "T")}Z`);
-	const isTerminal = (node: GraphNodeOutput): boolean => {
-		if (node.status === "done") return true;
-		if (
-			(node.status === "failed" || node.status === "dead_letter" || node.status === "cancelled") &&
-			node.completed_at !== null
-		) {
-			return now - parseSqliteUtcMs(node.completed_at) >= ONE_HOUR_MS;
-		}
-		return false;
-	};
-	// Transitively mark successor nodes as visible when their superseded predecessor is non-terminal.
-	// This makes completed supersession chains visible even though all their nodes are terminal.
-	const supersessionVisible = new Set<string>();
-	for (const [supersededId, successorId] of successorBySuperseded.entries()) {
-		const superseded = byId.get(supersededId);
-		if (superseded !== undefined && !isTerminal(superseded)) {
-			const queue = [successorId];
-			while (queue.length > 0) {
-				const id = queue.shift()!;
-				if (supersessionVisible.has(id) || !byId.has(id)) continue;
-				supersessionVisible.add(id);
-				for (const childId of childrenByParent.get(id) ?? []) queue.push(childId);
-			}
-		}
-	}
-	const selectedTaskId = graph.selector.kind === "task" ? graph.selector.value : undefined;
-	const visible = (id: string): boolean => {
-		const node = byId.get(id);
-		if (node === undefined) return false;
-		if (id === selectedTaskId) return true;
-		if (!isTerminal(node)) return true;
-		const successorId = successorBySuperseded.get(id);
-		const hasActiveSuccessor = successorId !== undefined && visible(successorId);
-		return (
-			(childrenByParent.get(id) ?? []).some(visible) ||
-			supersessionVisible.has(id) ||
-			hasActiveSuccessor
-		);
-	};
 	for (const [parentId, childIds] of childrenByParent.entries()) {
 		childrenByParent.set(
 			parentId,
@@ -1233,7 +1189,7 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 	const written = new Set<string>();
 	const writeNode = (id: string, depth: number, supersessionChild = false): void => {
 		const node = byId.get(id);
-		if (node === undefined || !visible(id)) return;
+		if (node === undefined) return;
 		const prefix = supersessionChild ? "~> " : "- ";
 		if (written.has(id)) {
 			lines.push(`${"  ".repeat(depth)}${prefix}↑ ${id} already shown`);
@@ -1536,63 +1492,6 @@ const graphForIds = (
 			a.to_task_id.localeCompare(b.to_task_id),
 	);
 	return { ok: true as const, graph: { selector, nodes, edges } };
-};
-
-const terminalLeafStatuses = new Set(["done", "failed", "dead_letter", "cancelled"]);
-
-const filterTerminalLeaves = (
-	graph: GraphInspectOutput["graph"],
-	pinnedTaskId: string | undefined,
-): GraphInspectOutput["graph"] => {
-	const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-	// dependents[parent] = tasks that depend on parent (depends_on: from=child, to=parent)
-	const dependents = new Map<string, string[]>();
-	// successorsOf[superseded] = successors (supersedes: from=successor, to=superseded)
-	const successorsOf = new Map<string, string[]>();
-	// sourceConsumers[source] = tasks that reference source via chain/repair source link (source: from=consumer, to=source)
-	const sourceConsumers = new Map<string, string[]>();
-	for (const edge of graph.edges) {
-		if (edge.kind === "depends_on") {
-			dependents.set(edge.to_task_id, [
-				...(dependents.get(edge.to_task_id) ?? []),
-				edge.from_task_id,
-			]);
-		} else if (edge.kind === "supersedes") {
-			successorsOf.set(edge.to_task_id, [
-				...(successorsOf.get(edge.to_task_id) ?? []),
-				edge.from_task_id,
-			]);
-		} else if (edge.kind === "source") {
-			sourceConsumers.set(edge.to_task_id, [
-				...(sourceConsumers.get(edge.to_task_id) ?? []),
-				edge.from_task_id,
-			]);
-		}
-	}
-	const hidden = new Set<string>();
-	let changed = true;
-	while (changed) {
-		changed = false;
-		for (const node of graph.nodes) {
-			if (hidden.has(node.id) || node.id === pinnedTaskId) continue;
-			if (!terminalLeafStatuses.has(node.status)) continue;
-			const downstream = [
-				...(dependents.get(node.id) ?? []),
-				...(successorsOf.get(node.id) ?? []),
-				...(sourceConsumers.get(node.id) ?? []),
-			];
-			if (downstream.every((id) => hidden.has(id) || !byId.has(id))) {
-				hidden.add(node.id);
-				changed = true;
-			}
-		}
-	}
-	if (hidden.size === 0) return graph;
-	return {
-		...graph,
-		nodes: graph.nodes.filter((n) => !hidden.has(n.id)),
-		edges: graph.edges.filter((e) => !hidden.has(e.from_task_id) && !hidden.has(e.to_task_id)),
-	};
 };
 
 export const makeEngine = (ctx: EngineContext): Engine => ({
@@ -2447,7 +2346,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				repair_alert_kind: repairAlertKind,
 			};
 		}),
-	graphInspect: ({ taskId, scope, all, hideTerminal }) =>
+	graphInspect: ({ taskId, scope, all }) =>
 		withDb(ctx, (db) => {
 			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
 				(v) => v !== undefined,
@@ -2488,8 +2387,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					).map((r) => r.id),
 				);
 			}
-			if (!hideTerminal) return result;
-			return { ...result, graph: filterTerminalLeaves(result.graph, taskId) };
+			return result;
 		}),
 	briefing: ({ agent }) =>
 		withDb(ctx, (db) => {

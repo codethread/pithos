@@ -33,3 +33,7 @@ Append notes here. Do not rewrite earlier notes.
 ### Task 1: Truthful graph rendering — 2026-05-16
 
 - This plan replaces `tasks/index.yml` with the active AFK queue requested for graph inspection work. Older `tasks/task-*` files remain in the repository as historical archive files but are intentionally unreferenced by this queue.
+- Removed `--hide-terminal` from the graph inspect CLI and engine input; unknown-flag parser failure is now the contract for that removed surface.
+- Readable graph rendering now emits every node in the selected closed graph. Existing seed selection still excludes stale cancelled tasks for `--scope`/`--all`; task-rooted inspection remains available for those nodes.
+- Validation: `pnpm verify` passed.
+- Deep-review noted readable output still does not label source-link edges; that is pre-existing graph text structure rather than terminal-node pruning and should be considered with the later graph inspect docs/convergence work if product wants source edges rendered explicitly.

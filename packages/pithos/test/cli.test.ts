@@ -995,7 +995,7 @@ describe("pithos cli", () => {
 		});
 	});
 
-	describe("graph inspect --hide-terminal", () => {
+	describe("graph inspect terminal rendering", () => {
 		const claimGlobal = async (dbPath: string, runId: string) => {
 			const result = await runCli(
 				["task", "claim", "--run", runId, "--scope", "global", "--capability", "triage"],
@@ -1004,43 +1004,12 @@ describe("pithos cli", () => {
 			return JSON.parse(result.stdout[0] ?? "") as { task: { id: string; token: number } };
 		};
 
-		it("hides terminal leaf tasks only when --hide-terminal is set", async () => {
+		it("renders terminal nodes in readable output by default", async () => {
 			const dbPath = tempDb();
 			await runCli(["init", "--fresh"], dbPath);
 			await upsertRun(dbPath, "run_toil");
 
-			const failedSource = await enqueueGlobalTriage(
-				dbPath,
-				"run_toil",
-				"Dead-end failed task",
-				"body",
-			);
-			const doneLeaf = await enqueueGlobalTriage(dbPath, "run_toil", "Dead-end done task", "body");
-			const cancelledLeaf = await enqueueGlobalTriage(
-				dbPath,
-				"run_toil",
-				"Dead-end cancelled task",
-				"body",
-			);
-			const active = await enqueueGlobalTriage(dbPath, "run_toil", "Active queued task", "body");
-
-			const failedClaim = await claimGlobal(dbPath, "run_toil");
-			expect(failedClaim.task.id).toBe(failedSource);
-			await runCli(
-				[
-					"task",
-					"fail",
-					"--run",
-					"run_toil",
-					"--token",
-					String(failedClaim.task.token),
-					"--reason",
-					"abandoned",
-					failedSource,
-				],
-				dbPath,
-			);
-
+			const doneLeaf = await enqueueGlobalTriage(dbPath, "run_toil", "Done leaf", "body");
 			const doneClaim = await claimGlobal(dbPath, "run_toil");
 			expect(doneClaim.task.id).toBe(doneLeaf);
 			await runCli(
@@ -1056,131 +1025,44 @@ describe("pithos cli", () => {
 				dbPath,
 			);
 
-			await runCli(
-				["task", "cancel", "--run", "run_toil", "--reason", "abandoned", cancelledLeaf],
-				dbPath,
-			);
+			const text = (await runCli(["graph", "inspect", "--task", doneLeaf], dbPath)).stdout[0] ?? "";
+			expect(text).toContain(`- ${doneLeaf} [triage] [done] Done leaf`);
 
-			const allText = normalizeGeneratedIds(
-				(await runCli(["graph", "inspect", "--all"], dbPath)).stdout[0] ?? "",
-			);
-			expect(allText).toContain("Dead-end failed task");
-			expect(allText).not.toContain("Dead-end done task");
-			expect(allText).toContain("Dead-end cancelled task");
-			expect(allText).toContain("Active queued task");
-
-			const allJson = await runCli(["graph", "inspect", "--all", "--json"], dbPath);
-			const allParsed = JSON.parse(allJson.stdout[0] ?? "") as {
-				ok: boolean;
-				graph: { nodes: { id: string }[] };
-			};
-			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(failedSource);
-			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(doneLeaf);
-			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(cancelledLeaf);
-			expect(allParsed.graph.nodes.map((n) => n.id)).toContain(active);
-
-			const hiddenText = await runCli(["graph", "inspect", "--all", "--hide-terminal"], dbPath);
-			expect(hiddenText.stdout[0] ?? "").toContain("Dead-end failed task");
-			expect(hiddenText.stdout[0] ?? "").not.toContain("Dead-end done task");
-			expect(hiddenText.stdout[0] ?? "").not.toContain("Dead-end cancelled task");
-			expect(hiddenText.stdout[0] ?? "").toContain("Active queued task");
-
-			const hiddenJson = await runCli(
-				["graph", "inspect", "--all", "--hide-terminal", "--json"],
-				dbPath,
-			);
-			const parsed = JSON.parse(hiddenJson.stdout[0] ?? "") as {
-				ok: boolean;
-				graph: { nodes: { id: string }[] };
-			};
-			expect(parsed.graph.nodes.map((n) => n.id)).toContain(failedSource);
-			expect(parsed.graph.nodes.map((n) => n.id)).not.toContain(doneLeaf);
-			expect(parsed.graph.nodes.map((n) => n.id)).not.toContain(cancelledLeaf);
-			expect(parsed.graph.nodes.map((n) => n.id)).toContain(active);
+			const parsed = JSON.parse(
+				(await runCli(["graph", "inspect", "--task", doneLeaf, "--json"], dbPath)).stdout[0] ?? "",
+			) as { graph: { nodes: { id: string }[] } };
+			expect(parsed.graph.nodes.map((node) => node.id)).toEqual([doneLeaf]);
 		});
 
-		it("retains a done task that has an active dependent", async () => {
+		it("rejects the removed --hide-terminal flag", async () => {
 			const dbPath = tempDb();
 			await runCli(["init", "--fresh"], dbPath);
-			await upsertRun(dbPath, "run_toil");
-
-			// Enqueue and complete a triage task so it becomes done
-			const done = await enqueueGlobalTriage(dbPath, "run_toil", "Done parent task", "body");
-			const claimed = await claimGlobal(dbPath, "run_toil");
-			expect(claimed.task.id).toBe(done);
-			await runCli(
-				["task", "complete", "--run", "run_toil", "--token", String(claimed.task.token), done],
-				dbPath,
-			);
-
-			// Enqueue a dependent that blocks on the done task
-			const dependent = await runCli(
-				[
-					"task",
-					"enqueue",
-					"--scope",
-					"global",
-					"--capability",
-					"triage",
-					"--title",
-					"Dependent task",
-					"--stdin",
-					"--run",
-					"run_toil",
-					"--chain",
-					"none",
-					"--depends-on",
-					done,
-				],
-				dbPath,
-				{ _tag: "RedirectedText", text: "body" },
-			).then((r) => (JSON.parse(r.stdout[0] ?? "") as { task: { id: string } }).task.id);
-
-			// With --hide-terminal: done parent is retained because it has a dependent
-			const hiddenText = await runCli(["graph", "inspect", "--all", "--hide-terminal"], dbPath);
-			expect(hiddenText.stdout[0] ?? "").toContain("Done parent task");
-			expect(hiddenText.stdout[0] ?? "").toContain("Dependent task");
-
-			const hiddenJson = await runCli(
-				["graph", "inspect", "--all", "--hide-terminal", "--json"],
-				dbPath,
-			);
-			const parsed = JSON.parse(hiddenJson.stdout[0] ?? "") as {
-				ok: boolean;
-				graph: { nodes: { id: string }[] };
-			};
-			expect(parsed.graph.nodes.map((n) => n.id)).toContain(done);
-			expect(parsed.graph.nodes.map((n) => n.id)).toContain(dependent);
+			await expect(
+				runCli(["graph", "inspect", "--all", "--hide-terminal"], dbPath),
+			).rejects.toThrow("hide-terminal");
 		});
 
-		it("retains the task-rooted task even when it is done", async () => {
+		it("preserves tagged selector validation failures", async () => {
 			const dbPath = tempDb();
 			await runCli(["init", "--fresh"], dbPath);
-			await upsertRun(dbPath, "run_toil");
 
-			const doneRoot = await enqueueGlobalTriage(dbPath, "run_toil", "Terminal root task", "body");
-			const claimed = await claimGlobal(dbPath, "run_toil");
-			expect(claimed.task.id).toBe(doneRoot);
-			await runCli(
-				["task", "complete", "--run", "run_toil", "--token", String(claimed.task.token), doneRoot],
-				dbPath,
-			);
-
-			const result = await runCli(
-				["graph", "inspect", "--task", doneRoot, "--hide-terminal"],
-				dbPath,
-			);
-			expect(result.stdout[0] ?? "").toContain("Terminal root task");
-
-			const jsonResult = await runCli(
-				["graph", "inspect", "--task", doneRoot, "--hide-terminal", "--json"],
-				dbPath,
-			);
-			const parsed = JSON.parse(jsonResult.stdout[0] ?? "") as {
-				ok: boolean;
-				graph: { nodes: { id: string }[] };
-			};
-			expect(parsed.graph.nodes.map((n) => n.id)).toContain(doneRoot);
+			for (const args of [
+				["graph", "inspect"],
+				["graph", "inspect", "--all", "--scope", "global"],
+			]) {
+				const result = await runCli(args, dbPath);
+				expect(result.stdout).toEqual([]);
+				expect(result.stderr.map((line) => JSON.parse(line) as unknown)).toEqual([
+					{
+						ok: false,
+						error: {
+							code: "VALIDATION_ERROR",
+							message: "provide exactly one graph selector",
+						},
+					},
+				]);
+				expect(result.exitCode).toBe(2);
+			}
 		});
 	});
 

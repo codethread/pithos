@@ -94,7 +94,7 @@ Important details:
 
 - `--help-json` prints the command tree used by Spawner.
 - Protocol/state-transition commands return JSON by default for Agent consumption.
-- Context commands (`task inspect`, `graph inspect`, `briefing`) render readable text by default and expose `--json` for structured output. `graph inspect` also accepts `--hide-terminal` to filter terminal leaf tasks from both readable and JSON output.
+- Context commands (`task inspect`, `graph inspect`, `briefing`) render readable text by default and expose `--json` for structured output. `graph inspect` readable output renders the same unpruned graph selection returned by `--json`.
 - Payload-bearing task mutations read redirected stdin only when `--stdin` is present and fail on empty/missing stdin.
 
 ### `src/engine.ts` — durable state transitions

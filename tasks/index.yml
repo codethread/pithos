@@ -2,7 +2,7 @@ tasks:
   - id: 1
     description: Truthful graph rendering
     task_file: tasks/001-truthful-graph-rendering.md
-    status: pending
+    status: complete
     blocked_by: []
   - id: 2
     description: Graph status seed filter

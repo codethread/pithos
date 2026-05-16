@@ -118,7 +118,6 @@ type CommandInput =
 			readonly taskId: string | undefined;
 			readonly scope: string | undefined;
 			readonly all: boolean;
-			readonly hideTerminal: boolean;
 			readonly json: boolean;
 	  }
 	| { readonly command: "briefing"; readonly agent: string | undefined; readonly json: boolean };
@@ -868,11 +867,8 @@ export const makePithosCommand = (ctx: CliContext) => {
 				Options.optional,
 			),
 			all: Options.boolean("all").pipe(
-				Options.withDescription("Include all tasks instead of only active graph roots."),
-			),
-			hideTerminal: Options.boolean("hide-terminal").pipe(
 				Options.withDescription(
-					"Omit terminal leaf tasks (done, failed, dead_letter, cancelled) from output; a task-rooted inspect always retains its root.",
+					"Inspect the global graph selection, excluding stale cancelled tasks unless needed for closure.",
 				),
 			),
 			json: Options.boolean("json").pipe(
@@ -885,7 +881,6 @@ export const makePithosCommand = (ctx: CliContext) => {
 				taskId: opt(o.taskId),
 				scope: opt(o.scope),
 				all: o.all,
-				hideTerminal: o.hideTerminal,
 				json: o.json,
 			}),
 	).pipe(

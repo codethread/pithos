@@ -624,7 +624,6 @@ CREATE TABLE repair_alerts (
 				taskId: undefined,
 				scope: repo,
 				all: false,
-				hideTerminal: false,
 			}),
 		);
 
@@ -667,7 +666,7 @@ CREATE TABLE repair_alerts (
 		}).task.id;
 
 		const graphText = renderGraphInspectText(
-			engine.graphInspect({ taskId: undefined, scope: repo, all: false, hideTerminal: false }),
+			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
 		);
 
 		expect(graphText).toBe(
@@ -727,7 +726,7 @@ CREATE TABLE repair_alerts (
 		}).task.id;
 
 		const graphText = renderGraphInspectText(
-			engine.graphInspect({ taskId: undefined, scope: repo, all: false, hideTerminal: false }),
+			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
 		);
 
 		// parent (done) is visible because original (recently failed, within 1 hour) is a visible child.
@@ -741,155 +740,6 @@ CREATE TABLE repair_alerts (
 				"",
 			].join("\n"),
 		);
-	});
-
-	it("ages out stale failed/dead_letter/cancelled leaf tasks from readable graph output", () => {
-		const { dbPath, engine, repo } = setup();
-		const db = new Database(dbPath);
-
-		// stale failed leaf — should be hidden (completed_at > 1 hour ago)
-		const staleFailedTask = enqueueTask(engine, {
-			title: "stale failed leaf",
-			capability: "execute",
-			scope: repo,
-			chain: "none",
-		}).task.id;
-		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
-		engine.failTask({ taskId: staleFailedTask, runId: "run_war", token: 1, reason: "bad" });
-		db.prepare("UPDATE tasks SET completed_at=datetime('now', '-2 hours') WHERE id=?").run(
-			staleFailedTask,
-		);
-
-		// stale dead_letter leaf — should be hidden (set directly in DB)
-		const staleDeadLetterTask = enqueueTask(engine, {
-			title: "stale dead_letter leaf",
-			capability: "execute",
-			scope: repo,
-			chain: "none",
-		}).task.id;
-		db.prepare(
-			"UPDATE tasks SET status='dead_letter', completed_at=datetime('now', '-2 hours') WHERE id=?",
-		).run(staleDeadLetterTask);
-
-		// stale cancelled leaf — should be hidden after the same 1 hour window
-		const staleCancelledTask = enqueueTask(engine, {
-			title: "stale cancelled leaf",
-			capability: "execute",
-			scope: repo,
-			chain: "none",
-		}).task.id;
-		engine.cancel({ taskId: staleCancelledTask, runId: "run_toil", reason: "stale cancel" });
-		db.prepare("UPDATE tasks SET completed_at=datetime('now', '-2 hours') WHERE id=?").run(
-			staleCancelledTask,
-		);
-
-		// recently failed leaf — should remain visible
-		engine.runUpsert({
-			agent: "war",
-			mode: "afk",
-			scope: repo,
-			cwd: "/tmp/pithos-repo",
-			sessionId: "s_war_r2",
-			harnessKind: "pi",
-			sessionLogPath: "/tmp/s_war_r2.jsonl",
-			runId: "run_war_r2",
-		});
-		const recentFailedTask = enqueueTask(engine, {
-			title: "recent failed leaf",
-			capability: "execute",
-			scope: repo,
-			chain: "none",
-		}).task.id;
-		engine.claim({ runId: "run_war_r2", scope: repo, capability: "execute" });
-		engine.failTask({ taskId: recentFailedTask, runId: "run_war_r2", token: 1, reason: "bad" });
-
-		// recently cancelled leaf — should remain visible for the first hour
-		const recentCancelledTask = enqueueTask(engine, {
-			title: "recent cancelled leaf",
-			capability: "execute",
-			scope: repo,
-			chain: "none",
-		}).task.id;
-		engine.cancel({ taskId: recentCancelledTask, runId: "run_toil", reason: "recent cancel" });
-
-		// stale failed parent with active child — parent should still appear due to visible descendant
-		const staleFailedParent = enqueueTask(engine, {
-			title: "stale failed parent",
-			capability: "execute",
-			scope: repo,
-			chain: "none",
-		}).task.id;
-		db.prepare(
-			"UPDATE tasks SET status='failed', completed_at=datetime('now', '-2 hours') WHERE id=?",
-		).run(staleFailedParent);
-		const activeChild = enqueueTask(engine, {
-			title: "active child of stale parent",
-			capability: "execute",
-			scope: repo,
-			dependsOn: [staleFailedParent],
-			chain: "none",
-		}).task.id;
-
-		// stale failed task that was superseded — should remain visible because its successor is active
-		const staleFailedSuperseded = enqueueTask(engine, {
-			title: "stale failed superseded",
-			capability: "execute",
-			scope: repo,
-			chain: "none",
-		}).task.id;
-		db.prepare(
-			"UPDATE tasks SET status='failed', completed_at=datetime('now', '-2 hours') WHERE id=?",
-		).run(staleFailedSuperseded);
-		const activeSuccessor = engine.supersede({
-			taskId: staleFailedSuperseded,
-			runId: "run_toil",
-			reason: "retry",
-			title: "active successor of stale failed",
-			body: "body",
-			bodyFile: undefined,
-			scope: repo,
-			capability: "execute",
-		}).task.id;
-
-		db.close();
-
-		const graphText = renderGraphInspectText(
-			engine.graphInspect({ taskId: undefined, scope: repo, all: false, hideTerminal: false }),
-		);
-
-		// stale failed, dead_letter, and cancelled leaf tasks are hidden
-		expect(graphText).not.toContain("stale failed leaf");
-		expect(graphText).not.toContain("stale dead_letter leaf");
-		expect(graphText).not.toContain("stale cancelled leaf");
-		// recent terminal failures/cancellations are still visible
-		expect(graphText).toContain(`${recentFailedTask} [execute] [failed] recent failed leaf`);
-		expect(graphText).toContain(
-			`${recentCancelledTask} [execute] [cancelled] recent cancelled leaf`,
-		);
-		// stale parent remains visible because its dependency child is active
-		expect(graphText).toContain(`${staleFailedParent} [execute] [failed] stale failed parent`);
-		expect(graphText).toContain(`${activeChild} [execute] [blocked] active child of stale parent`);
-		// stale superseded task remains visible because its supersession successor is active
-		expect(graphText).toContain(
-			`${staleFailedSuperseded} [execute] [failed] stale failed superseded`,
-		);
-		expect(graphText).toContain(
-			`${activeSuccessor} [execute] [queued] active successor of stale failed`,
-		);
-
-		const selectedStaleLeafGraphText = renderGraphInspectText(
-			engine.graphInspect({
-				taskId: staleFailedTask,
-				scope: undefined,
-				all: false,
-				hideTerminal: false,
-			}),
-		);
-		expect(selectedStaleLeafGraphText).toContain(
-			`- ${staleFailedTask} [execute] [failed] stale failed leaf`,
-		);
-		// Auto-alert created by failTask appears in the graph via repair_source link
-		expect(selectedStaleLeafGraphText).toContain(`Investigate failed task ${staleFailedTask}`);
 	});
 
 	it("auto-chains ordinary follow-up to the actor run's held task", () => {
@@ -1012,7 +862,6 @@ CREATE TABLE repair_alerts (
 			taskId: escalation.task.id,
 			scope: undefined,
 			all: false,
-			hideTerminal: false,
 		}) as ReturnType<Engine["graphInspect"]> & {
 			graph: {
 				nodes: readonly { id: string; source_task_id: string | null; source_kind: string | null }[];
@@ -1048,7 +897,7 @@ CREATE TABLE repair_alerts (
 		expect(eventPayload.chain.source_kind).toBe("chain_source");
 	});
 
-	it("--hide-terminal retains a terminal task that is the source of an active escalation", () => {
+	it("renders a terminal task that is the source of an active escalation", () => {
 		const { engine } = setup();
 		upsertPandoraRun(engine);
 		const source = enqueueTask(engine, { title: "held source" }).task.id;
@@ -1067,7 +916,6 @@ CREATE TABLE repair_alerts (
 			taskId: undefined,
 			scope: undefined,
 			all: true,
-			hideTerminal: true,
 		});
 		const nodeIds = graph.graph.nodes.map((n) => n.id);
 		expect(nodeIds).toContain(source);
@@ -1694,7 +1542,6 @@ CREATE TABLE repair_alerts (
 			taskId: result.escalation.id,
 			scope: undefined,
 			all: false,
-			hideTerminal: false,
 		});
 		expect(graph.graph.edges).toContainEqual({
 			kind: "source",
@@ -2207,7 +2054,6 @@ CREATE TABLE repair_alerts (
 			taskId: downstream,
 			scope: undefined,
 			all: false,
-			hideTerminal: false,
 		}) as {
 			ok: true;
 			graph: {

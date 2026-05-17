@@ -176,7 +176,7 @@ const pithosHelpTree = {
 					usage:
 						"inspect [--task text] [--scope text] [--all] [--status text] [--search text] [--since text] [--json]",
 					description:
-						"Render a readable dependency graph; pass --json for structured graph metadata.",
+						"Render a readable task graph with dependencies, source links, and supersessions; pass --json for structured metadata.",
 					subcommands: [],
 				},
 			],
@@ -764,6 +764,7 @@ describe("renderAgent", () => {
 		expect(rendered.prompt).toContain("#### `pithos scope list`");
 		expect(rendered.prompt).toContain("#### `pithos briefing`");
 		expect(rendered.prompt).toContain("#### `pithos graph inspect`");
+		expect(rendered.prompt).toContain("dependencies, source links, and supersessions");
 		expect(rendered.prompt).toContain("#### `pithos events tail`");
 		expect(rendered.prompt).not.toContain("pdx daemon status");
 		expect(rendered.prompt).not.toContain("pdx daemon logs");

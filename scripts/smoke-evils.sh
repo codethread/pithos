@@ -8,6 +8,9 @@ PITHOS_DB="${PITHOS_DB:-$SMOKE_DIR/pithos.sqlite}"
 
 mkdir -p "$SMOKE_DIR"
 export PITHOS_DB
+# This smoke script renders bundled repo templates. Ignore any interactive-shell
+# pdx config so user overlays in ~/.pdx cannot make jq parse Spawner errors.
+unset PDX_DATA_DIR
 
 preview_prompt() {
   local agent="$1"

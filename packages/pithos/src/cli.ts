@@ -956,7 +956,7 @@ export const makePithosCommand = (ctx: CliContext) => {
 			}),
 	).pipe(
 		Command.withDescription(
-			"Render a readable dependency graph; pass --json for structured graph metadata.",
+			"Render a readable task graph with dependencies, source links, and supersessions; pass --json for structured metadata.",
 		),
 	);
 	const graph = Command.make("graph").pipe(

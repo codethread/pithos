@@ -184,8 +184,10 @@ Lines that fail validation are logged and skipped; the stream continues.
   (1s → 2s → 4s → 8s → 16s → 30s cap). Backoff resets after 60s of continuous
   uptime.
 - If the hook exits 5 or more times within a 60s window, pdx stops restarting
-  and creates an `input_hook_stuck` repair alert for Pandora. To recover: fix
+  and creates an `input_hook_stuck` Repair Alert for Pandora. To recover: fix
   the script, then restart pdx.
+- Invalid hook configuration/rendering stops hook supervision and creates a
+  `hook_config_error` Repair Alert for Pandora.
 - On `pdx close`, pdx sends SIGTERM to the hook.
 
 **Envy:** intake tasks created by the input hook are claimed by Envy. Envy

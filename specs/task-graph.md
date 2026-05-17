@@ -1,7 +1,7 @@
 # Pithos Task Graph
 
 **Status:** Implemented
-**Last Updated:** 2026-05-16
+**Last Updated:** 2026-05-17
 
 ## 1. Overview
 
@@ -128,7 +128,7 @@ The durable schema and Engine implementation live in:
 - `packages/pithos/src/rows.ts` — SQLite row parsing
 - `packages/pithos/test/` — SQLite-backed behavior coverage
 
-Key tables include `tasks`, `runs`, `task_dependencies`, `task_sources`, `task_supersessions`, `artifacts`, and `events`. The package README documents module boundaries; generated CLI help is the command syntax source.
+Key tables include `tasks`, `runs`, `task_dependencies`, `task_sources`, `task_supersessions`, `artifacts`, and `events`. `runs.has_claimed_task` is the durable record that a Run has claimed work, so timeout/launch-abort semantics do not depend on retained event history. Event rows are retention-managed operational history and may be pruned by age through the Engine library boundary. The package README documents module boundaries; generated CLI help is the command syntax source.
 
 ## 6. Testing
 

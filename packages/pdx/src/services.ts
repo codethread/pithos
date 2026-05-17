@@ -79,6 +79,12 @@ export interface PithosReadyTask {
 	readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 }
 
+export interface PithosPruneEventsResult {
+	readonly ok: true;
+	readonly deleted_heartbeat: number;
+	readonly deleted_other: number;
+}
+
 export interface PithosClientService {
 	readonly init: () => Effect.Effect<void, PdxError>;
 	readonly scopeUpsert: (input: {
@@ -159,6 +165,7 @@ export interface PithosClientService {
 	}) => Effect.Effect<void, PdxError>;
 	readonly claimableRepairAlertKinds: () => Effect.Effect<readonly RepairAlertKind[], PdxError>;
 	readonly briefing: () => Effect.Effect<readonly PithosReadyTask[], PdxError>;
+	readonly pruneEvents: () => Effect.Effect<PithosPruneEventsResult, PdxError>;
 }
 export class PithosClient extends Context.Tag("pdx/PithosClient")<
 	PithosClient,
@@ -246,6 +253,8 @@ export interface RegistryService {
 	readonly setLastEscalateClaimableCount: (count: number) => Effect.Effect<void>;
 	readonly pendingNudgeSince: Effect.Effect<string | null>;
 	readonly setPendingNudgeSince: (value: string | null) => Effect.Effect<void>;
+	readonly lastEventPruneAt: Effect.Effect<string | null>;
+	readonly setLastEventPruneAt: (value: string | null) => Effect.Effect<void>;
 	readonly upsert: (entry: RegistryEntry) => Effect.Effect<void>;
 	readonly remove: (runId: string) => Effect.Effect<void>;
 }
@@ -255,6 +264,7 @@ export const makeRegistry = Effect.gen(function* () {
 	const entriesRef = yield* SynchronizedRef.make<readonly RegistryEntry[]>([]);
 	const lastEscalateClaimableCountRef = yield* SynchronizedRef.make(0);
 	const pendingNudgeSinceRef = yield* SynchronizedRef.make<string | null>(null);
+	const lastEventPruneAtRef = yield* SynchronizedRef.make<string | null>(null);
 	return Registry.of({
 		list: SynchronizedRef.get(entriesRef),
 		lastEscalateClaimableCount: SynchronizedRef.get(lastEscalateClaimableCountRef),
@@ -262,6 +272,8 @@ export const makeRegistry = Effect.gen(function* () {
 			SynchronizedRef.set(lastEscalateClaimableCountRef, count),
 		pendingNudgeSince: SynchronizedRef.get(pendingNudgeSinceRef),
 		setPendingNudgeSince: (value) => SynchronizedRef.set(pendingNudgeSinceRef, value),
+		lastEventPruneAt: SynchronizedRef.get(lastEventPruneAtRef),
+		setLastEventPruneAt: (value) => SynchronizedRef.set(lastEventPruneAtRef, value),
 		upsert: (entry) =>
 			SynchronizedRef.update(entriesRef, (entries) => [
 				...entries.filter((existing) => existing.runId !== entry.runId),

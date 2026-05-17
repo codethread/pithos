@@ -260,6 +260,7 @@ const pithosClient = (dbPath: string): PithosClientService => {
 		claimableRepairAlertKinds: () =>
 			run("pithos repair alert kinds", () => engine.claimableRepairAlertKinds().kinds),
 		briefing: () => run("pithos briefing", () => engine.briefing({ agent: undefined }).ready),
+		pruneEvents: () => run("pithos prune events", () => engine.pruneEvents()),
 	};
 };
 

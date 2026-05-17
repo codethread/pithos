@@ -104,6 +104,14 @@ export interface Engine {
 		readonly ok: true;
 		readonly events: readonly EventOutput[];
 	};
+	readonly pruneEvents: (input?: {
+		readonly heartbeatOlderThanDays?: number;
+		readonly otherOlderThanDays?: number;
+	}) => {
+		readonly ok: true;
+		readonly deleted_heartbeat: number;
+		readonly deleted_other: number;
+	};
 	readonly enqueue: (input: {
 		readonly scope: string;
 		readonly capability: Capability;
@@ -513,6 +521,7 @@ export interface RunOutput {
 	readonly scope_id: string;
 	readonly status: string;
 	readonly task_id: string | null;
+	readonly has_claimed_task: boolean;
 	readonly session_id: string;
 	readonly harness_kind: HarnessKind;
 	readonly session_log_path: string;
@@ -530,6 +539,8 @@ export interface EventOutput {
 	readonly created_at: string;
 }
 
+const HEARTBEAT_EVENT_TYPES = ["run.heartbeat", "task.heartbeat"] as const;
+
 const toRunOutput = (row: RunRow): RunOutput => ({
 	id: row.id,
 	agent: row.agent_kind,
@@ -537,6 +548,7 @@ const toRunOutput = (row: RunRow): RunOutput => ({
 	scope_id: row.scope_id,
 	status: row.status,
 	task_id: row.task_id,
+	has_claimed_task: row.has_claimed_task === 1,
 	session_id: row.session_id,
 	harness_kind: row.harness_kind,
 	session_log_path: row.session_log_path,
@@ -572,6 +584,7 @@ LIMIT 1
 const claimRunTaskUpdate = sql`
 UPDATE runs
 SET task_id = ?,
+    has_claimed_task = 1,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?
   AND task_id IS NULL
@@ -602,6 +615,13 @@ const parseHarnessKind = (value: unknown): HarnessKind =>
 
 const requireNonEmpty = (value: string, name: string): string => {
 	if (value.length === 0) fail("VALIDATION_ERROR", `${name} must be non-empty`);
+	return value;
+};
+
+const requirePositiveInteger = (value: number, name: string): number => {
+	if (!Number.isSafeInteger(value) || value < 1) {
+		fail("VALIDATION_ERROR", `${name} must be a positive integer`);
+	}
 	return value;
 };
 
@@ -715,6 +735,7 @@ SELECT
 	session_log_path,
 	status,
 	task_id,
+	has_claimed_task,
 	session_id,
 	created_at,
 	updated_at
@@ -2082,10 +2103,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				if (run.agent_kind === "pandora" || run.agent_kind === "pdx") {
 					fail("VALIDATION_ERROR", `run timeout is not valid for ${run.agent_kind}`);
 				}
-				const hasClaimed = db
-					.prepare(sql`SELECT 1 FROM events WHERE type='task.claimed' AND actor_run_id=?`)
-					.get(run.id);
-				if (hasClaimed !== undefined) {
+				if (run.has_claimed_task !== 0) {
 					fail("VALIDATION_ERROR", "run timeout requires a run that has never claimed a task");
 				}
 				const runUpdate = db
@@ -2114,10 +2132,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				if (run.task_id !== null) {
 					fail("VALIDATION_ERROR", "launch abort requires no held task");
 				}
-				const hasClaimed = db
-					.prepare(sql`SELECT 1 FROM events WHERE type='task.claimed' AND actor_run_id=?`)
-					.get(run.id);
-				if (hasClaimed !== undefined) {
+				if (run.has_claimed_task !== 0) {
 					fail("VALIDATION_ERROR", "launch abort requires a run that has never claimed a task");
 				}
 				const runUpdate = db
@@ -2161,6 +2176,42 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					payload: decodeEventPayload(row.payload_json, row.id),
 					created_at: row.created_at,
 				})),
+			};
+		}),
+	pruneEvents: (input) =>
+		withDb(ctx, (db) => {
+			const heartbeatOlderThanDays = requirePositiveInteger(
+				input?.heartbeatOlderThanDays ?? 1,
+				"heartbeatOlderThanDays",
+			);
+			const otherOlderThanDays = requirePositiveInteger(
+				input?.otherOlderThanDays ?? 7,
+				"otherOlderThanDays",
+			);
+			const nowIso = Effect.runSync(ctx.services.clock.nowIso());
+			const now = new Date(nowIso);
+			if (Number.isNaN(now.getTime())) {
+				fail("INTERNAL_ERROR", `clock returned invalid ISO timestamp: ${nowIso}`);
+			}
+			const heartbeatCutoff = toDbTimestamp(
+				new Date(now.getTime() - heartbeatOlderThanDays * 24 * 60 * 60 * 1000),
+			);
+			const otherCutoff = toDbTimestamp(
+				new Date(now.getTime() - otherOlderThanDays * 24 * 60 * 60 * 1000),
+			);
+			const deleted = db.transaction(() => {
+				const deletedHeartbeat = db
+					.prepare(sql`DELETE FROM events WHERE type IN (?, ?) AND created_at < ?`)
+					.run(HEARTBEAT_EVENT_TYPES[0], HEARTBEAT_EVENT_TYPES[1], heartbeatCutoff).changes;
+				const deletedOther = db
+					.prepare(sql`DELETE FROM events WHERE type NOT IN (?, ?) AND created_at < ?`)
+					.run(HEARTBEAT_EVENT_TYPES[0], HEARTBEAT_EVENT_TYPES[1], otherCutoff).changes;
+				return { deletedHeartbeat, deletedOther };
+			})();
+			return {
+				ok: true,
+				deleted_heartbeat: deleted.deletedHeartbeat,
+				deleted_other: deleted.deletedOther,
 			};
 		}),
 	enqueue: ({ scope, capability, title, body, bodyFile, runId, dependsOn, chain }) =>

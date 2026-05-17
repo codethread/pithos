@@ -205,6 +205,10 @@ describe("task lifecycle", () => {
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT status FROM tasks WHERE id=?").pluck().get(enq.task.id)).toBe("done");
 		expect(db.prepare("SELECT task_id FROM runs WHERE id='run_war'").pluck().get()).toBeNull();
+		expect(db.prepare("SELECT has_claimed_task FROM runs WHERE id='run_war'").pluck().get()).toBe(
+			1,
+		);
+		db.close();
 	});
 
 	it("enforces authorization, scope capability rules, and one held task", () => {
@@ -387,6 +391,40 @@ describe("task lifecycle", () => {
 		db.close();
 		// Running migrate again on the same DB is idempotent
 		engine.init({ fresh: false });
+	});
+
+	it("migrates older runs tables to add has_claimed_task with default 0", () => {
+		const { dbPath, engine } = setup();
+		const db = new Database(dbPath);
+		db.exec(`
+DROP TABLE runs;
+CREATE TABLE runs (
+	id TEXT PRIMARY KEY CHECK (length(id) > 0),
+	agent_kind TEXT NOT NULL REFERENCES agent_kinds(agent_kind),
+	mode TEXT NOT NULL CHECK (mode IN ('afk', 'hitl')),
+	scope_id TEXT NOT NULL REFERENCES scopes(id),
+	cwd TEXT NOT NULL CHECK (length(cwd) > 0),
+	session_id TEXT NOT NULL CHECK (length(session_id) > 0),
+	harness_kind TEXT NOT NULL CHECK (harness_kind IN ('claude', 'pi', 'system')),
+	session_log_path TEXT NOT NULL CHECK (length(session_log_path) > 0),
+	status TEXT NOT NULL CHECK (status IN ('live', 'ended', 'failed', 'cancelled', 'timed_out')) DEFAULT 'live',
+	task_id TEXT,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
+		db.prepare(
+			"INSERT INTO runs(id,agent_kind,mode,scope_id,cwd,session_id,harness_kind,session_log_path) VALUES (?,?,?,?,?,?,?,?)",
+		).run("run_legacy", "war", "afk", "global", "/tmp", "s_legacy", "pi", "/tmp/s_legacy.jsonl");
+		db.close();
+
+		engine.init({ fresh: false });
+
+		const migrated = new Database(dbPath);
+		expect(
+			migrated.prepare("SELECT has_claimed_task FROM runs WHERE id=?").pluck().get("run_legacy"),
+		).toBe(0);
+		migrated.close();
 	});
 
 	it("migrates existing repair_alerts CHECK constraints to current alert kinds", () => {
@@ -1761,8 +1799,8 @@ CREATE TABLE repair_alerts (
 		db.close();
 	});
 
-	it("rejects launch-abort for runs that hold or held tasks", () => {
-		const { engine, repo } = setup();
+	it("rejects launch-abort for runs that hold or held tasks even without task.claimed history", () => {
+		const { dbPath, engine, repo } = setup();
 		const held = engine.enqueue({
 			scope: repo,
 			capability: "execute",
@@ -1778,13 +1816,19 @@ CREATE TABLE repair_alerts (
 			/launch abort requires no held task/,
 		);
 		engine.complete({ taskId: held, runId: "run_war", token: 1, resultJson: "{}" });
+		const db = new Database(dbPath);
+		db.prepare("DELETE FROM events WHERE type='task.claimed' AND actor_run_id=?").run("run_war");
+		expect(db.prepare("SELECT has_claimed_task FROM runs WHERE id=?").pluck().get("run_war")).toBe(
+			1,
+		);
+		db.close();
 		expect(() => engine.runLaunchAbort({ runId: "run_war", reason: "bad launch" })).toThrow(
 			/launch abort requires a run that has never claimed a task/,
 		);
 	});
 
-	it("timeouts only no-claim live runs", () => {
-		const { engine, repo } = setup();
+	it("timeouts only no-claim live runs even without task.claimed history", () => {
+		const { dbPath, engine, repo } = setup();
 		expect(() => engine.runTimeout({ runId: "run_pdx", reason: "no claim" })).toThrow(PithosError);
 		expect(engine.runTimeout({ runId: "run_war", reason: "no claim" })).toMatchObject({
 			ok: true,
@@ -1792,12 +1836,13 @@ CREATE TABLE repair_alerts (
 				id: "run_war",
 				status: "timed_out",
 				task_id: null,
+				has_claimed_task: false,
 				harness_kind: "pi",
 				session_log_path: "/tmp/s_war.jsonl",
 			},
 		});
 		expect(engine.runTimeout({ runId: "run_war", reason: "retry" })).toMatchObject({
-			run: { id: "run_war", status: "timed_out", task_id: null },
+			run: { id: "run_war", status: "timed_out", task_id: null, has_claimed_task: false },
 		});
 		engine.runUpsert({
 			agent: "war",
@@ -1822,6 +1867,12 @@ CREATE TABLE repair_alerts (
 		engine.claim({ runId: "run_war2", scope: repo, capability: "execute" });
 		expect(() => engine.runTimeout({ runId: "run_war2", reason: "no claim" })).toThrow(PithosError);
 		engine.complete({ taskId: held, runId: "run_war2", token: 1, resultJson: "{}" });
+		const db = new Database(dbPath);
+		db.prepare("DELETE FROM events WHERE type='task.claimed' AND actor_run_id=?").run("run_war2");
+		expect(db.prepare("SELECT has_claimed_task FROM runs WHERE id=?").pluck().get("run_war2")).toBe(
+			1,
+		);
+		db.close();
 		expect(() => engine.runTimeout({ runId: "run_war2", reason: "no claim" })).toThrow(PithosError);
 	});
 

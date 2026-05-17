@@ -56,7 +56,7 @@ The composed behavior is specified in [`../../specs/control-plane-supervision.md
 Exported from `@pdx/pithos`:
 
 - CLI helpers: `makePithosCommand`, `runPithosCli`, `renderPithosHelpJson`.
-- Engine boundary: `makeEngine`, `Engine`, render helpers for briefing/graph/task inspect text.
+- Engine boundary: `makeEngine`, `Engine`, render helpers for briefing/graph/task inspect text, and library-only event pruning used by `pdx` maintenance.
 - Schema/DB helpers: `migrate`, `openDb`, row schemas, decoded row helpers.
 - Chain helpers: chain-policy resolution and graph dependency utilities.
 - Config/services/errors: `loadConfig`, `liveServices`, `PithosError`.
@@ -109,6 +109,7 @@ Owns the Pithos domain API used by both the CLI and `pdx`:
 - graph inspect
 - briefing
 - event tail
+- library-only `pruneEvents` retention maintenance (default: heartbeat events older than 1 day, other events older than 7 days)
 - text renderers for task/graph/briefing views
 
 Engine code opens the SQLite DB, runs migrations, executes transition logic, and closes the DB per operation. Race-sensitive updates run inside SQLite transactions and use fenced preconditions so stale writes fail rather than drifting state. Scope/task admission validates external filesystem state at the Pithos boundary: repo/worktree paths must exist as directories when scopes are upserted and when tasks are enqueued or superseded into those scopes.
@@ -121,13 +122,13 @@ Key tables:
 
 - `scopes`
 - `agent_kinds`, `capabilities`, `agent_claims`, `agent_enqueues`
-- `runs`
+- `runs` (includes durable `has_claimed_task` so Run timeout/launch-abort invariants do not depend on retained event history)
 - `tasks`
 - `task_dependencies`
 - `task_sources`
 - `task_supersessions`
 - `artifacts`
-- `events`
+- `events` (indexed for age-based pruning by `created_at` and `(type, created_at)`)
 
 `migrate` enables foreign keys, creates/updates schema, and seeds the built-in global scope, Agent kinds, Capabilities, claim rules, and enqueue rules.
 
@@ -173,6 +174,7 @@ Defines `PithosError` and exit-code mapping. Keep new runtime failures tagged wi
 Pithos owns durable invariants, not live resource observation. Important rules to preserve:
 
 - A Run may hold at most one Held task (`runs.task_id`).
+- `runs.has_claimed_task` is the durable signal that a Run has successfully claimed work; timeout and launch-abort logic must not rely on historical `task.claimed` events.
 - A Task has exactly one Capability.
 - A Task must reference an existing Scope row; the database foreign key is the integrity backstop for row existence.
 - Engine prechecks require the Scope to be active and provide tagged JSON errors for missing or archived scopes.
@@ -185,6 +187,7 @@ Pithos owns durable invariants, not live resource observation. Important rules t
 - Supersessions preserve history while replacing work with a fresh Task.
 - Fencing tokens invalidate stale task writes.
 - Cleanup is for confirmed natural Run death; Interrupt is for deliberate Kill of a live Run; Cancel is for non-held Task abandonment.
+- Event history is retention-managed data, not an invariant store. `pruneEvents` deletes heartbeat events older than 1 day and other events older than 7 days using strict older-than cutoffs.
 
 ## Environment and runtime files
 

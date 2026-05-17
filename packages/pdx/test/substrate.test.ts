@@ -68,7 +68,15 @@ const runPdxCli = (args: readonly string[], env?: NodeJS.ProcessEnv) =>
 	execFileAsync(
 		process.execPath,
 		["packages/pdx/scripts/build.mjs", "--dev", "--run", "--", ...args],
-		{ cwd: repoRoot, env },
+		{
+			cwd: repoRoot,
+			env: {
+				...process.env,
+				PDX_DATA_DIR: undefined,
+				PDX_USER_DATA_DIR: undefined,
+				...env,
+			},
+		},
 	);
 
 const makeFakeTmux = async () => {
@@ -273,10 +281,15 @@ const alwaysLiveProcess = Process.of({
 const testLog = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
 const testLifecycle = LifecycleReporter.of({ report: () => Effect.void });
 const stripAnsi = (text: string): string =>
-	["\u001b[32m", "\u001b[33m", "\u001b[31m", "\u001b[2m", "\u001b[0m"].reduce(
-		(value, code) => value.split(code).join(""),
-		text,
-	);
+	[
+		"\u001b[32m",
+		"\u001b[33m",
+		"\u001b[31m",
+		"\u001b[34m",
+		"\u001b[1m",
+		"\u001b[2m",
+		"\u001b[0m",
+	].reduce((value, code) => value.split(code).join(""), text);
 
 const testClock = Clock.of({ nowIso: Effect.succeed("2026-05-09T00:00:31.000Z") });
 
@@ -299,7 +312,7 @@ const pithosTestServices = (): PithosServices => {
 			existsDirectory: () => Effect.succeed(true),
 		},
 		input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
-		output: { write: () => Effect.void, writeError: () => Effect.void },
+		output: { write: () => Effect.void, writeError: () => Effect.void, isTty: () => false },
 		ids: {
 			make: (prefix) =>
 				Effect.sync(() => {
@@ -465,15 +478,19 @@ describe("pdx substrate", () => {
 
 	it("CLI init materializes templates without tmux", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-cli-init-"));
+		const userDataDir = join(dataDir, "config");
 		const tmux = await makeFakeTmux();
-		const { stdout } = await runPdxCli(["init", "--data-dir", dataDir], tmux.env());
+		const { stdout } = await runPdxCli(["init", "--data-dir", dataDir], {
+			...tmux.env(),
+			PDX_USER_DATA_DIR: userDataDir,
+		});
 		expect(stdout).toBe(`${dataDir}\n`);
 		expect(existsSync(join(dataDir, "pithos.sqlite"))).toBe(true);
 		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
-		expect(await readFile(join(dataDir, "config", "AGENTS.md"), "utf8")).toContain(
+		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toContain(
 			"pdx user config agent guide",
 		);
-		expect(await readlink(join(dataDir, "config", "CLAUDE.md"))).toBe("AGENTS.md");
+		expect(await readlink(join(userDataDir, "CLAUDE.md"))).toBe("AGENTS.md");
 		expect(existsSync(join(dataDir, "runs"))).toBe(true);
 		expect(existsSync(join(tmux.binDir, "tmux.log"))).toBe(false);
 	});

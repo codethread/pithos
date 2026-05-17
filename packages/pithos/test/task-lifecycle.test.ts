@@ -28,7 +28,7 @@ const services = (options?: { readonly existingDirectories?: ReadonlySet<string>
 			),
 	},
 	input: { readStdin: () => Effect.succeed({ _tag: "NoRedirectedStdin" as const }) },
-	output: { write: () => Effect.void, writeError: () => Effect.void },
+	output: { write: () => Effect.void, writeError: () => Effect.void, isTty: () => false },
 	ids: {
 		make: (prefix) => Effect.succeed(`${prefix}_${randomUUID().replaceAll("-", "").slice(0, 8)}`),
 	},

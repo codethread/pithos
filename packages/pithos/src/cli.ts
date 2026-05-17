@@ -380,8 +380,16 @@ const readOptionalResultMetadata = (ctx: CliContext, enabled: boolean) =>
 		return yield* fromEngine(() => parseResultMetadata(text));
 	});
 
+const successGreen = "\u001b[32m";
+const warningYellowDim = "\u001b[2m\u001b[33m";
+const errorRed = "\u001b[31m";
+const ansiReset = "\u001b[0m";
+const colorText = (enabled: boolean, code: string, text: string): string =>
+	enabled ? `${code}${text}${ansiReset}` : text;
+
 const runCommand = (ctx: CliContext, input: CommandInput) =>
 	Effect.gen(function* () {
+		const tty = ctx.services.output.isTty();
 		const writeJson = (value: unknown) => ctx.services.output.write(json(value));
 		const enqueueChain =
 			input.command === "task.enqueue"
@@ -473,7 +481,7 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 						status: graphStatuses!,
 						sinceCutoff: graphSinceCutoff,
 					});
-					return input.json ? graphOutput : renderGraphInspectText(graphOutput);
+					return input.json ? graphOutput : renderGraphInspectText(graphOutput, { color: tty });
 				}
 				case "briefing": {
 					const briefingOutput = engine.briefing({ agent: input.agent });
@@ -481,13 +489,23 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 				}
 			}
 		});
-		yield* typeof result === "string" ? ctx.services.output.write(result) : writeJson(result);
+		if (typeof result === "string") {
+			yield* ctx.services.output.write(result);
+		} else if (input.command === "task.claim" && tty) {
+			yield* ctx.services.output.write(colorText(true, successGreen, json(result)));
+		} else {
+			yield* writeJson(result);
+		}
 	}).pipe(
 		Effect.catchAll((error) =>
 			Effect.gen(function* () {
-				yield* ctx.services.output.writeError(
-					json({ ok: false, error: { code: error.code, message: error.message } }),
-				);
+				const tty = ctx.services.output.isTty();
+				const payload = json({ ok: false, error: { code: error.code, message: error.message } });
+				const colored =
+					error.code === "NO_CLAIMABLE_WORK"
+						? colorText(tty, warningYellowDim, payload)
+						: colorText(tty, errorRed, payload);
+				yield* ctx.services.output.writeError(tty ? colored : payload);
 				process.exitCode = exitCodeFor(error.code);
 			}),
 		),

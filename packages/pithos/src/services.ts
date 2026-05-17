@@ -22,6 +22,7 @@ export interface ClockService {
 export interface OutputService {
 	readonly write: (text: string) => Effect.Effect<void>;
 	readonly writeError: (text: string) => Effect.Effect<void>;
+	readonly isTty: () => boolean;
 }
 
 export type StdinState =
@@ -104,6 +105,7 @@ export const liveServices: Services = {
 	output: {
 		write: (text) => Effect.sync(() => void process.stdout.write(text)),
 		writeError: (text) => Effect.sync(() => void process.stderr.write(text)),
+		isTty: () => Boolean(process.stdout.isTTY),
 	},
 	ids: {
 		make: (prefix) =>

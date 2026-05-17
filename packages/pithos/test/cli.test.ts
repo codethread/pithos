@@ -15,6 +15,7 @@ const services = (
 		| { readonly _tag: "NoRedirectedStdin" }
 		| { readonly _tag: "RedirectedText"; readonly text: string }
 		| { readonly _tag: "ReadFailure"; readonly error: PithosError } = { _tag: "NoRedirectedStdin" },
+	options: { readonly isTty?: boolean } = {},
 ): Services & { stdout: string[]; stderr: string[]; stdinReads: () => number } => {
 	const stdout: string[] = [];
 	const stderr: string[] = [];
@@ -39,6 +40,7 @@ const services = (
 		output: {
 			write: (text) => Effect.sync(() => void stdout.push(text)),
 			writeError: (text) => Effect.sync(() => void stderr.push(text)),
+			isTty: () => options.isTty ?? false,
 		},
 		ids: { make: (prefix) => Effect.sync(() => `${prefix}_cli_${idCounter++}`) },
 		clock: { nowIso: () => Effect.succeed("2026-05-08T00:00:00.000Z") },
@@ -49,9 +51,10 @@ const runCli = async (
 	args: readonly string[],
 	dbPath: string,
 	stdin?: Parameters<typeof services>[0],
+	options?: Parameters<typeof services>[1],
 ) => {
 	process.exitCode = undefined;
-	const svc = services(stdin);
+	const svc = services(stdin, options);
 	let configRead = false;
 	await Effect.runPromise(
 		runPithosCli(
@@ -1076,6 +1079,53 @@ describe("pithos cli", () => {
 				(await runCli(["graph", "inspect", "--task", doneLeaf, "--json"], dbPath)).stdout[0] ?? "",
 			) as { graph: { nodes: { id: string }[] } };
 			expect(parsed.graph.nodes.map((node) => node.id)).toEqual([doneLeaf]);
+		});
+
+		it("adds ANSI colors to graph inspect in a tty", async () => {
+			const dbPath = tempDb();
+			await runCli(["init", "--fresh"], dbPath);
+			await upsertRun(dbPath, "run_toil");
+
+			const taskId = await enqueueGlobalTriage(dbPath, "run_toil", "Done leaf", "body");
+			const claim = await claimGlobal(dbPath, "run_toil");
+			expect(claim.task.id).toBe(taskId);
+			await runCli(
+				["task", "complete", "--run", "run_toil", "--token", String(claim.task.token), taskId],
+				dbPath,
+			);
+
+			const text =
+				(await runCli(["graph", "inspect", "--task", taskId], dbPath, undefined, { isTty: true }))
+					.stdout[0] ?? "";
+			expect(text).toContain("\u001b[32m");
+			expect(text).toContain(`${taskId} [triage] [done] Done leaf`);
+		});
+
+		it("adds ANSI colors to task claim success and no-work failures in a tty", async () => {
+			const dbPath = tempDb();
+			await runCli(["init", "--fresh"], dbPath);
+			await upsertRun(dbPath, "run_toil");
+			await upsertRun(dbPath, "run_other");
+			await enqueueGlobalTriage(dbPath, "run_toil", "Claim me", "body");
+
+			const claimed = await runCli(
+				["task", "claim", "--run", "run_toil", "--scope", "global", "--capability", "triage"],
+				dbPath,
+				undefined,
+				{ isTty: true },
+			);
+			expect(claimed.stdout[0]).toContain("\u001b[32m");
+			expect(claimed.stdout[0]).toContain('"ok":true');
+
+			const noWork = await runCli(
+				["task", "claim", "--run", "run_other", "--scope", "global", "--capability", "triage"],
+				dbPath,
+				undefined,
+				{ isTty: true },
+			);
+			expect(noWork.stderr[0]).toContain("\u001b[2m\u001b[33m");
+			expect(noWork.stderr[0]).toContain('"code":"NO_CLAIMABLE_WORK"');
+			expect(noWork.exitCode).toBe(5);
 		});
 
 		it("rejects the removed --hide-terminal flag", async () => {

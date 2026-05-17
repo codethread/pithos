@@ -284,6 +284,48 @@ const taskTitleLine = (task: {
 	readonly unresolved_dependency_ids?: readonly string[];
 }): string => `${task.id} [${task.capability}] [${effectiveTaskStatus(task)}] ${task.title}`;
 
+const ansi = {
+	reset: "\u001b[0m",
+	bold: "\u001b[1m",
+	dim: "\u001b[2m",
+	red: "\u001b[31m",
+	green: "\u001b[32m",
+	yellow: "\u001b[33m",
+	blue: "\u001b[34m",
+};
+
+const color = (enabled: boolean, code: string, text: string): string =>
+	enabled ? `${code}${text}${ansi.reset}` : text;
+
+const taskTitleLineColored = (
+	task: {
+		readonly id: string;
+		readonly capability: Capability;
+		readonly status: TaskStatus;
+		readonly title: string;
+		readonly unresolved_dependency_ids?: readonly string[];
+	},
+	enabled: boolean,
+): string => {
+	const line = taskTitleLine(task);
+	if (!enabled) return line;
+	switch (task.status) {
+		case "queued":
+			return color(enabled, ansi.yellow, line);
+		case "claimed":
+		case "running":
+			return color(enabled, ansi.blue, line);
+		case "done":
+			return color(enabled, ansi.green, line);
+		case "failed":
+			return color(enabled, ansi.red, line);
+		case "dead_letter":
+			return color(enabled, `${ansi.bold}${ansi.red}`, line);
+		case "cancelled":
+			return color(enabled, ansi.dim, line);
+	}
+};
+
 const fencedMarkdown = (body: string): string => {
 	const longestBacktickRun = Math.max(
 		0,
@@ -1186,7 +1228,11 @@ const assertAcyclic = (db: Db): void => {
 	for (const id of outgoing.keys()) visit(id);
 };
 
-export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string => {
+export const renderGraphInspectText = (
+	{ graph }: GraphInspectOutput,
+	options: { readonly color?: boolean } = {},
+): string => {
+	const colorEnabled = options.color ?? false;
 	const byId = new Map(graph.nodes.map((node) => [node.id, node]));
 	const childrenByParent = new Map<string, string[]>();
 	const childIds = new Set<string>();
@@ -1229,7 +1275,7 @@ export const renderGraphInspectText = ({ graph }: GraphInspectOutput): string =>
 			lines.push(`${"  ".repeat(depth)}${prefix}↑ ${id} already shown`);
 			return;
 		}
-		lines.push(`${"  ".repeat(depth)}${prefix}${taskTitleLine(node)}`);
+		lines.push(`${"  ".repeat(depth)}${prefix}${taskTitleLineColored(node, colorEnabled)}`);
 		written.add(id);
 		for (const childId of childrenByParent.get(id) ?? []) writeNode(childId, depth + 1);
 		const successorId = successorBySuperseded.get(id);

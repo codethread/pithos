@@ -36,6 +36,7 @@ const services = (
 		output: {
 			write: (text) => Effect.sync(() => void stdout.push(text)),
 			writeError: (text) => Effect.sync(() => void stderr.push(text)),
+			isTty: () => false,
 		},
 		ids: { make: (prefix) => Effect.sync(() => `${prefix}_test_${idCounter++}`) },
 		clock: { nowIso: () => Effect.succeed("2026-05-08T00:00:00.000Z") },

@@ -52,12 +52,14 @@ CREATE TABLE IF NOT EXISTS scopes (
 	id TEXT PRIMARY KEY CHECK (length(id) > 0),
 	kind TEXT NOT NULL CHECK (kind IN ('global', 'repo', 'worktree')),
 	canonical_path TEXT,
+	parent_repo_path TEXT,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	archived_at TEXT,
 	CHECK (
-		(kind = 'global' AND canonical_path IS NULL)
-		OR (kind <> 'global' AND canonical_path IS NOT NULL AND length(canonical_path) > 0)
+		(kind = 'global' AND canonical_path IS NULL AND parent_repo_path IS NULL)
+		OR (kind = 'repo' AND canonical_path IS NOT NULL AND length(canonical_path) > 0 AND parent_repo_path IS NULL)
+		OR (kind = 'worktree' AND canonical_path IS NOT NULL AND length(canonical_path) > 0 AND parent_repo_path IS NOT NULL AND length(parent_repo_path) > 0)
 	)
 );
 
@@ -193,6 +195,7 @@ CREATE INDEX IF NOT EXISTS idx_task_sources_source
 `);
 	ensureScopesArchivedAtColumn(db);
 	ensureScopesDescriptionColumn(db);
+	ensureScopesParentRepoPathColumn(db);
 	ensureRepairAlertsKindConstraint(db);
 	seed(db);
 };
@@ -208,6 +211,13 @@ const ensureScopesDescriptionColumn = (db: Db): void => {
 	const columns = db.prepare(sql`PRAGMA table_info(scopes)`).all() as { name: string }[];
 	if (!columns.some((column) => column.name === "description")) {
 		db.exec(sql`ALTER TABLE scopes ADD COLUMN description TEXT`);
+	}
+};
+
+const ensureScopesParentRepoPathColumn = (db: Db): void => {
+	const columns = db.prepare(sql`PRAGMA table_info(scopes)`).all() as { name: string }[];
+	if (!columns.some((column) => column.name === "parent_repo_path")) {
+		db.exec(sql`ALTER TABLE scopes ADD COLUMN parent_repo_path TEXT`);
 	}
 };
 

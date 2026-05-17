@@ -118,9 +118,11 @@ const configInput = (
 	dataDir: string | undefined,
 	envHome: string | undefined,
 	envDataDir?: string,
+	envUserDataDir?: string,
 ) => ({
 	dataDir,
 	envDataDir,
+	envUserDataDir,
 	envHome,
 	daemonEntrypoint: "/tmp/pdx-dev",
 });
@@ -134,6 +136,7 @@ interface ReadyTaskInput {
 	readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 	readonly scope_kind?: "global" | "repo" | "worktree";
 	readonly canonical_path?: string | null;
+	readonly parent_repo_path?: string | null;
 }
 
 const runOutput = (
@@ -235,6 +238,7 @@ const makePithos = (
 					id: task.id ?? `task_ready_${index}`,
 					scope_kind: task.scope_kind ?? "global",
 					canonical_path: task.canonical_path ?? null,
+					parent_repo_path: task.parent_repo_path ?? null,
 					...task,
 				})),
 			),
@@ -458,10 +462,11 @@ describe("pdx substrate", () => {
 		const { stdout } = await runPdxCli(["init", "--data-dir", dataDir], tmux.env());
 		expect(stdout).toBe(`${dataDir}\n`);
 		expect(existsSync(join(dataDir, "pithos.sqlite"))).toBe(true);
-		expect(await readFile(join(dataDir, "templates", "agents.json"), "utf8")).toContain(
-			'"agent": "pandora"',
+		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
+		expect(await readFile(join(dataDir, "config", "AGENTS.md"), "utf8")).toContain(
+			"pdx user config agent guide",
 		);
-		expect(await readlink(join(dataDir, "templates", "CLAUDE.md"))).toBe("AGENTS.md");
+		expect(await readlink(join(dataDir, "config", "CLAUDE.md"))).toBe("AGENTS.md");
 		expect(existsSync(join(dataDir, "runs"))).toBe(true);
 		expect(existsSync(join(tmux.binDir, "tmux.log"))).toBe(false);
 	});
@@ -509,6 +514,45 @@ describe("pdx substrate", () => {
 			parsePdxConfig(configInput("/tmp/pdx-explicit", "/tmp/user-home", "/tmp/pdx-env")),
 		);
 		expect(config.dataDir).toBe("/tmp/pdx-explicit");
+	});
+
+	it("defaults userDataDir under dataDir/config", async () => {
+		const config = await run(parsePdxConfig(configInput("/tmp/pdx-home", "/tmp/user-home")));
+		expect(config.userDataDir).toBe("/tmp/pdx-home/config");
+	});
+
+	it("accepts explicit PDX_USER_DATA_DIR outside the data dir", async () => {
+		const config = await run(
+			parsePdxConfig(
+				configInput("/tmp/pdx-home", "/tmp/user-home", undefined, "/tmp/shared-pdx-config"),
+			),
+		);
+		expect(config.userDataDir).toBe("/tmp/shared-pdx-config");
+	});
+
+	it("rejects invalid PDX_USER_DATA_DIR relationships", async () => {
+		await expect(
+			run(
+				parsePdxConfig(configInput("/tmp/pdx-home", "/tmp/user-home", undefined, "/tmp/pdx-home")),
+			),
+		).rejects.toThrow(/must not equal PDX_DATA_DIR/);
+		await expect(
+			run(parsePdxConfig(configInput("/tmp/pdx-home", "/tmp/user-home", undefined, "/tmp"))),
+		).rejects.toThrow(/must not be an ancestor/);
+		await expect(
+			run(
+				parsePdxConfig(
+					configInput("/tmp/pdx-home", "/tmp/user-home", undefined, "/tmp/pdx-home/nested"),
+				),
+			),
+		).rejects.toThrow(/only allowed at \/tmp\/pdx-home\/config/);
+	});
+
+	it("expands ~/ PDX_USER_DATA_DIR with HOME", async () => {
+		const config = await run(
+			parsePdxConfig(configInput("/tmp/pdx-home", "/tmp/user-home", undefined, "~/pdx-config")),
+		);
+		expect(config.userDataDir).toBe("/tmp/user-home/pdx-config");
 	});
 
 	it("fails config parse when --data-dir and HOME env are both missing", async () => {
@@ -707,6 +751,7 @@ describe("pdx substrate", () => {
 			`remove:${config.pithosDbPath}`,
 			`remove:${config.runsDir}`,
 			`remove:${config.logPath}`,
+			`remove:${config.socketPath}`,
 			"mkdir:/tmp/pdx-clean",
 			"init",
 			"mkdir:/tmp/pdx-clean/runs",
@@ -714,13 +759,14 @@ describe("pdx substrate", () => {
 		]);
 	});
 
-	it("init --nuke wipes the full data dir before re-seeding", async () => {
+	it("init --nuke preserves default nested user config while clearing sibling entries", async () => {
 		const config = await parseConfig("/tmp/pdx-nuke");
 		const calls: string[] = [];
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
-			readDirectory: () => Effect.succeed([]),
+			readDirectory: (path) =>
+				Effect.succeed(path === config.dataDir ? ["config", "runs", "pithos.sqlite"] : []),
 			existsDirectory: () => Effect.succeed(true),
 			mkdir: (path) => Effect.sync(() => calls.push(`mkdir:${path}`)),
 			writeFileAtomic: () => Effect.void,
@@ -742,7 +788,8 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(calls).toEqual([
-			"remove:/tmp/pdx-nuke",
+			"remove:/tmp/pdx-nuke/runs",
+			"remove:/tmp/pdx-nuke/pithos.sqlite",
 			"mkdir:/tmp/pdx-nuke",
 			"init",
 			"mkdir:/tmp/pdx-nuke/runs",
@@ -754,6 +801,7 @@ describe("pdx substrate", () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
 		const spawner = makeSpawnerLive({
 			dataDir,
+			userDataDir: join(dataDir, "config"),
 			pithosDbPath: join(dataDir, "pithos.sqlite"),
 		});
 		const error = await run(
@@ -769,8 +817,8 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(error.code).toBe("CONFIG_ERROR");
-		expect(error.message).toContain(`${dataDir}/templates/agents.json`);
-		await expect(stat(join(dataDir, "templates", "agents.json"))).rejects.toMatchObject({
+		expect(error.message).toContain(`${dataDir}/agents.toml`);
+		await expect(stat(join(dataDir, "agents.toml"))).rejects.toMatchObject({
 			code: "ENOENT",
 		});
 	});
@@ -779,6 +827,7 @@ describe("pdx substrate", () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
 		const spawner = makeSpawnerLive({
 			dataDir,
+			userDataDir: join(dataDir, "config"),
 			pithosDbPath: join(dataDir, "pithos.sqlite"),
 		});
 		await run(spawner.materializeTemplates());
@@ -795,27 +844,28 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(error.code).toBe("VALIDATION_ERROR");
-		expect(await readFile(join(dataDir, "templates", "agents.json"), "utf8")).toContain(
-			'"agent": "pandora"',
-		);
+		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
 		expect(await readFile(join(dataDir, "templates", "war.md"), "utf8")).not.toHaveLength(0);
 		expect(await readFile(join(dataDir, "templates", "war", "cwd-guard.md"), "utf8")).toContain(
 			"cwd/scope guard",
 		);
-		expect(await readlink(join(dataDir, "templates", "CLAUDE.md"))).toBe("AGENTS.md");
+		expect(await readFile(join(dataDir, "config", "README.md"), "utf8")).toContain(
+			"pdx user config",
+		);
 	});
 
 	it("materializes templates as read-only (0555 dir, 0444 files)", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
 		const spawner = makeSpawnerLive({
 			dataDir,
+			userDataDir: join(dataDir, "config"),
 			pithosDbPath: join(dataDir, "pithos.sqlite"),
 		});
 		await run(spawner.materializeTemplates());
 		const templatesDir = join(dataDir, "templates");
 		const dirMode = (await stat(templatesDir)).mode & 0o777;
 		expect(dirMode).toBe(0o555);
-		const agentsMode = (await stat(join(templatesDir, "agents.json"))).mode & 0o777;
+		const agentsMode = (await stat(join(dataDir, "agents.toml"))).mode & 0o777;
 		expect(agentsMode).toBe(0o444);
 		const warMode = (await stat(join(templatesDir, "war.md"))).mode & 0o777;
 		expect(warMode).toBe(0o444);
@@ -825,31 +875,40 @@ describe("pdx substrate", () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
 		const spawner = makeSpawnerLive({
 			dataDir,
+			userDataDir: join(dataDir, "config"),
 			pithosDbPath: join(dataDir, "pithos.sqlite"),
 		});
 		await run(spawner.materializeTemplates());
 		// Second call must succeed even though dir is read-only
 		await run(spawner.materializeTemplates());
-		expect(await readFile(join(dataDir, "templates", "agents.json"), "utf8")).toContain(
-			'"agent": "pandora"',
-		);
+		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
 	});
 
-	it("materialization leaves extensions dir untouched", async () => {
+	it("materialization scaffolds user config idempotently without overwriting edits", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
-		const extensionsDir = join(dataDir, "extensions", "templates");
-		await mkdir(extensionsDir, { recursive: true });
-		await writeFile(join(extensionsDir, "my-rules.md"), "user rules", "utf8");
+		const userDataDir = join(dataDir, "config");
+		await mkdir(userDataDir, { recursive: true });
+		await writeFile(join(userDataDir, "README.md"), "my custom readme", "utf8");
 		const spawner = makeSpawnerLive({
 			dataDir,
+			userDataDir,
 			pithosDbPath: join(dataDir, "pithos.sqlite"),
 		});
 		await run(spawner.materializeTemplates());
-		expect(await readFile(join(extensionsDir, "my-rules.md"), "utf8")).toBe("user rules");
+		await run(spawner.materializeTemplates());
+		expect(await readFile(join(userDataDir, "README.md"), "utf8")).toBe("my custom readme");
+		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toContain(
+			"pdx user config agent guide",
+		);
+		expect(await readlink(join(userDataDir, "CLAUDE.md"))).toBe("AGENTS.md");
 	});
 
 	it("maps spawner boundary validation errors without flattening to process errors", async () => {
-		const spawner = makeSpawnerLive({ dataDir: "/tmp/pdx-data", pithosDbPath: "/tmp/pdx.sqlite" });
+		const spawner = makeSpawnerLive({
+			dataDir: "/tmp/pdx-data",
+			userDataDir: "/tmp/pdx-data/config",
+			pithosDbPath: "/tmp/pdx.sqlite",
+		});
 		const error = await run(
 			Effect.flip(
 				spawner.renderAgent({
@@ -971,7 +1030,7 @@ describe("pdx substrate", () => {
 		});
 	});
 
-	it("open --nuke wipes the full data dir before starting", async () => {
+	it("open --nuke preserves default nested user config while starting", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const parsed = await parseConfig(dataDir);
 		const socketDir = await mkdtemp(join(tmpdir(), "pdx-nuke-socket-"));
@@ -990,7 +1049,8 @@ describe("pdx substrate", () => {
 		const fs = FileSystem.of({
 			appendFile: () => Effect.void,
 			readFile: () => Effect.succeed(""),
-			readDirectory: () => Effect.succeed([]),
+			readDirectory: (path) =>
+				Effect.succeed(path === config.dataDir ? ["config", "runs", "pithos.sqlite"] : []),
 			existsDirectory: () => Effect.succeed(true),
 			mkdir: () => Effect.void,
 			writeFileAtomic: () => Effect.void,
@@ -1014,7 +1074,7 @@ describe("pdx substrate", () => {
 		} finally {
 			await run(server.close);
 		}
-		expect(removes).toEqual([config.dataDir]);
+		expect(removes).toEqual([join(config.dataDir, "runs"), join(config.dataDir, "pithos.sqlite")]);
 	});
 
 	it("open --clean wipes runtime state only (DB, runs, logs) before starting", async () => {
@@ -1060,7 +1120,12 @@ describe("pdx substrate", () => {
 		} finally {
 			await run(server.close);
 		}
-		expect(removes).toEqual([config.pithosDbPath, config.runsDir, config.logPath]);
+		expect(removes).toEqual([
+			config.pithosDbPath,
+			config.runsDir,
+			config.logPath,
+			config.socketPath,
+		]);
 	});
 
 	it("daemon startup creates runs dir, system run, Pandora singleton, and excludes pdx from caps", async () => {
@@ -3508,6 +3573,7 @@ describe("pdx substrate", () => {
 						id: task.id ?? `task_ready_${index}`,
 						scope_kind: task.scope_kind ?? "global",
 						canonical_path: task.canonical_path ?? null,
+						parent_repo_path: task.parent_repo_path ?? null,
 						...task,
 					})),
 				),
@@ -3581,6 +3647,7 @@ describe("pdx substrate", () => {
 						id: `task_${index}`,
 						scope_kind: "global" as const,
 						canonical_path: null,
+						parent_repo_path: null,
 						...task,
 					})),
 				),
@@ -3745,6 +3812,7 @@ describe("pdx substrate", () => {
 						id: `task_${index}`,
 						scope_kind: "global" as const,
 						canonical_path: null,
+						parent_repo_path: null,
 						...task,
 					})),
 				),
@@ -4058,6 +4126,7 @@ describe("pdx substrate", () => {
 describe("runInputHookSupervisor", () => {
 	const hookTestConfig: PdxConfig = {
 		dataDir: "/tmp/pdx-hook-test",
+		userDataDir: "/tmp/pdx-hook-test/config",
 		socketPath: "/tmp/pdx-hook-test/pdx.sock",
 		logPath: "/tmp/pdx-hook-test/pdx.jsonl",
 		runsDir: "/tmp/pdx-hook-test/runs",

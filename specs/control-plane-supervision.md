@@ -79,11 +79,11 @@ Capabilities are `intake`, `triage`, `design`, `execute`, and `escalate`. `execu
 
 ### `pdx init`
 
-`pdx init` prepares the data dir, initializes Pithos, creates runtime directories, and materializes bundle-owned templates. It does not touch tmux or Harness CLIs.
+`pdx init` prepares the data dir, initializes Pithos, creates runtime directories, materializes bundle-owned `<data-dir>/agents.toml` plus `<data-dir>/templates/`, and scaffolds user-owned config docs under `<user-data-dir>/` when missing. It does not touch tmux or Harness CLIs.
 
 - normal init reuses existing state
-- `--clean` removes DB, runs, and logs while preserving templates/extensions
-- `--nuke` removes the full data dir
+- `--clean` removes DB, runs, and logs while preserving bundled config and user config
+- `--nuke` removes pdx-owned runtime/bundled state while preserving `<user-data-dir>`
 - `--clean` and `--nuke` are mutually exclusive
 
 ### `pdx open`
@@ -173,7 +173,7 @@ Spawner does not own Pithos graph policy, live Registry state, Kill, Cleanup, In
 
 ## 8. Input Hook
 
-`agents.json` may configure `hooks.input.command`. pdx runs that command as a producer process after Pandora is live. The hook writes newline-delimited JSON on stdout; each valid line with non-empty `title` and `body` creates a global `intake` Task for Envy. Invalid lines are logged and skipped.
+Layered `agents.toml` may configure `hooks.input.command` through the global config layers. pdx runs that command as a producer process after Pandora is live. The hook writes newline-delimited JSON on stdout; each valid line with non-empty `title` and `body` creates a global `intake` Task for Envy. Invalid lines are logged and skipped.
 
 pdx supervises the hook independently:
 
@@ -207,6 +207,6 @@ All commands resolve data dir as `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/
 - `packages/pdx/src/log.ts` — Supervisor log JSONL
 - `packages/pithos/src/engine.ts` — Run/Task transitions and Repair Alert creation
 - `packages/spawner/src/spawner.ts` — render/launch/transcript behavior
-- `templates/README.md` — manifest, templates, extensions, input hook contract
+- `templates/README.md` — manifest, layered template/config contract, input hook contract
 
 Automated coverage lives primarily in `packages/pdx/test/substrate.test.ts`, `packages/pithos/test/`, and `packages/spawner/src/spawner.test.ts`.

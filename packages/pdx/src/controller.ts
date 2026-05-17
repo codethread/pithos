@@ -1,4 +1,5 @@
 import { Deferred, Effect, Fiber, Ref, Schedule, Either } from "effect";
+import { resolve } from "node:path";
 import { PDX_SYSTEM_RUN_ID } from "@pdx/pithos";
 import { requestIpc, listenIpc } from "./ipc-socket.js";
 import type { IpcResponse } from "./ipc.js";
@@ -127,6 +128,20 @@ const isMissingTmuxSessionError = (error: PdxError): boolean =>
 
 const isMissingProcessError = (error: PdxError): boolean => error.message.includes("ESRCH");
 
+const nukePreservingUserConfig = (config: PdxConfig) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem;
+		const defaultUserDataDir = resolve(config.dataDir, "config");
+		if (config.userDataDir === defaultUserDataDir) {
+			for (const entry of yield* fs.readDirectory(config.dataDir)) {
+				if (entry === "config") continue;
+				yield* fs.removeFile(resolve(config.dataDir, entry));
+			}
+			return;
+		}
+		yield* fs.removeFile(config.dataDir);
+	});
+
 export const initPdx = (
 	config: PdxConfig,
 	input: { readonly clean: boolean; readonly nuke: boolean },
@@ -144,11 +159,12 @@ export const initPdx = (
 			);
 		}
 		if (input.nuke) {
-			yield* fs.removeFile(config.dataDir);
+			yield* nukePreservingUserConfig(config);
 		} else if (input.clean) {
 			yield* fs.removeFile(config.pithosDbPath);
 			yield* fs.removeFile(config.runsDir);
 			yield* fs.removeFile(config.logPath);
+			yield* fs.removeFile(config.socketPath);
 		}
 		yield* fs.mkdir(config.dataDir);
 		yield* pithos.init();
@@ -899,6 +915,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				sessionId,
 				scopeId: task.scope_id,
 				cwd,
+				...(task.parent_repo_path === null ? {} : { parentRepoPath: task.parent_repo_path }),
 			});
 			const cwdExistsBeforeRunUpsert = yield* cwdExists(cwd);
 			if (!cwdExistsBeforeRunUpsert) {
@@ -1767,7 +1784,7 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 						runId: PDX_SYSTEM_RUN_ID,
 						kind: "hook_config_error",
 						escalationTitle: "Input hook disabled: hook config failed to load",
-						escalationBody: `pdx failed to load the input hook configuration. The input hook is disabled for this daemon session.\n\nError: ${error.message}\n\nSuggested next steps: fix the agents.json manifest overlay (usually $PDX_DATA_DIR/extensions/templates/agents.json for custom hooks), then restart pdx (pdx close && pdx open) to resume hook supervision.`,
+						escalationBody: `pdx failed to load the input hook configuration. The input hook is disabled for this daemon session.\n\nError: ${error.message}\n\nSuggested next steps: fix the layered agents.toml hook config (usually $PDX_USER_DATA_DIR/agents.toml or $PDX_USER_DATA_DIR/scopes/global/agents.toml for custom hooks), then restart pdx (pdx close && pdx open) to resume hook supervision.`,
 					});
 					return { input: undefined } as const;
 				}),

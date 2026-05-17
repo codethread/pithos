@@ -11,7 +11,7 @@ pandora-spawn --help
 pandora-spawn preview --help
 ```
 
-Preview renders the Agent run plan as JSON. It does not mutate Pithos, create a Run, touch tmux, or launch a Harness session.
+Preview renders the Agent run plan as JSON, including config/template provenance for layered `agents.toml` debugging. It does not mutate Pithos, create a Run, touch tmux, or launch a Harness session.
 
 For the actual agent manifest and prompt-template contract, see the repo-root
 [`templates/`](../../templates/) directory and [`templates/README.md`](../../templates/README.md).
@@ -73,7 +73,7 @@ Exported from `@pdx/spawner`:
 - `launchRenderedAgent(rendered)` — launch an already-rendered plan.
 - `launchAgent(input)` — convenience render-then-launch wrapper. `pdx` should prefer the two-step flow.
 - `renderSessionTranscript(input)` — parse a stored Claude/Pi Harness session log.
-- `loadHooks()` — read the optional pdx hook config from the same manifest overlay as rendering.
+- `loadHooks()` — read the optional pdx hook config from the same layered `agents.toml` manifest resolution used by rendering.
 - `LiveSpawnerServices` — live filesystem/process/env implementation.
 - `makeFakeSpawnerServices(input)` — deterministic service implementation for tests.
 - `bundledTemplatesDir` — repo-root bundled default template directory used when `PDX_DATA_DIR` is unset and by `pdx` when seeding a fresh data dir.
@@ -84,11 +84,11 @@ Exported from `@pdx/spawner`:
 
 Spawner intentionally keeps the render contract in the repo-root
 [`templates/README.md`](../../templates/README.md) next to the bundled default
-`agents.json` and prompt templates themselves.
+`agents.toml` and prompt templates themselves.
 
 Use that doc for:
 
-- `agents.json` schema and the built-in Pithos claim/enqueue contract Spawner derives at render time
+- `agents.toml` schema, merge semantics, and the built-in Pithos claim/enqueue contract Spawner derives at render time
 - template variables and include rules, including `command_cards` as generated Markdown rather than raw JSON
 - `PDX_DATA_DIR` loading behavior
 - user-editable config guidance
@@ -97,7 +97,7 @@ Use that doc for:
 
 Read `src/spawner.ts` for exact argv construction. Stable behavior worth knowing before editing:
 
-- `harness.argv` in `agents.json` is an optional escape hatch: tokens are inserted verbatim after the binary name and before all Spawner-managed flags. See [`templates/README.md`](../../templates/README.md) for the full contract.
+- `harness.argv` in `agents.toml` is an optional escape hatch: tokens are inserted verbatim after the binary name and before all Spawner-managed flags. See [`templates/README.md`](../../templates/README.md) for the full contract.
 - AFK mode uses Harness print mode with the message `Claim and process one task, then exit.`
 - HITL mode launches under tmux.
 - HITL prompt delivery uses a temp-file shell wrapper for every Harness to keep rendered prompts out of the `tmux new-session` argv.
@@ -129,7 +129,7 @@ pnpm --filter @pdx/spawner start -- preview \
 ```
 
 If you want preview to use the same seeded templates plus
-`extensions/templates/` overlay as `pdx`, set `PDX_DATA_DIR` and ensure
+layered `agents.toml` / `templates/` config as `pdx`, set `PDX_DATA_DIR` and ensure
 `<data-dir>/templates/` has already been seeded.
 
 Use fake services for deterministic render/launch tests. Do not require live model credentials for package tests.

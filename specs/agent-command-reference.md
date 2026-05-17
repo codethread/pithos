@@ -46,7 +46,7 @@ Spawner renders generated Markdown command references into Agent prompts through
 
 ```text
 Spawner.renderAgent
-  -> load agents.json and templates through the data-dir overlay
+  -> load bundled `agents.toml` + templates, then merge/select layered config assets by scope context
   -> call pithos --help-json
   -> call pdx --help-json for Pandora-only pdx inspection commands
   -> parse and validate command trees

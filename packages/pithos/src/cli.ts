@@ -35,6 +35,7 @@ type CommandInput =
 			readonly command: "scope.upsert";
 			readonly kind: ScopeKind;
 			readonly path: string | undefined;
+			readonly parentRepoPath?: string | undefined;
 			readonly description?: string | undefined;
 	  }
 	| { readonly command: "scope.list"; readonly all: boolean }
@@ -422,6 +423,7 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 					return engine.scopeUpsert({
 						kind: input.kind,
 						path: input.path,
+						parentRepoPath: input.parentRepoPath,
 						description: input.description,
 					});
 				case "scope.list":
@@ -553,16 +555,21 @@ export const makePithosCommand = (ctx: CliContext) => {
 				Options.withDescription("Filesystem path for repo/worktree scopes; omit for global scope."),
 				Options.optional,
 			),
+			parentRepoPath: Options.text("parent-repo").pipe(
+				Options.withDescription("Durable parent repo path required for worktree scopes."),
+				Options.optional,
+			),
 			description: Options.text("description").pipe(
 				Options.withDescription("Optional human-readable description for operator context."),
 				Options.optional,
 			),
 		},
-		({ kind, path, description }) =>
+		({ kind, path, parentRepoPath, description }) =>
 			runCommand(ctx, {
 				command: "scope.upsert",
 				kind,
 				path: opt(path),
+				parentRepoPath: opt(parentRepoPath),
 				description: opt(description),
 			}),
 	).pipe(Command.withDescription("Create or update a durable Pithos scope."));

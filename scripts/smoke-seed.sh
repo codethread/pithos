@@ -2,12 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PITHOS_BIN="${PITHOS_BIN:-$ROOT_DIR/packages/pithos/bin/pithos-dev}"
+PITHOS_BIN="${PITHOS_BIN:-$ROOT_DIR/packages/pithos/bin/pithos}"
 PDX_DATA_DIR="${PDX_DATA_DIR:-$(mktemp -d)/pdx}"
 PITHOS_DB="${PITHOS_DB:-$PDX_DATA_DIR/pithos.sqlite}"
 REPO_DIR="$PDX_DATA_DIR/repo-smoke"
 
 export PDX_DATA_DIR PITHOS_DB
+unset PITHOS_RUN_ID PITHOS_SESSION_ID PITHOS_SCOPE_ID
 
 mkdir -p "$PDX_DATA_DIR" "$REPO_DIR"
 

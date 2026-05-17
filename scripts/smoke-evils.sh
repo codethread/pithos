@@ -2,15 +2,19 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SPAWNER_BIN="${SPAWNER_BIN:-$ROOT_DIR/packages/spawner/bin/pandora-spawn-dev}"
+SPAWNER_BIN="${SPAWNER_BIN:-$ROOT_DIR/packages/spawner/bin/pandora-spawn}"
 SMOKE_DIR="${SMOKE_DIR:-$(mktemp -d)/pdx-evils}"
 PITHOS_DB="${PITHOS_DB:-$SMOKE_DIR/pithos.sqlite}"
+PDX_DATA_DIR="${PDX_DATA_DIR:-$SMOKE_DIR/pdx-data}"
+PDX_USER_DATA_DIR="${PDX_USER_DATA_DIR:-$SMOKE_DIR/pdx-user}"
 
-mkdir -p "$SMOKE_DIR"
-export PITHOS_DB
-# This smoke script renders bundled repo templates. Ignore any interactive-shell
-# pdx config so user overlays in ~/.pdx cannot make jq parse Spawner errors.
-unset PDX_DATA_DIR
+mkdir -p "$SMOKE_DIR" "$PDX_DATA_DIR/templates" "$PDX_USER_DATA_DIR"
+export PITHOS_DB PDX_DATA_DIR PDX_USER_DATA_DIR
+cp "$ROOT_DIR/templates/agents.toml" "$PDX_DATA_DIR/agents.toml"
+cp -R "$ROOT_DIR/templates/." "$PDX_DATA_DIR/templates/"
+# This smoke script renders through an isolated layered config root so previews do
+# not read ~/.pdx and can be extended by writing temp user/project layers under
+# $PDX_USER_DATA_DIR.
 
 preview_prompt() {
   local agent="$1"

@@ -1,6 +1,6 @@
 import { Deferred, Effect, Fiber, Ref, Schedule, Either } from "effect";
 import { resolve } from "node:path";
-import { PDX_SYSTEM_RUN_ID } from "@pdx/pithos";
+import { PDX_SYSTEM_RUN_ID, type Capability } from "@pdx/pithos";
 import { requestIpc, listenIpc } from "./ipc-socket.js";
 import type { IpcResponse } from "./ipc.js";
 import { PdxError } from "./errors.js";
@@ -18,7 +18,6 @@ import {
 	Tmux,
 	type HookExecutorService,
 	type NudgeReason,
-	type PithosReadyTask,
 	type RegistryEntry,
 	type TmuxService,
 } from "./services.js";
@@ -677,17 +676,28 @@ const settleNoClaimTimeout = (config: PdxConfig, entry: RegistryEntry) =>
 		});
 	});
 
-const agentPolicy = {
-	toil: { capabilities: ["triage"], mode: "afk" },
-	greed: { capabilities: ["design", "review"], mode: "hitl" },
-	war: { capabilities: ["execute"], mode: "afk" },
-	envy: { capabilities: ["intake"], mode: "afk" },
-} as const;
+type LaunchableAgent = "toil" | "greed" | "war" | "envy";
+
+const agentModes = {
+	toil: "afk",
+	greed: "hitl",
+	war: "afk",
+	envy: "afk",
+} as const satisfies Record<LaunchableAgent, "afk" | "hitl">;
+
+const agentForCapability = {
+	triage: "toil",
+	design: "greed",
+	review: "greed",
+	execute: "war",
+	intake: "envy",
+	escalate: undefined,
+} as const satisfies Record<Capability, LaunchableAgent | undefined>;
 
 const launchPreconditionTitle = (taskId: string): string => `Repair unlaunchable task ${taskId}`;
 
 const launchPreconditionBody = (input: {
-	readonly agent: "toil" | "greed" | "war" | "envy";
+	readonly agent: LaunchableAgent;
 	readonly taskId: string;
 	readonly scopeId: string;
 	readonly canonicalPath: string;
@@ -696,11 +706,11 @@ const launchPreconditionBody = (input: {
 	`pdx could not launch a queued task because its scope runtime path is not an existing directory.\n\nAgent: ${input.agent}\nTask: ${input.taskId}\nScope: ${input.scopeId}\nPath: ${input.canonicalPath}\nReason: ${input.reason}\n\nSuggested next steps: inspect the cancelled task and repair the broken chain by upserting a valid scope and superseding the task, or replan the work.`;
 
 const escalateLaunchPrecondition = (input: {
-	readonly agent: "toil" | "greed" | "war" | "envy";
+	readonly agent: LaunchableAgent;
 	readonly task: {
 		readonly id: string;
 		readonly scope_id: string;
-		readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
+		readonly capability: Capability;
 		readonly canonical_path: string | null;
 	};
 	readonly cwd: string;
@@ -729,11 +739,11 @@ const escalateLaunchPrecondition = (input: {
 	);
 
 const escalateLaunchPreconditionIfStillMatching = (input: {
-	readonly agent: "toil" | "greed" | "war" | "envy";
+	readonly agent: LaunchableAgent;
 	readonly task: {
 		readonly id: string;
 		readonly scope_id: string;
-		readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
+		readonly capability: Capability;
 		readonly canonical_path: string | null;
 	};
 	readonly cwd: string;
@@ -755,17 +765,12 @@ const escalateLaunchPreconditionIfStillMatching = (input: {
 
 const hasAgentScopeCap = (
 	entries: readonly RegistryEntry[],
-	agent: "toil" | "greed" | "war" | "envy",
+	agent: LaunchableAgent,
 	scopeId: string,
 ): boolean => entries.some((entry) => entry.agent === agent && entry.scopeId === scopeId);
 
 const hasAfkCapacity = (entries: readonly RegistryEntry[], maxAfk: number): boolean =>
 	entries.filter((entry) => entry.agent !== "pandora" && entry.mode === "afk").length < maxAfk;
-
-const policyClaimsCapability = (
-	policy: (typeof agentPolicy)[keyof typeof agentPolicy],
-	capability: PithosReadyTask["capability"],
-): boolean => policy.capabilities.some((claim) => claim === capability);
 
 const NUDGE_MARKER = "<pithos-event>escalation-ready</pithos-event>";
 const ACTIVE_WINDOW_SECONDS = 3;
@@ -918,12 +923,12 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 		const entries = yield* registry.list;
 		const ready = yield* pithos.briefing();
 		for (const agent of ["envy", "toil", "greed", "war"] as const) {
-			const policy = agentPolicy[agent];
+			const mode = agentModes[agent];
 			const task = ready.find(
 				(candidate) =>
-					policyClaimsCapability(policy, candidate.capability) &&
+					agentForCapability[candidate.capability] === agent &&
 					!hasAgentScopeCap(entries, agent, candidate.scope_id) &&
-					(policy.mode !== "afk" || hasAfkCapacity(entries, maxAfk)),
+					(mode !== "afk" || hasAfkCapacity(entries, maxAfk)),
 			);
 			if (task === undefined) continue;
 			const cwd = task.scope_kind === "global" ? config.dataDir : task.canonical_path;
@@ -958,7 +963,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			const launchedAt = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
 			const rendered = yield* spawner.renderAgent({
 				agent,
-				mode: policy.mode,
+				mode,
 				runId,
 				sessionId,
 				scopeId: task.scope_id,
@@ -986,7 +991,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			}
 			yield* pithos.runUpsert({
 				agent,
-				mode: policy.mode,
+				mode,
 				scope: task.scope_id,
 				cwd,
 				sessionId,
@@ -997,7 +1002,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			yield* registry.upsert({
 				runId,
 				agent,
-				mode: policy.mode,
+				mode,
 				scopeId: task.scope_id,
 				state: "launching",
 				logicalName: rendered.logicalName,
@@ -1010,7 +1015,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				msg: "launching agent",
 				data: {
 					agent,
-					mode: policy.mode,
+					mode,
 					run_id: runId,
 					session_id: sessionId,
 					scope_id: task.scope_id,
@@ -1042,7 +1047,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			}
 			const launched = launchResult.right;
 			const liveEntry =
-				policy.mode === "hitl"
+				mode === "hitl"
 					? launched.hitl === undefined
 						? undefined
 						: { tmuxTarget: launched.hitl.tmuxTarget }
@@ -1081,14 +1086,14 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				yield* Effect.fail(
 					new PdxError({
 						code: "PROCESS_ERROR",
-						message: `${agent} launch missing ${policy.mode} metadata`,
+						message: `${agent} launch missing ${mode} metadata`,
 					}),
 				);
 			}
 			yield* registry.upsert({
 				runId,
 				agent,
-				mode: policy.mode,
+				mode,
 				scopeId: task.scope_id,
 				state: "live",
 				logicalName: launched.logicalName,
@@ -1109,14 +1114,14 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 					harness_env_keys: Object.keys(rendered.harness.env),
 					session_log_path: launched.sessionLogPath,
 					pid: afk?.pid ?? null,
-					stdout_path: policy.mode === "afk" ? afkStdoutPath(config, runId) : null,
-					stderr_path: policy.mode === "afk" ? afkStderrPath(config, runId) : null,
+					stdout_path: mode === "afk" ? afkStdoutPath(config, runId) : null,
+					stderr_path: mode === "afk" ? afkStderrPath(config, runId) : null,
 				},
 			});
 			yield* reportLifecycle({
 				kind: "spawned",
 				agent,
-				mode: policy.mode,
+				mode,
 				runId,
 				scopeId: task.scope_id,
 				sessionId,

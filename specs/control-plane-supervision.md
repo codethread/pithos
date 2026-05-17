@@ -1,7 +1,7 @@
 # Control Plane Supervision
 
 **Status:** Implemented
-**Last Updated:** 2026-05-16
+**Last Updated:** 2026-05-17
 
 ## 1. Overview
 
@@ -99,11 +99,12 @@ Each tick settles lifecycle before spawning:
 3. handle no-claim timeouts for non-Pandora sessions that never claimed work
 4. reap non-Pandora HITL sessions after their first held Task clears
 5. continue terminating Kills until resources are gone
-6. maintain the Pandora singleton
-7. send a content-free Nudge when claimable Escalation work appears
-8. validate launch cwd for one selected claimable non-Pandora Task
-9. spawn at most one Agent through Spawner, in built-in order with Envy before Toil/Greed/War
-10. supervise the configured input hook, if any
+6. run event-pruning maintenance once on startup and then at hourly cadence
+7. maintain the Pandora singleton
+8. send a content-free Nudge when claimable Escalation work appears
+9. validate launch cwd for one selected claimable non-Pandora Task
+10. spawn at most one Agent through Spawner, in built-in order with Envy before Toil/Greed/War
+11. supervise the configured input hook, if any
 
 Registry entries in `launching`, `live`, and `terminating` states count against caps. The MVP cap is one live entry per `(Agent kind, Scope)` plus the global AFK cap.
 
@@ -142,7 +143,25 @@ pdx calls Pithos Cleanup only after it confirms the execution resource is gone. 
 
 ### Timeout
 
-A non-Pandora no-claim session that exceeds the bootstrap timeout is killed, confirmed gone, and terminalized as a Timed out run. No Task is mutated.
+A non-Pandora no-claim session that exceeds the bootstrap timeout is killed, confirmed gone, and terminalized as a Timed out run. No Task is mutated. This decision uses durable Run state (`runs.has_claimed_task`) rather than scanning retained `task.claimed` events.
+
+### Event pruning maintenance
+
+pdx invokes Pithos event pruning through the typed library boundary, not by shelling out to the `pithos` CLI.
+
+Retention semantics:
+
+- prune `run.heartbeat` and `task.heartbeat` events when `created_at < now - 1 day`
+- prune all other event types when `created_at < now - 7 days`
+- use strict older-than cutoffs so exact boundary timestamps are retained until the next eligible tick
+
+Scheduling semantics:
+
+- run once on the initial daemon reconcile tick after startup/open
+- run again only when at least one hour has elapsed since the last successful prune in daemon memory
+- log completion under Supervisor span `pdx.maintenance` with deleted counts, `last_prune_at`, and `next_due_at`
+
+Pruning is maintenance, not invariant storage: Pithos' Run timeout/launch-abort safety must remain correct even if older `task.claimed` events have been deleted.
 
 ### Launch abort
 

@@ -28,6 +28,7 @@ export { PDX_SYSTEM_RUN_ID };
 const NO_CLAIM_TIMEOUT_MILLIS = 30_000;
 const MAX_CONSECUTIVE_RECONCILE_FAILURES = 3;
 const MAX_KILL_ATTEMPTS_BEFORE_ESCALATION = 3;
+const EVENT_PRUNE_INTERVAL_MILLIS = 60 * 60 * 1000;
 
 const pidfilePath = (config: PdxConfig, runId: string): string => `${config.runsDir}/${runId}.pid`;
 const afkStdoutPath = (config: PdxConfig, runId: string): string =>
@@ -754,6 +755,47 @@ const deriveNudgeReason = (kinds: readonly string[]): NudgeReason => {
 	return "claimable_escalate";
 };
 
+const shouldPruneEvents = (
+	lastPruneAt: string | null,
+	nowIso: string,
+): Effect.Effect<boolean, PdxError> =>
+	Effect.gen(function* () {
+		if (lastPruneAt === null) return true;
+		const lastMillis = Date.parse(lastPruneAt);
+		const nowMillis = Date.parse(nowIso);
+		if (Number.isNaN(lastMillis) || Number.isNaN(nowMillis)) {
+			return yield* Effect.fail(
+				new PdxError({
+					code: "VALIDATION_ERROR",
+					message: `invalid event prune timestamp(s): last=${lastPruneAt} now=${nowIso}`,
+				}),
+			);
+		}
+		return nowMillis - lastMillis >= EVENT_PRUNE_INTERVAL_MILLIS;
+	});
+
+const pruneEventsIfDue = (nowIso: string) =>
+	Effect.gen(function* () {
+		const registry = yield* Registry;
+		const pithos = yield* PithosClient;
+		const log = yield* SupervisorLog;
+		const lastPruneAt = yield* registry.lastEventPruneAt;
+		if (!(yield* shouldPruneEvents(lastPruneAt, nowIso))) return;
+		const result = yield* pithos.pruneEvents();
+		yield* registry.setLastEventPruneAt(nowIso);
+		yield* log.write({
+			level: "info",
+			span: "pdx.maintenance",
+			msg: "event prune completed",
+			data: {
+				deleted_heartbeat: result.deleted_heartbeat,
+				deleted_other: result.deleted_other,
+				last_prune_at: nowIso,
+				next_due_at: new Date(Date.parse(nowIso) + EVENT_PRUNE_INTERVAL_MILLIS).toISOString(),
+			},
+		});
+	});
+
 const sendEscalateNudgeIfNeeded = () =>
 	Effect.gen(function* () {
 		const registry = yield* Registry;
@@ -1438,6 +1480,7 @@ export const reconcileTick = (config: PdxConfig, maxAfk = 4) =>
 				}
 			}
 		}
+		yield* pruneEventsIfDue(nowIso);
 		const entries = yield* registry.list;
 		if (!entries.some((entry) => entry.agent === "pandora")) {
 			const runId = yield* ids.nextRunId;

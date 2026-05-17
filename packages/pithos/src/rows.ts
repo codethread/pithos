@@ -14,6 +14,7 @@ export const RunRowSchema = Schema.Struct({
 	session_log_path: NonEmptyString,
 	status: Schema.Literal("live", "ended", "failed", "cancelled", "timed_out"),
 	task_id: NullableString,
+	has_claimed_task: Schema.Number,
 	session_id: NonEmptyString,
 	created_at: NonEmptyString,
 	updated_at: NonEmptyString,

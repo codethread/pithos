@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS runs (
 	session_log_path TEXT NOT NULL CHECK (length(session_log_path) > 0),
 	status TEXT NOT NULL CHECK (status IN ('live', 'ended', 'failed', 'cancelled', 'timed_out')) DEFAULT 'live',
 	task_id TEXT,
+	has_claimed_task INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -190,9 +191,16 @@ CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
 
 CREATE INDEX IF NOT EXISTS idx_task_sources_source
 	ON task_sources(source_task_id);
+
+CREATE INDEX IF NOT EXISTS idx_events_created_at
+	ON events(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_events_type_created_at
+	ON events(type, created_at);
 `);
 	ensureScopesArchivedAtColumn(db);
 	ensureScopesDescriptionColumn(db);
+	ensureRunsHasClaimedTaskColumn(db);
 	ensureRepairAlertsKindConstraint(db);
 	seed(db);
 };
@@ -208,6 +216,13 @@ const ensureScopesDescriptionColumn = (db: Db): void => {
 	const columns = db.prepare(sql`PRAGMA table_info(scopes)`).all() as { name: string }[];
 	if (!columns.some((column) => column.name === "description")) {
 		db.exec(sql`ALTER TABLE scopes ADD COLUMN description TEXT`);
+	}
+};
+
+const ensureRunsHasClaimedTaskColumn = (db: Db): void => {
+	const columns = db.prepare(sql`PRAGMA table_info(runs)`).all() as { name: string }[];
+	if (!columns.some((column) => column.name === "has_claimed_task")) {
+		db.exec(sql`ALTER TABLE runs ADD COLUMN has_claimed_task INTEGER NOT NULL DEFAULT 0`);
 	}
 };
 

@@ -89,7 +89,7 @@ Central service boundary for domain code. Controller logic depends on these inte
 - `Clock` — current ISO timestamp
 - `Ids` — run/session IDs; run IDs use the word-based format (`run_fish-butter-clam`)
 - `Tmux` — session lifecycle and operator attach helpers
-- `PithosClient` — typed Pithos operations needed by supervision
+- `PithosClient` — typed Pithos operations needed by supervision, including library-only event pruning maintenance
 - `Spawner` — render/launch/Harness session transcript operations
 - `Registry` — in-memory view of launching, live, or terminating supervised Agent runs
 - `SupervisorLog` — structured JSONL Supervisor log writer
@@ -114,7 +114,7 @@ Owns pdx behavior:
 - `initPdx` creates the data dir, initializes Pithos, creates `runs`, and materializes bundle-owned templates without touching tmux or Harness CLIs.
 - `openPdx` supports normal reuse, `--clean` runtime-state reset, and `--nuke` full data-dir reset before starting the pdx daemon tmux session and waiting for IPC readiness.
 - `runDaemon` settles startup orphans, upserts the `pdx` system Run, starts reconcile, and serves IPC.
-- `reconcileTick` performs Cleanup/settlement first, maintains Pandora, sends Nudges for new Escalation tasks, validates launch preconditions, and spawns at most one ready non-Pandora Agent run per tick. After settling, it also forks the input-hook supervisor when `hooks.input` is configured in `agents.json` and no hook child is running.
+- `reconcileTick` performs Cleanup/settlement first, runs event-pruning maintenance on daemon startup and then hourly, maintains Pandora, sends Nudges for new Escalation tasks, validates launch preconditions, and spawns at most one ready non-Pandora Agent run per tick. After settling, it also forks the input-hook supervisor when `hooks.input` is configured in `agents.json` and no hook child is running.
 - When a ready repo/worktree task's cwd is missing before run creation, pdx uses Pithos' atomic launch-precondition transition to cancel the still-queued task, create a source-linked global Repair Alert (kind=`launch_precondition`) for Pandora, and avoid creating a Run. If the cwd disappears after run creation but before launch succeeds, pdx first calls Pithos' launch-abort transition so the no-claim Run becomes `cancelled` with reason `launch_precondition_failed`, then applies the same atomic task transition.
 - `handleKillRequest` performs Interrupt in Pithos before killing the live resource and enqueues a Repair Alert (kind=`interrupt`) when a Held task was interrupted.
 - `statusPdx`, `logsShowPdx`, `runTranscriptPdx`, `runShowPdx`, and `taskShowPdx` implement operator/Pandora inspection helpers.
@@ -140,6 +140,7 @@ It owns tmux command construction and normalizes expected “missing session/ser
 ### `src/log.ts` and `src/lifecycle.ts` — observability
 
 - `SupervisorLog` writes structured JSONL Supervisor log records to `<data-dir>/pdx.jsonl`.
+- Event-pruning maintenance logs under span `pdx.maintenance` with deleted counts and next-due metadata.
 - `pdx daemon logs` reads those raw JSONL lines for operators/Pandora.
 - `LifecycleReporter` prints concise human-readable daemon-pane pulses for spawn/remove/nudge events. These are not durable Supervisor logs.
 

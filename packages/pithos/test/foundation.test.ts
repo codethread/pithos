@@ -104,6 +104,22 @@ describe("pithos foundation", () => {
 				.pluck()
 				.get(),
 		).toBe("description");
+		expect(
+			db
+				.prepare(
+					"SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_events_created_at'",
+				)
+				.pluck()
+				.get(),
+		).toContain("ON events(created_at)");
+		expect(
+			db
+				.prepare(
+					"SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_events_type_created_at'",
+				)
+				.pluck()
+				.get(),
+		).toContain("ON events(type, created_at)");
 	});
 
 	it("non-fresh init is idempotent", () => {
@@ -493,6 +509,54 @@ describe("pithos foundation", () => {
 			expect.objectContaining({ id: "event_b", type: "run.heartbeat", payload: { n: 2 } }),
 		]);
 		expect(() => engine.eventsTail({ limit: 0 })).toThrow(PithosError);
+	});
+
+	it("prunes heartbeat and non-heartbeat events with strict age cutoffs and returns counts", () => {
+		const dbPath = tempDb();
+		const db = initEngine(dbPath, true);
+		const rows = [
+			["event_old_hb", "run.heartbeat", { n: 1 }, "2026-05-06 23:59:59"],
+			["event_boundary_hb", "task.heartbeat", { n: 2 }, "2026-05-07 00:00:00"],
+			["event_fresh_hb", "run.heartbeat", { n: 3 }, "2026-05-07 00:00:01"],
+			["event_old_other", "task.created", { n: 4 }, "2026-04-30 23:59:59"],
+			["event_boundary_other", "task.failed", { n: 5 }, "2026-05-01 00:00:00"],
+			["event_fresh_other", "run.cleanup", { n: 6 }, "2026-05-01 00:00:01"],
+		] as const;
+		for (const [id, type, payload, createdAt] of rows) {
+			db.prepare("INSERT INTO events (id, type, payload_json, created_at) VALUES (?, ?, ?, ?)").run(
+				id,
+				type,
+				JSON.stringify(payload),
+				createdAt,
+			);
+		}
+		db.close();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		expect(engine.pruneEvents()).toEqual({
+			ok: true,
+			deleted_heartbeat: 1,
+			deleted_other: 1,
+		});
+		const verifyDb = new Database(dbPath);
+		const remaining = verifyDb
+			.prepare("SELECT id FROM events ORDER BY created_at ASC, id ASC")
+			.pluck()
+			.all();
+		verifyDb.close();
+		expect(remaining).toEqual([
+			"event_boundary_other",
+			"event_fresh_other",
+			"event_boundary_hb",
+			"event_fresh_hb",
+		]);
+	});
+
+	it("pruneEvents rejects non-positive retention windows", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		expect(() => engine.pruneEvents({ heartbeatOlderThanDays: 0 })).toThrow(PithosError);
+		expect(() => engine.pruneEvents({ otherOlderThanDays: -1 })).toThrow(PithosError);
 	});
 
 	it("empty claims use the no-work engine contract", () => {

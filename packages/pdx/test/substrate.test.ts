@@ -147,6 +147,7 @@ const runOutput = (
 		readonly session_id?: string;
 		readonly harness_kind?: "claude" | "pi" | "system";
 		readonly session_log_path?: string;
+		readonly has_claimed_task?: boolean;
 	} = {},
 ) => ({
 	id: overrides.id ?? "run_test",
@@ -158,6 +159,7 @@ const runOutput = (
 	session_id: overrides.session_id ?? "session_test",
 	harness_kind: overrides.harness_kind ?? "pi",
 	session_log_path: overrides.session_log_path ?? "/tmp/session_test.jsonl",
+	has_claimed_task: overrides.has_claimed_task ?? false,
 	created_at: "2026-05-09T00:00:00.000Z",
 	updated_at: "2026-05-09T00:00:00.000Z",
 });
@@ -238,6 +240,11 @@ const makePithos = (
 					...task,
 				})),
 			),
+		pruneEvents: () =>
+			Effect.sync(() => {
+				calls.push("pruneEvents");
+				return { ok: true as const, deleted_heartbeat: 0, deleted_other: 0 };
+			}),
 	};
 	return PithosClient.of({ ...base, ...overrides });
 };
@@ -1164,6 +1171,70 @@ describe("pdx substrate", () => {
 		expect((await run(registry.list)).map((entry) => entry.agent)).not.toContain("pdx");
 	});
 
+	it("daemon startup prunes events on the initial reconcile tick", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const calls: string[] = [];
+		const pithos = makePithos(calls, [], {
+			pruneEvents: () =>
+				Effect.sync(() => {
+					calls.push("pruneEvents");
+					return { ok: true as const, deleted_heartbeat: 7, deleted_other: 2 };
+				}),
+		});
+		const logRecords: { readonly span: string; readonly msg: string; readonly data?: unknown }[] =
+			[];
+		const log = SupervisorLog.of({
+			write: (record) =>
+				Effect.sync(() => {
+					logRecords.push(record);
+					return { ts: "now", ...record };
+				}),
+		});
+		const registry = await run(makeRegistry);
+		const config = await parseConfig(dataDir);
+		const handle = await run(
+			runDaemon(config, 4, 5).pipe(
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(Registry, registry),
+				Effect.provideService(
+					Ids,
+					Ids.of({
+						nextRunId: Effect.succeed("run_pandora"),
+						nextSessionId: Effect.succeed("session_pandora"),
+					}),
+				),
+				Effect.provideService(
+					Spawner,
+					makeSpawner({
+						launchAgent: (input) =>
+							Effect.succeed({
+								...input,
+								logicalName: PANDORA_TARGET,
+								hitl: { tmuxTarget: PANDORA_TARGET, panePid: 1 },
+							}),
+					}),
+				),
+				Effect.provideService(Tmux, alwaysLiveTmux),
+				Effect.provideService(Process, alwaysLiveProcess),
+			),
+		);
+		await run(handle.close);
+		expect(calls).toContain("pruneEvents");
+		expect(logRecords).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					span: "pdx.maintenance",
+					msg: "event prune completed",
+					data: expect.objectContaining({ deleted_heartbeat: 7, deleted_other: 2 }),
+				}),
+			]),
+		);
+	});
+
 	it("daemon reports Pandora launch failures in lifecycle output before later ticks retry", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
 		const records: { readonly level: string; readonly msg: string; readonly data?: unknown }[] = [];
@@ -1691,6 +1762,64 @@ describe("pdx substrate", () => {
 		await expect(
 			run(isAfkAlive(456).pipe(Effect.provideService(Process, deadProcess))),
 		).resolves.toBe(false);
+	});
+
+	it("reconcile prunes on startup and then hourly cadence only", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(upsertPandora(registry));
+		const calls: string[] = [];
+		const pithos = makePithos(calls, [], {
+			pruneEvents: () =>
+				Effect.sync(() => {
+					calls.push("pruneEvents");
+					return { ok: true as const, deleted_heartbeat: 1, deleted_other: 0 };
+				}),
+		});
+		const logs: { readonly span: string; readonly msg: string }[] = [];
+		const log = SupervisorLog.of({
+			write: (record) =>
+				Effect.sync(() => {
+					logs.push({ span: record.span, msg: record.msg });
+					return { ts: "now", ...record };
+				}),
+		});
+		const runTickAt = async (nowIso: string) =>
+			run(
+				reconcileTick(await parseConfig(dataDir)).pipe(
+					Effect.provideService(Registry, registry),
+					Effect.provideService(PithosClient, pithos),
+					Effect.provideService(
+						Ids,
+						Ids.of({
+							nextRunId: Effect.succeed("run_unused"),
+							nextSessionId: Effect.succeed("session_unused"),
+						}),
+					),
+					Effect.provideService(
+						Spawner,
+						makeSpawner({
+							launchAgent: () =>
+								Effect.fail(new PdxError({ code: "PROCESS_ERROR", message: "unexpected launch" })),
+						}),
+					),
+					Effect.provideService(Tmux, alwaysLiveTmux),
+					Effect.provideService(Process, alwaysLiveProcess),
+					Effect.provideService(SupervisorLog, log),
+					Effect.provideService(LifecycleReporter, testLifecycle),
+					Effect.provideService(FileSystem, noopFs),
+					Effect.provideService(Clock, Clock.of({ nowIso: Effect.succeed(nowIso) })),
+				),
+			);
+		await runTickAt("2026-05-09T00:00:00.000Z");
+		await runTickAt("2026-05-09T00:59:59.000Z");
+		await runTickAt("2026-05-09T01:00:00.000Z");
+		expect(calls.filter((call) => call === "pruneEvents")).toHaveLength(2);
+		expect(
+			logs.filter(
+				(record) => record.span === "pdx.maintenance" && record.msg === "event prune completed",
+			),
+		).toHaveLength(2);
 	});
 
 	it("reconcile cleans dead Pandora and respawns with a fresh run id", async () => {
@@ -3029,6 +3158,7 @@ describe("pdx substrate", () => {
 		expect(calls.filter((call) => !call.startsWith("taskHeartbeat:"))).toEqual([
 			"kill:456:SIGTERM",
 			"runTimeout:run_timeout:no_claim_timeout",
+			"pruneEvents",
 		]);
 		expect(removes).toContain(`${config.runsDir}/run_timeout.pid`);
 		expect(await run(registry.list)).toEqual([expect.objectContaining({ runId: "run_pandora" })]);

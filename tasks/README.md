@@ -34,3 +34,10 @@ Append notes here. Do not rewrite earlier notes.
 - Deep review found that adding `review` to Greed claims affects pdx launch policy and Spawner claim rendering, not only Pithos built-ins. Task 1 now explicitly includes pdx/Spawner integration and tests.
 - Task 2 now carries the prompt-only scope policy, global review payload requirements, rejected-review outcome behavior, and preview validation.
 - Task 3 now includes the root `README.md` in permanent docs fold-in.
+
+### Task 1 implementation — 2026-05-17
+
+- Added `review` as a built-in Capability, Greed claim, and Pandora/Toil enqueue target; kept Greed/War/Envy unauthorized for `review` enqueues and Pandora/Toil/War/Envy unauthorized for `review` claims.
+- pdx now treats claimable `design` and `review` work as Greed launches and passes the launch-selected Capability through to Spawner.
+- Spawner now requires an authorized `selectedCapability` for multi-claim agents and renders the deterministic claim command for that Capability.
+- `review` uses ordinary chain-policy dependency behavior; `escalate` remains the only source-link special case.

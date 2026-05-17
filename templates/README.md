@@ -88,13 +88,13 @@ Supported config fields remain the same conceptual surface as before:
 
 Current built-in claim/enqueue contract:
 
-| Agent kind | Mode today | Claims     | Enqueues                                  |
-| ---------- | ---------- | ---------- | ----------------------------------------- |
-| `pandora`  | `hitl`     | `escalate` | `triage`, `design`, `escalate`            |
-| `toil`     | `afk`      | `triage`   | `triage`, `design`, `execute`, `escalate` |
-| `greed`    | `hitl`     | `design`   | `triage`, `design`, `escalate`            |
-| `war`      | `afk`      | `execute`  | `escalate`                                |
-| `envy`     | `afk`      | `intake`   | `triage`, `design`, `escalate`            |
+| Agent kind | Mode today | Claims             | Enqueues                                            |
+| ---------- | ---------- | ------------------ | --------------------------------------------------- |
+| `pandora`  | `hitl`     | `escalate`         | `triage`, `design`, `execute`, `review`, `escalate` |
+| `toil`     | `afk`      | `triage`           | `triage`, `design`, `execute`, `review`, `escalate` |
+| `greed`    | `hitl`     | `design`, `review` | `triage`, `design`, `escalate`                      |
+| `war`      | `afk`      | `execute`          | `escalate`                                          |
+| `envy`     | `afk`      | `intake`           | `triage`, `design`, `escalate`                      |
 
 Built-in claim/enqueue authorization stays in Pithos. If you change Agent kinds or Capabilities, update Pithos built-ins and keep the manifest's agent roster aligned.
 

@@ -18,6 +18,7 @@ import {
 	Tmux,
 	type HookExecutorService,
 	type NudgeReason,
+	type PithosReadyTask,
 	type RegistryEntry,
 	type TmuxService,
 } from "./services.js";
@@ -677,10 +678,10 @@ const settleNoClaimTimeout = (config: PdxConfig, entry: RegistryEntry) =>
 	});
 
 const agentPolicy = {
-	toil: { capability: "triage", mode: "afk" },
-	greed: { capability: "design", mode: "hitl" },
-	war: { capability: "execute", mode: "afk" },
-	envy: { capability: "intake", mode: "afk" },
+	toil: { capabilities: ["triage"], mode: "afk" },
+	greed: { capabilities: ["design", "review"], mode: "hitl" },
+	war: { capabilities: ["execute"], mode: "afk" },
+	envy: { capabilities: ["intake"], mode: "afk" },
 } as const;
 
 const launchPreconditionTitle = (taskId: string): string => `Repair unlaunchable task ${taskId}`;
@@ -699,7 +700,7 @@ const escalateLaunchPrecondition = (input: {
 	readonly task: {
 		readonly id: string;
 		readonly scope_id: string;
-		readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
+		readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 		readonly canonical_path: string | null;
 	};
 	readonly cwd: string;
@@ -732,7 +733,7 @@ const escalateLaunchPreconditionIfStillMatching = (input: {
 	readonly task: {
 		readonly id: string;
 		readonly scope_id: string;
-		readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
+		readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 		readonly canonical_path: string | null;
 	};
 	readonly cwd: string;
@@ -760,6 +761,11 @@ const hasAgentScopeCap = (
 
 const hasAfkCapacity = (entries: readonly RegistryEntry[], maxAfk: number): boolean =>
 	entries.filter((entry) => entry.agent !== "pandora" && entry.mode === "afk").length < maxAfk;
+
+const policyClaimsCapability = (
+	policy: (typeof agentPolicy)[keyof typeof agentPolicy],
+	capability: PithosReadyTask["capability"],
+): boolean => policy.capabilities.some((claim) => claim === capability);
 
 const NUDGE_MARKER = "<pithos-event>escalation-ready</pithos-event>";
 const ACTIVE_WINDOW_SECONDS = 3;
@@ -915,7 +921,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			const policy = agentPolicy[agent];
 			const task = ready.find(
 				(candidate) =>
-					candidate.capability === policy.capability &&
+					policyClaimsCapability(policy, candidate.capability) &&
 					!hasAgentScopeCap(entries, agent, candidate.scope_id) &&
 					(policy.mode !== "afk" || hasAfkCapacity(entries, maxAfk)),
 			);
@@ -958,6 +964,7 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 				scopeId: task.scope_id,
 				cwd,
 				...(task.parent_repo_path === null ? {} : { parentRepoPath: task.parent_repo_path }),
+				selectedCapability: task.capability,
 			});
 			const cwdExistsBeforeRunUpsert = yield* cwdExists(cwd);
 			if (!cwdExistsBeforeRunUpsert) {

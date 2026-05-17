@@ -715,11 +715,12 @@ export const makePithosCommand = (ctx: CliContext) => {
 		"triage",
 		"design",
 		"execute",
+		"review",
 		"escalate",
 		"intake",
 	] as const).pipe(
 		Options.withDescription(
-			"Task capability used for claim authorization: triage, design, execute, escalate, or intake.",
+			"Task capability used for claim authorization: triage, design, execute, review, escalate, or intake.",
 		),
 	);
 	const taskEnqueue = Command.make(

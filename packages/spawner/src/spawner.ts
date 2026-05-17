@@ -3,6 +3,7 @@ import {
 	BUILTIN_AGENT_CLAIMS,
 	BUILTIN_AGENT_ENQUEUES,
 	BUILTIN_SPAWNABLE_AGENT_KINDS,
+	type Capability,
 	type SpawnableAgentKind,
 } from "@pdx/pithos/builtins";
 import { Either, ParseResult, Schema } from "effect";
@@ -34,6 +35,7 @@ export interface RenderAgentInput {
 	readonly scopeId: string;
 	readonly cwd: string;
 	readonly parentRepoPath?: string;
+	readonly selectedCapability?: Capability;
 }
 
 const HarnessKindSchema = Schema.Literal("claude", "pi");
@@ -137,22 +139,34 @@ export type { HooksConfig } from "./manifest.js";
 export const loadHooks = (services: RenderServices = LiveSpawnerServices): HooksConfig =>
 	loadResolvedHooks(services);
 
-const claimForAgent = (agent: SpawnableAgentKind): string => {
+const claimForAgent = (
+	agent: SpawnableAgentKind,
+	selectedCapability: Capability | undefined,
+): string => {
 	const claims = BUILTIN_AGENT_CLAIMS[agent];
-	if (claims.length !== 1) {
+	if (claims.length === 1) {
+		const [claim] = claims;
+		if (selectedCapability !== undefined && selectedCapability !== claim) {
+			throw new SpawnerError({
+				code: "VALIDATION_ERROR",
+				message: `${agent}: selected capability ${selectedCapability} is not authorized`,
+			});
+		}
+		return claim;
+	}
+	if (selectedCapability === undefined) {
 		throw new SpawnerError({
 			code: "VALIDATION_ERROR",
-			message: `${agent}: MVP requires exactly one claim capability`,
+			message: `${agent}: selectedCapability is required for multi-claim render`,
 		});
 	}
-	const claim = claims[0];
-	if (claim === undefined) {
+	if (!(claims as readonly string[]).includes(selectedCapability)) {
 		throw new SpawnerError({
 			code: "VALIDATION_ERROR",
-			message: `${agent}: missing claim capability`,
+			message: `${agent}: selected capability ${selectedCapability} is not authorized`,
 		});
 	}
-	return claim;
+	return selectedCapability;
 };
 
 const renderTemplate = (template: string, ctx: Record<string, string>): string =>
@@ -589,7 +603,7 @@ export const renderAgent = (
 			message: `${input.agent} manifest mode ${expectedMode} does not match requested mode ${input.mode}`,
 		});
 	}
-	const claim = claimForAgent(input.agent);
+	const claim = claimForAgent(input.agent, input.selectedCapability);
 	const claims = BUILTIN_AGENT_CLAIMS[input.agent];
 	const enqueues = BUILTIN_AGENT_ENQUEUES[input.agent];
 	const includeAssets = manifest.includes.map((include) =>

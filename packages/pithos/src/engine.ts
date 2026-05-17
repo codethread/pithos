@@ -316,7 +316,7 @@ const taskStatusColor = (status: TaskStatus): string => {
 	}
 };
 
-const capabilityColor = (_capability: Capability): string => `${ansi.dim}${ansi.cyan}`;
+const capabilityColor = (): string => `${ansi.dim}${ansi.cyan}`;
 
 const taskTitleLineColored = (
 	task: {
@@ -330,7 +330,7 @@ const taskTitleLineColored = (
 ): string => {
 	if (!enabled) return taskTitleLine(task);
 	const status = effectiveTaskStatus(task);
-	return `${color(enabled, taskStatusColor(task.status), task.id)} ${color(enabled, capabilityColor(task.capability), `[${task.capability}]`)} [${status}] ${task.title}`;
+	return `${color(enabled, taskStatusColor(task.status), task.id)} ${color(enabled, capabilityColor(), `[${task.capability}]`)} [${status}] ${task.title}`;
 };
 
 const fencedMarkdown = (body: string): string => {

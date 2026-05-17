@@ -90,7 +90,7 @@ const pithosHelpTree = {
 					name: "claim",
 					path: "pithos task claim",
 					usage:
-						"claim [--run text] --scope text --capability triage | design | execute | escalate",
+						"claim [--run text] --scope text --capability triage | design | execute | review | escalate",
 					description: "Claim one claimable task for a run and return its fencing token.",
 					subcommands: [],
 				},
@@ -140,7 +140,7 @@ const pithosHelpTree = {
 					name: "enqueue",
 					path: "pithos task enqueue",
 					usage:
-						"enqueue [--run text] --scope text --capability triage | design | execute | escalate --title text [--stdin] [--chain auto | none]",
+						"enqueue [--run text] --scope text --capability triage | design | execute | review | escalate --title text [--stdin] [--chain auto | none]",
 					description: "Create a new queued task.",
 					subcommands: [],
 				},
@@ -483,7 +483,12 @@ describe("bundled agent templates", () => {
 		["envy", "afk", false],
 	] as const)("render %s bundled template", (agent, mode, expectsCwdGuard) => {
 		const rendered = renderAgent(
-			{ ...base, agent, mode },
+			{
+				...base,
+				agent,
+				mode,
+				...(agent === "greed" ? { selectedCapability: "design" as const } : {}),
+			},
 			{
 				readText: (path: string) => readFileSync(path, "utf8"),
 				env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
@@ -620,6 +625,37 @@ describe("renderAgent", () => {
 		expect(rendered.harness.env).not.toHaveProperty("PATH");
 	});
 
+	it.each(["design", "review"] as const)(
+		"renders Greed claim command for selected %s work",
+		(selectedCapability) => {
+			const rendered = renderAgent(
+				{ ...base, agent: "greed", mode: "hitl", selectedCapability },
+				fakeRenderServices(agentsFile({ agent: "greed", mode: "hitl", harnessKind: "pi" })),
+			);
+			expect(rendered.prompt).toContain(
+				`pithos task claim --run ${base.runId} --scope ${base.scopeId} --capability ${selectedCapability}`,
+			);
+		},
+	);
+
+	it("fails loudly when multi-claim Greed render omits selected capability", () => {
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "greed", mode: "hitl" },
+				fakeRenderServices(agentsFile({ agent: "greed", mode: "hitl", harnessKind: "pi" })),
+			),
+		).toThrow(/selectedCapability is required/);
+	});
+
+	it("fails loudly when Greed selected capability is unauthorized", () => {
+		expect(() =>
+			renderAgent(
+				{ ...base, agent: "greed", mode: "hitl", selectedCapability: "execute" },
+				fakeRenderServices(agentsFile({ agent: "greed", mode: "hitl", harnessKind: "pi" })),
+			),
+		).toThrow(/selected capability execute is not authorized/);
+	});
+
 	it.each(["pi", "claude"] as const)(
 		"renders the begin bootstrap arg for %s HITL sessions",
 		(harnessKind) => {
@@ -681,6 +717,7 @@ describe("renderAgent", () => {
 				scopeId: `worktree:${cwd}`,
 				cwd,
 				parentRepoPath: `${homedir()}/dev/pandoras-box`,
+				selectedCapability: "design",
 			},
 			{
 				readText: (path: string) => {
@@ -803,7 +840,7 @@ describe("renderAgent", () => {
 			"- Use to abandon non-held work, not normal successful completion.",
 		);
 		expect(rendered.prompt).toContain(
-			"```sh\npithos task claim [--run text] --scope text --capability triage | design | execute | escalate\n```",
+			"```sh\npithos task claim [--run text] --scope text --capability triage | design | execute | review | escalate\n```",
 		);
 
 		expect(rendered.prompt).toContain(
@@ -822,7 +859,12 @@ describe("renderAgent", () => {
 	it("renders scope command reference for routing agents", () => {
 		for (const agent of ["toil", "greed", "envy"] as const) {
 			const rendered = renderAgent(
-				{ ...base, agent, mode: agent === "greed" ? "hitl" : "afk" },
+				{
+					...base,
+					agent,
+					mode: agent === "greed" ? "hitl" : "afk",
+					...(agent === "greed" ? { selectedCapability: "design" as const } : {}),
+				},
 				fakeRenderServices(
 					agentsFile({
 						agent,

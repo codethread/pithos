@@ -76,7 +76,7 @@ export interface PithosReadyTask {
 	readonly scope_kind: "global" | "repo" | "worktree";
 	readonly canonical_path: string | null;
 	readonly parent_repo_path: string | null;
-	readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
+	readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 }
 
 export interface PithosPruneEventsResult {
@@ -130,7 +130,7 @@ export interface PithosClientService {
 				readonly id: string;
 				readonly status: string;
 				readonly scope_id: string;
-				readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
+				readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 				readonly canonical_path: string | null;
 			};
 		},
@@ -139,7 +139,7 @@ export interface PithosClientService {
 	readonly taskHeartbeat: (input: { readonly runId: string }) => Effect.Effect<void, PdxError>;
 	readonly taskEnqueue: (input: {
 		readonly scope: string;
-		readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
+		readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 		readonly title: string;
 		readonly body: string;
 		readonly runId?: string;
@@ -149,7 +149,7 @@ export interface PithosClientService {
 		readonly runId: string;
 		readonly expectedTaskId: string;
 		readonly expectedScopeId: string;
-		readonly expectedCapability: "triage" | "design" | "execute" | "escalate" | "intake";
+		readonly expectedCapability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 		readonly canonicalPath: string;
 		readonly agentKind: string;
 		readonly reason: string;
@@ -180,6 +180,7 @@ export interface LaunchAgentInput {
 	readonly scopeId: string;
 	readonly cwd: string;
 	readonly parentRepoPath?: string;
+	readonly selectedCapability?: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 }
 
 export type RenderedAgent = SpawnerRenderedAgent;

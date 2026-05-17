@@ -23,7 +23,7 @@ export const RunRowSchema = Schema.Struct({
 export const TaskRowSchema = Schema.Struct({
 	id: NonEmptyString,
 	scope_id: NonEmptyString,
-	capability: Schema.Literal("triage", "design", "execute", "escalate", "intake"),
+	capability: Schema.Literal("triage", "design", "execute", "review", "escalate", "intake"),
 	title: Schema.String,
 	body: Schema.String,
 	status: Schema.Literal(

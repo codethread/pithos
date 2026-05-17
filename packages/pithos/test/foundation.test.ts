@@ -63,7 +63,14 @@ describe("pithos foundation", () => {
 				.prepare("SELECT agent_kind || ':' || capability FROM agent_claims ORDER BY 1")
 				.pluck()
 				.all(),
-		).toEqual(["envy:intake", "greed:design", "pandora:escalate", "toil:triage", "war:execute"]);
+		).toEqual([
+			"envy:intake",
+			"greed:design",
+			"greed:review",
+			"pandora:escalate",
+			"toil:triage",
+			"war:execute",
+		]);
 		expect(
 			db
 				.prepare("SELECT agent_kind || ':' || capability FROM agent_enqueues ORDER BY 1")
@@ -78,12 +85,15 @@ describe("pithos foundation", () => {
 			"greed:triage",
 			"pandora:design",
 			"pandora:escalate",
+			"pandora:execute",
+			"pandora:review",
 			"pandora:triage",
 			"pdx:escalate",
 			"pdx:intake",
 			"toil:design",
 			"toil:escalate",
 			"toil:execute",
+			"toil:review",
 			"toil:triage",
 			"war:escalate",
 		]);
@@ -129,7 +139,7 @@ describe("pithos foundation", () => {
 		initEngine(dbPath).close();
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT COUNT(*) FROM agent_kinds").pluck().get()).toBe(6);
-		expect(db.prepare("SELECT COUNT(*) FROM agent_enqueues").pluck().get()).toBe(16);
+		expect(db.prepare("SELECT COUNT(*) FROM agent_enqueues").pluck().get()).toBe(19);
 	});
 
 	it("exported built-in contract matches seeded rows", () => {
@@ -594,6 +604,60 @@ describe("pithos foundation", () => {
 		engine.init({ fresh: true });
 		expect(() => engine.pruneEvents({ heartbeatOlderThanDays: 0 })).toThrow(PithosError);
 		expect(() => engine.pruneEvents({ otherOlderThanDays: -1 })).toThrow(PithosError);
+	});
+
+	it("authorizes review claims and enqueues for the scoped review contract", () => {
+		const dbPath = tempDb();
+		const engine = makeEngine({ config: { dbPath }, services: services() });
+		engine.init({ fresh: true });
+		for (const agent of ["greed", "war", "envy", "pandora", "toil"] as const) {
+			engine.runUpsert({
+				agent,
+				mode: agent === "greed" || agent === "pandora" ? "hitl" : "afk",
+				scope: "global",
+				cwd: "/tmp",
+				sessionId: `session_${agent}`,
+				harnessKind: "claude",
+				sessionLogPath: `/tmp/session_${agent}.jsonl`,
+				runId: `run_${agent}`,
+			});
+		}
+		const reviewInput = (runId: string, title: string) => ({
+			runId,
+			scope: "global",
+			capability: "review" as const,
+			title,
+			body: "review body",
+			bodyFile: undefined,
+			dependsOn: [],
+			chain: "none" as const,
+		});
+		expect(engine.enqueue(reviewInput("run_pandora", "Review"))).toMatchObject({
+			task: { status: "queued" },
+		});
+		expect(engine.enqueue(reviewInput("run_toil", "Review 2"))).toMatchObject({
+			task: { status: "queued" },
+		});
+		expect(() => engine.enqueue(reviewInput("run_greed", "Bad"))).toThrow(/not authorized/);
+		expect(() => engine.enqueue(reviewInput("run_war", "Bad"))).toThrow(/not authorized/);
+		expect(() => engine.enqueue(reviewInput("run_envy", "Bad"))).toThrow(/not authorized/);
+		expect(
+			engine.claim({ runId: "run_greed", scope: "global", capability: "review" }),
+		).toMatchObject({
+			task: { status: "claimed", capability: "review" },
+		});
+		expect(() =>
+			engine.claim({ runId: "run_pandora", scope: "global", capability: "review" }),
+		).toThrow(/not authorized/);
+		expect(() =>
+			engine.claim({ runId: "run_toil", scope: "global", capability: "review" }),
+		).toThrow(/not authorized/);
+		expect(() => engine.claim({ runId: "run_war", scope: "global", capability: "review" })).toThrow(
+			/not authorized/,
+		);
+		expect(() =>
+			engine.claim({ runId: "run_envy", scope: "global", capability: "review" }),
+		).toThrow(/not authorized/);
 	});
 
 	it("empty claims use the no-work engine contract", () => {

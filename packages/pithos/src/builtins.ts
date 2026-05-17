@@ -4,7 +4,14 @@ export const BUILTIN_AGENT_KINDS = [
 	...BUILTIN_SYSTEM_ACTORS,
 	...BUILTIN_SPAWNABLE_AGENT_KINDS,
 ] as const;
-export const BUILTIN_CAPABILITIES = ["triage", "design", "execute", "escalate", "intake"] as const;
+export const BUILTIN_CAPABILITIES = [
+	"triage",
+	"design",
+	"execute",
+	"review",
+	"escalate",
+	"intake",
+] as const;
 
 export type SystemActor = (typeof BUILTIN_SYSTEM_ACTORS)[number];
 export type SpawnableAgentKind = (typeof BUILTIN_SPAWNABLE_AGENT_KINDS)[number];
@@ -14,15 +21,15 @@ export type Capability = (typeof BUILTIN_CAPABILITIES)[number];
 export const BUILTIN_AGENT_CLAIMS = {
 	pandora: ["escalate"],
 	toil: ["triage"],
-	greed: ["design"],
+	greed: ["design", "review"],
 	war: ["execute"],
 	envy: ["intake"],
 } as const satisfies Partial<Record<AgentKind, readonly Capability[]>>;
 
 export const BUILTIN_AGENT_ENQUEUES = {
 	pdx: ["escalate", "intake"],
-	pandora: ["triage", "design", "escalate"],
-	toil: ["triage", "design", "execute", "escalate"],
+	pandora: ["triage", "design", "execute", "review", "escalate"],
+	toil: ["triage", "design", "execute", "review", "escalate"],
 	greed: ["triage", "design", "escalate"],
 	war: ["escalate"],
 	envy: ["triage", "design", "escalate"],

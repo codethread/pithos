@@ -1,6 +1,6 @@
 import { PithosError } from "./errors.js";
 
-export type ChainCapability = "triage" | "design" | "execute" | "escalate" | "intake";
+export type ChainCapability = "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 export type ChainPolicy = "auto" | "none" | "held" | "source";
 export type SourceKind = "chain_source" | "repair_source";
 

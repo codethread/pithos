@@ -1,9 +1,12 @@
+import { BUILTIN_CAPABILITIES } from "@pdx/pithos/builtins";
 import { CliConfig, Command, Options } from "@effect/cli";
 import * as ValidationError from "@effect/cli/ValidationError";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer, Option, ParseResult, Schema } from "effect";
 import { SpawnerError, exitCodeFor, type ErrorCode } from "./errors.js";
 import { AgentKindSchema, ModeSchema, renderAgent } from "./spawner.js";
+
+const CapabilitySchema = Schema.Literal(...BUILTIN_CAPABILITIES);
 
 const PreviewInputSchema = Schema.Struct({
 	agent: AgentKindSchema,
@@ -13,6 +16,7 @@ const PreviewInputSchema = Schema.Struct({
 	scopeId: Schema.NonEmptyString,
 	cwd: Schema.NonEmptyString,
 	parentRepoPath: Schema.optional(Schema.NonEmptyString),
+	selectedCapability: Schema.optional(CapabilitySchema),
 });
 
 type PreviewInput = Schema.Schema.Type<typeof PreviewInputSchema>;
@@ -53,6 +57,9 @@ const preview = (raw: PreviewInput) =>
 				scopeId: input.scopeId,
 				cwd: input.cwd,
 				...(input.parentRepoPath === undefined ? {} : { parentRepoPath: input.parentRepoPath }),
+				...(input.selectedCapability === undefined
+					? {}
+					: { selectedCapability: input.selectedCapability }),
 			}),
 		);
 	});
@@ -62,7 +69,7 @@ const previewCommand = Command.make(
 	{
 		agent: Options.text("agent").pipe(
 			Options.withSchema(AgentKindSchema),
-			Options.withDescription("Agent kind: pandora, toil, greed, or war"),
+			Options.withDescription("Agent kind: pandora, toil, greed, war, or envy"),
 		),
 		mode: Options.choice("mode", ["afk", "hitl"] as const).pipe(
 			Options.withDescription("Launch mode; must match manifest"),
@@ -86,8 +93,13 @@ const previewCommand = Command.make(
 		parentRepoPath: Options.optional(Options.text("parent-repo")).pipe(
 			Options.withDescription("Durable parent repo root for worktree scope previews"),
 		),
+		selectedCapability: Options.optional(
+			Options.text("selected-capability").pipe(Options.withSchema(CapabilitySchema)),
+		).pipe(
+			Options.withDescription("Launch-selected task capability for multi-claim agent previews"),
+		),
 	},
-	({ agent, mode, scopeId, runId, sessionId, cwd, parentRepoPath }) =>
+	({ agent, mode, scopeId, runId, sessionId, cwd, parentRepoPath, selectedCapability }) =>
 		preview({
 			agent,
 			mode,
@@ -96,6 +108,9 @@ const previewCommand = Command.make(
 			sessionId,
 			cwd,
 			...(opt(parentRepoPath) === undefined ? {} : { parentRepoPath: opt(parentRepoPath) }),
+			...(opt(selectedCapability) === undefined
+				? {}
+				: { selectedCapability: opt(selectedCapability) }),
 		}),
 ).pipe(
 	Command.withDescription(

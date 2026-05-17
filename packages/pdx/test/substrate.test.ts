@@ -141,7 +141,7 @@ const parseConfig = (dataDir: string, envHome = "/tmp/user-home") =>
 interface ReadyTaskInput {
 	readonly id?: string;
 	readonly scope_id: string;
-	readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
+	readonly capability: "triage" | "design" | "execute" | "review" | "escalate" | "intake";
 	readonly scope_kind?: "global" | "repo" | "worktree";
 	readonly canonical_path?: string | null;
 	readonly parent_repo_path?: string | null;
@@ -3007,7 +3007,88 @@ describe("pdx substrate", () => {
 			),
 		);
 		expect(launches).toEqual([
-			expect.objectContaining({ agent: "greed", cwd: "/wt", scopeId: "scope_greed" }),
+			expect.objectContaining({
+				agent: "greed",
+				cwd: "/wt",
+				scopeId: "scope_greed",
+				selectedCapability: "design",
+			}),
+		]);
+	});
+
+	it("spawns Greed for review work and passes the selected capability", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-test-"));
+		const registry = await run(makeRegistry);
+		await run(
+			registry.upsert({
+				runId: "run_pandora",
+				agent: "pandora",
+				scopeId: "global",
+				mode: "hitl",
+				state: "live",
+				logicalName: PANDORA_TARGET,
+				tmuxTarget: PANDORA_TARGET,
+			}),
+		);
+		const pithos = makePithos(
+			[],
+			[
+				{
+					scope_id: "scope_review",
+					capability: "review",
+					scope_kind: "repo",
+					canonical_path: "/repo",
+				},
+			],
+		);
+		const ids = Ids.of({
+			nextRunId: Effect.succeed("run_greed_review"),
+			nextSessionId: Effect.succeed("session_greed_review"),
+		});
+		const launches: unknown[] = [];
+		const spawner = makeSpawner({
+			launchAgent: (input) =>
+				Effect.sync(() => {
+					launches.push(input);
+					return {
+						...input,
+						logicalName: "pdx--greed",
+						hitl: { tmuxTarget: "pdx--greed", panePid: 1 },
+					};
+				}),
+		});
+		const log = SupervisorLog.of({ write: (record) => Effect.succeed({ ts: "now", ...record }) });
+		const tmux = Tmux.of({
+			hasSession: () => Effect.succeed(true),
+			lsSessions: () => Effect.succeed([]),
+			newSession: () => Effect.void,
+			killSession: () => Effect.void,
+			switchClient: () => Effect.void,
+			sendLiteralLine: () => Effect.void,
+			pasteBuffer: () => Effect.void,
+			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
+		});
+		await run(
+			reconcileTick(await parseConfig(dataDir)).pipe(
+				Effect.provideService(Registry, registry),
+				Effect.provideService(PithosClient, pithos),
+				Effect.provideService(Ids, ids),
+				Effect.provideService(Spawner, spawner),
+				Effect.provideService(Tmux, tmux),
+				Effect.provideService(SupervisorLog, log),
+				Effect.provideService(LifecycleReporter, testLifecycle),
+				Effect.provideService(FileSystem, noopFs),
+				Effect.provideService(Clock, testClock),
+			),
+		);
+		expect(launches).toEqual([
+			expect.objectContaining({
+				agent: "greed",
+				mode: "hitl",
+				cwd: "/repo",
+				scopeId: "scope_review",
+				selectedCapability: "review",
+			}),
 		]);
 	});
 

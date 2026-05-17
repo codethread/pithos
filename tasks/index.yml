@@ -1,0 +1,21 @@
+tasks:
+  - id: 1
+    description: Add review capability contract
+    task_file: tasks/001-add-review-capability-contract.md
+    status: pending
+    blocked_by: []
+  - id: 2
+    description: Teach agents review workflow
+    task_file: tasks/002-teach-agents-review-workflow.md
+    status: pending
+    blocked_by: [1]
+  - id: 3
+    description: Fold review into base docs
+    task_file: tasks/003-fold-review-into-base-docs.md
+    status: pending
+    blocked_by: [1, 2]
+  - id: 4
+    description: Verify review integration
+    task_file: tasks/004-verify-review-integration.md
+    status: pending
+    blocked_by: [1, 2, 3]

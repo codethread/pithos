@@ -509,6 +509,54 @@ describe("bundled agent templates", () => {
 		expect(rendered.prompt).not.toContain("Repository default-branch guard");
 	});
 
+	it("teaches Greed design and review modes in bundled prompt", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "greed", mode: "hitl", selectedCapability: "review" },
+			{
+				readText: (path: string) => readFileSync(path, "utf8"),
+				env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
+				execFile: (file: string, args: readonly string[]) => {
+					const basename = file.split("/").at(-1);
+					if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
+						return { status: 0, stdout: pithosHelpJson, stderr: "" };
+					}
+					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+				},
+			},
+		);
+		expect(rendered.prompt).toContain("## Design mode (`design`)");
+		expect(rendered.prompt).toContain("## Review mode (`review`)");
+		expect(rendered.prompt).toContain("Attach `review-report` and complete");
+		expect(rendered.prompt).toContain("If the user rejects the work or asks for changes");
+	});
+
+	it("teaches Pandora and Toil requested review routing without automatic gates", () => {
+		const services = {
+			readText: (path: string) => readFileSync(path, "utf8"),
+			env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
+			execFile: (file: string, args: readonly string[]) => {
+				const basename = file.split("/").at(-1);
+				if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
+					return { status: 0, stdout: pithosHelpJson, stderr: "" };
+				}
+				if (basename === "pdx" && args.length === 1 && args[0] === "--help-json") {
+					return { status: 0, stdout: pdxHelpJson, stderr: "" };
+				}
+				return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
+			},
+		};
+		const pandora = renderAgent({ ...base, agent: "pandora", mode: "hitl" }, services);
+		const toil = renderAgent({ ...base, agent: "toil", mode: "afk" }, services);
+		expect(pandora.prompt).toContain(
+			"Enqueue `review` only when the user or task chain explicitly requests",
+		);
+		expect(pandora.prompt).toContain("Greed says a review task is ready for HITL walkthrough");
+		expect(toil.prompt).toContain(
+			"Enqueue `review` only when triage instructions or the user request",
+		);
+		expect(toil.prompt).toContain("do not add review gates by default");
+	});
+
 	it("keeps bundled Pandora sitrep flow aligned with briefing before graph inspect", () => {
 		const rendered = renderAgent(
 			{ ...base, agent: "pandora", mode: "hitl" },

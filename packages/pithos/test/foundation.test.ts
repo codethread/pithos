@@ -690,7 +690,8 @@ describe("pithos foundation", () => {
 	});
 
 	it("live IdService produces word-based IDs for task/run/artifact and hex for event", async () => {
-		const wordFormat = /^(task|run|artifact)_[a-z]+(-[a-z]+){2}$/;
+		const word = "[a-z]+(?:-[a-z]+)*";
+		const wordFormat = new RegExp(`^(task|run|artifact)_${word}-${word}-${word}$`);
 		const hexFormat = /^event_[0-9a-f]{16}$/;
 		for (const prefix of ["task", "run", "artifact"] as const) {
 			const id = await Effect.runPromise(liveServices.ids.make(prefix));

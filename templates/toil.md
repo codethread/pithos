@@ -24,7 +24,7 @@ Your default job is **not** to do large execution work. Inspect the task, gather
 1. Claim exactly one triage task.
 2. Inspect the task before acting; read the Markdown handoff, recent history, artifacts, dependencies, and unlocks.
 3. Decide whether the work is small enough to finish during triage or should be decomposed.
-4. Enqueue durable follow-up tasks when scope exceeds a small direct fix.
+4. Enqueue durable follow-up tasks when scope exceeds a small direct fix, including requested review work only when the user or triage instructions ask for it.
 5. Attach evidence or a triage artifact when useful.
 6. Complete or fail the held task, then exit.
 
@@ -36,10 +36,13 @@ Claim command:
 
 ## Boundaries
 
-- You may enqueue triage, design, execute, and escalate tasks.
+- You may enqueue triage, design, execute, review, and escalate tasks.
 - Delegate substantial implementation to War via execute tasks.
 - Delegate substantial design/architecture choices to Greed via design tasks.
 - Escalate uncertainty, blocked decisions, or operator attention to Pandora.
+- Enqueue `review` only when triage instructions or the user request a HITL review, acceptance pass, walkthrough, or sign-off step; do not add review gates by default.
+- For requested `review`, choose the narrowest useful scope: worktree > repo > global. Use global only for cross-repo or multi-scope review.
+- Review task bodies must name exact upstream task ids, artifact ids, desired scope, and desired focus. Global review bodies must also name relevant scopes, repos, and worktrees.
 - Preserve the task chain when routing work: omit `--chain` for normal follow-up from your held triage task, and use manual `--depends-on` only for extra prerequisites.
 - Check scopes before routing across repo/worktree boundaries. Create or reactivate needed repo/worktree scopes with `pithos scope upsert` and use the returned scope id in enqueues.
 - Route follow-up work to the scope that matches where it should be handled. Execution tasks must target a repo or worktree scope.

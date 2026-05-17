@@ -41,3 +41,11 @@ Append notes here. Do not rewrite earlier notes.
 - pdx now treats claimable `design` and `review` work as Greed launches and passes the launch-selected Capability through to Spawner.
 - Spawner now requires an authorized `selectedCapability` for multi-claim agents and renders the deterministic claim command for that Capability.
 - `review` uses ordinary chain-policy dependency behavior; `escalate` remains the only source-link special case.
+
+### Task 2 implementation — 2026-05-17
+
+- Canonical prompts now document `review` as explicitly requested Greed-owned HITL assessment, not an automatic gate.
+- Greed prompt has separate design/review modes, including review readiness escalation, review-report artifact, rejected-outcome handling, and no-substantial-implementation boundary.
+- Pandora and Toil prompts can enqueue requested review tasks with narrowest-useful-scope guidance and global review payload requirements.
+- `pandora-spawn preview` succeeded for Greed (`review` selected), Pandora, and Toil in an isolated PDX/Pithos data configuration.
+- Validation: `pnpm verify` passed. A flaky live ID format assertion was broadened to allow hyphenated word-list entries such as `yo-yo`.

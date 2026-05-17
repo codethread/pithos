@@ -96,7 +96,7 @@ Current built-in claim/enqueue contract:
 | `war`      | `afk`      | `execute`          | `escalate`                                          |
 | `envy`     | `afk`      | `intake`           | `triage`, `design`, `escalate`                      |
 
-Built-in claim/enqueue authorization stays in Pithos. If you change Agent kinds or Capabilities, update Pithos built-ins and keep the manifest's agent roster aligned.
+Built-in claim/enqueue authorization stays in Pithos. If you change Agent kinds or Capabilities, update Pithos built-ins and keep the manifest's agent roster aligned. Greed claims both `design` and `review`, but Greed, War, and Envy do not enqueue `review`; only Pandora and Toil route requested review work.
 
 ## Layered assets and `appends`
 

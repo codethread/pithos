@@ -14,8 +14,11 @@
 - A task chain is the inspectable history the user will review later: dependencies, source links, supersessions, artifacts, runs, and events together explain what happened.
 - Dependencies gate claimability; source links are non-blocking provenance.
 - For any Pithos command using `--stdin`, send exactly one stdin document; prefer quoted heredocs (`<<'EOF'`) and do not stage temp files solely for payload upload.
-- Queue capabilities are `triage`, `design`, `execute`, and `escalate`; only enqueue capabilities listed in your launch context.
+- Queue capabilities are `triage`, `design`, `execute`, `review`, and `escalate`; only enqueue capabilities listed in your launch context.
 - Escalation is a normal global-scope task claimed by Pandora.
+- Review is a requested HITL assessment task claimed by Greed. It is not an automatic gate after design or execution.
+- When enqueueing requested review work, choose the narrowest useful scope: worktree for pre-merge implementation review and local smoke evidence; repo for repo-local work not tied to one checkout; global only for cross-repo or multi-scope review.
+- A global review task body must name the relevant scopes, repos, worktrees, upstream task ids, artifact ids, desired focus, and any smoke-test or command evidence Greed should inspect.
 
 ## Common command recipes
 
@@ -50,7 +53,7 @@ pithos task fail --run $PITHOS_RUN_ID --token <token> --reason '<reason>' <task-
 Enqueue with default auto chaining:
 
 ```sh
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute> --title '<title>' --stdin <<'EOF'
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute|review> --title '<title>' --stdin <<'EOF'
 <task body>
 EOF
 ```
@@ -58,7 +61,7 @@ EOF
 Enqueue with `--chain none` (manual chaining):
 
 ```sh
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute> --title '<title>' --stdin --chain none [--depends-on <task-id>] <<'EOF'
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute|review> --title '<title>' --stdin --chain none [--depends-on <task-id>] <<'EOF'
 <task body>
 EOF
 ```

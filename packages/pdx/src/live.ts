@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import {
+	bundledAgentsPath,
 	bundledTemplatesDir,
 	launchRenderedAgent,
 	loadHooks,
@@ -185,7 +186,12 @@ const pithosClient = (dbPath: string): PithosClientService => {
 		scopeUpsert: (input) =>
 			run(
 				"pithos scope upsert",
-				() => void engine.scopeUpsert({ kind: input.kind, path: input.path }),
+				() =>
+					void engine.scopeUpsert({
+						kind: input.kind,
+						path: input.path,
+						parentRepoPath: input.parentRepoPath,
+					}),
 			),
 		runUpsert: (input) =>
 			run(
@@ -291,6 +297,7 @@ const chmodTree = async (path: string, mode: number): Promise<void> => {
 const copyBundledTemplates = async (sourceDir: string, targetDir: string): Promise<void> => {
 	const entries = await readdir(sourceDir, { withFileTypes: true });
 	for (const entry of entries) {
+		if (entry.name === "agents.toml") continue;
 		const sourcePath = join(sourceDir, entry.name);
 		const targetPath = join(targetDir, entry.name);
 		if (entry.isDirectory()) {
@@ -307,8 +314,30 @@ const copyBundledTemplates = async (sourceDir: string, targetDir: string): Promi
 	}
 };
 
+const ensureUserScaffold = async (dataDir: string, userDataDir: string): Promise<void> => {
+	await mkdir(userDataDir, { recursive: true });
+	const scaffoldAgents = await readFile(join(bundledTemplatesDir, "AGENTS.md"), "utf8");
+	const scaffoldReadme = `# pdx user config\n\nThis directory is user-owned. Edit config here, not in ${dataDir}.\n\nCanonical bundled defaults:\n- ${join(dataDir, "agents.toml")}\n- ${join(dataDir, "templates")}\n\nCommon files:\n- agents.toml — optional user-wide partial manifest\n- templates/ — optional user-wide prompt assets\n- scopes/global|repo|worktree/ — scope-kind overrides\n\nValidate changes with:\n\n\`\`\`sh\npandora-spawn preview --agent war --mode afk --scope repo:$PWD --run run_preview --session-id 123e4567-e89b-12d3-a456-426614174000 --cwd "$PWD"\n\`\`\`\n`;
+	const writeIfMissing = async (path: string, content: string): Promise<void> => {
+		try {
+			await stat(path);
+		} catch (error) {
+			if (!isNodeErrorCode(error, "ENOENT")) throw error;
+			await writeFile(path, content, "utf8");
+		}
+	};
+	await writeIfMissing(join(userDataDir, "AGENTS.md"), scaffoldAgents);
+	await writeIfMissing(join(userDataDir, "README.md"), scaffoldReadme);
+	try {
+		await stat(join(userDataDir, "CLAUDE.md"));
+	} catch (error) {
+		if (!isNodeErrorCode(error, "ENOENT")) throw error;
+		await symlink("AGENTS.md", join(userDataDir, "CLAUDE.md"));
+	}
+};
+
 // Full re-seed: used by materializeTemplates() on pdx init/open.
-const reseedSpawnerTemplates = async (dataDir: string): Promise<void> => {
+const reseedSpawnerTemplates = async (dataDir: string, userDataDir: string): Promise<void> => {
 	const targetDir = join(dataDir, "templates");
 	// Make the dir writable before wiping so rm -rf can remove files from it
 	try {
@@ -317,19 +346,29 @@ const reseedSpawnerTemplates = async (dataDir: string): Promise<void> => {
 		if (!isNodeErrorCode(error, "ENOENT")) throw error;
 	}
 	await rm(targetDir, { recursive: true, force: true });
+	try {
+		await chmod(join(dataDir, "agents.toml"), 0o644);
+	} catch (error) {
+		if (!isNodeErrorCode(error, "ENOENT")) throw error;
+	}
 	await mkdir(targetDir, { recursive: true });
 	await copyBundledTemplates(bundledTemplatesDir, targetDir);
+	await writeFile(join(dataDir, "agents.toml"), await readFile(bundledAgentsPath, "utf8"), "utf8");
+	await chmod(join(dataDir, "agents.toml"), 0o444);
 	await chmod(targetDir, 0o555);
+	await ensureUserScaffold(dataDir, userDataDir);
 };
 
 export const makeSpawnerLive = (config: {
 	readonly dataDir: string;
+	readonly userDataDir: string;
 	readonly pithosDbPath: string;
 }) => {
 	const renderServices = {
 		readText: liveSpawnerServices.readText,
 		env: (key: string) => {
 			if (key === "PDX_DATA_DIR") return config.dataDir;
+			if (key === "PDX_USER_DATA_DIR") return config.userDataDir;
 			if (key === "PITHOS_DB") return config.pithosDbPath;
 			return liveSpawnerServices.env(key);
 		},
@@ -339,7 +378,7 @@ export const makeSpawnerLive = (config: {
 	return Spawner.of({
 		materializeTemplates: () =>
 			Effect.tryPromise({
-				try: () => reseedSpawnerTemplates(config.dataDir),
+				try: () => reseedSpawnerTemplates(config.dataDir, config.userDataDir),
 				catch: (error) => spawnerError("spawner template materialize", error),
 			}),
 		renderAgent: (input) =>
@@ -366,6 +405,7 @@ export const makeSpawnerLive = (config: {
 									env: {
 										...process.env,
 										PDX_DATA_DIR: config.dataDir,
+										PDX_USER_DATA_DIR: config.userDataDir,
 										PITHOS_DB: config.pithosDbPath,
 										...options.env,
 									},

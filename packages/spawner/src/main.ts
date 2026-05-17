@@ -1,7 +1,7 @@
 import { CliConfig, Command, Options } from "@effect/cli";
 import * as ValidationError from "@effect/cli/ValidationError";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect, Layer, ParseResult, Schema } from "effect";
+import { Effect, Layer, Option, ParseResult, Schema } from "effect";
 import { SpawnerError, exitCodeFor, type ErrorCode } from "./errors.js";
 import { AgentKindSchema, ModeSchema, renderAgent } from "./spawner.js";
 
@@ -12,9 +12,12 @@ const PreviewInputSchema = Schema.Struct({
 	sessionId: Schema.NonEmptyString,
 	scopeId: Schema.NonEmptyString,
 	cwd: Schema.NonEmptyString,
+	parentRepoPath: Schema.optional(Schema.NonEmptyString),
 });
 
 type PreviewInput = Schema.Schema.Type<typeof PreviewInputSchema>;
+
+const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
 
 const writeJson = (value: unknown): void => {
 	process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -41,7 +44,17 @@ const decode = <A, I>(
 const preview = (raw: PreviewInput) =>
 	Effect.gen(function* () {
 		const input = yield* decode(PreviewInputSchema, raw);
-		writeJson(renderAgent(input));
+		writeJson(
+			renderAgent({
+				agent: input.agent,
+				mode: input.mode,
+				runId: input.runId,
+				sessionId: input.sessionId,
+				scopeId: input.scopeId,
+				cwd: input.cwd,
+				...(input.parentRepoPath === undefined ? {} : { parentRepoPath: input.parentRepoPath }),
+			}),
+		);
 	});
 
 const previewCommand = Command.make(
@@ -70,9 +83,20 @@ const previewCommand = Command.make(
 			Options.withSchema(Schema.NonEmptyString),
 			Options.withDescription("Working directory for the harness"),
 		),
+		parentRepoPath: Options.optional(Options.text("parent-repo")).pipe(
+			Options.withDescription("Durable parent repo root for worktree scope previews"),
+		),
 	},
-	({ agent, mode, scopeId, runId, sessionId, cwd }) =>
-		preview({ agent, mode, scopeId, runId, sessionId, cwd }),
+	({ agent, mode, scopeId, runId, sessionId, cwd, parentRepoPath }) =>
+		preview({
+			agent,
+			mode,
+			scopeId,
+			runId,
+			sessionId,
+			cwd,
+			...(opt(parentRepoPath) === undefined ? {} : { parentRepoPath: opt(parentRepoPath) }),
+		}),
 ).pipe(
 	Command.withDescription(
 		"Render an agent prompt and harness launch description without touching Pithos state.",

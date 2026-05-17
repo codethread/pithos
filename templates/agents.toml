@@ -1,0 +1,56 @@
+[agents.pandora]
+template = "pandora.md"
+includes.replace = ["_common.md", "_common-hitl.md"]
+appends.replace = []
+
+[agents.pandora.harness]
+kind = "pi"
+model = "deepseek-v4-pro"
+system_prompt_mode = "replace"
+tools.replace = ["bash", "read"]
+argv.replace = []
+
+[agents.toil]
+template = "toil.md"
+includes.replace = ["_common.md", "_common-afk.md"]
+appends.replace = []
+
+[agents.toil.harness]
+kind = "pi"
+model = "openai-codex/gpt-5.4"
+system_prompt_mode = "append"
+tools.replace = ["bash", "read", "grep", "find", "ls", "subagent"]
+argv.replace = []
+
+[agents.greed]
+template = "greed.md"
+includes.replace = ["_common.md", "_common-hitl.md"]
+appends.replace = []
+
+[agents.greed.harness]
+kind = "pi"
+model = "openai-codex/gpt-5.5"
+system_prompt_mode = "replace"
+argv.replace = []
+
+[agents.war]
+template = "war.md"
+includes.replace = ["_common.md", "_common-afk.md", "war/cwd-guard.md"]
+appends.replace = []
+
+[agents.war.harness]
+kind = "pi"
+model = "openai-codex/gpt-5.4"
+system_prompt_mode = "append"
+argv.replace = []
+
+[agents.envy]
+template = "envy.md"
+includes.replace = ["_common.md", "_common-afk.md"]
+appends.replace = []
+
+[agents.envy.harness]
+kind = "pi"
+model = "openai-codex/gpt-5.4"
+system_prompt_mode = "append"
+argv.replace = []

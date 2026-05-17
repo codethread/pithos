@@ -27,6 +27,7 @@
 		"@effect/cli": "catalog:",
 		"@effect/platform": "catalog:",
 		"@effect/platform-node": "catalog:",
+		"@iarna/toml": "2.2.5",
 		"@pdx/pithos": "workspace:*",
 		"effect": "catalog:"
 	}

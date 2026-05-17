@@ -137,6 +137,7 @@ describe("pithos foundation", () => {
 			id: "repo:/tmp/pithos-repo",
 			kind: "repo",
 			canonical_path: "/tmp/pithos-repo",
+			parent_repo_path: null,
 			archived_at: null,
 			description: null,
 		});
@@ -147,6 +148,7 @@ describe("pithos foundation", () => {
 					id: "global",
 					kind: "global",
 					canonical_path: null,
+					parent_repo_path: null,
 					archived_at: null,
 					description: null,
 					task_count: 0,
@@ -156,6 +158,7 @@ describe("pithos foundation", () => {
 					id: repo.scope.id,
 					kind: "repo",
 					canonical_path: "/tmp/pithos-repo",
+					parent_repo_path: null,
 					archived_at: null,
 					description: null,
 					task_count: 0,
@@ -194,6 +197,7 @@ describe("pithos foundation", () => {
 					id: "global",
 					kind: "global",
 					canonical_path: null,
+					parent_repo_path: null,
 					archived_at: null,
 					description: null,
 					task_count: 0,
@@ -203,6 +207,7 @@ describe("pithos foundation", () => {
 					id: repo.scope.id,
 					kind: "repo",
 					canonical_path: "/tmp/pithos-repo",
+					parent_repo_path: null,
 					archived_at: null,
 					description: null,
 					task_count: 0,
@@ -380,6 +385,7 @@ describe("pithos foundation", () => {
 				id: repo.scope.id,
 				kind: "repo",
 				canonical_path: "/tmp/pithos-archive-history",
+				parent_repo_path: null,
 				archived_at: null,
 				description: null,
 			},
@@ -406,6 +412,7 @@ describe("pithos foundation", () => {
 				id: repo.scope.id,
 				kind: "repo",
 				canonical_path: "/tmp/pithos-archive-delete",
+				parent_repo_path: null,
 				archived_at: null,
 				description: null,
 				task_count: 0,
@@ -425,6 +432,7 @@ describe("pithos foundation", () => {
 	it("scope upsert requires repo/worktree paths to exist as directories", () => {
 		const dbPath = tempDb();
 		const root = mkdtempSync(join(tmpdir(), "pithos-scope-path-"));
+		const parentRepo = mkdtempSync(join(tmpdir(), "pithos-parent-repo-"));
 		const filePath = join(root, "file.txt");
 		writeFileSync(filePath, "not a directory");
 		const engine = makeEngine({
@@ -435,23 +443,51 @@ describe("pithos foundation", () => {
 		expect(engine.scopeUpsert({ kind: "repo", path: root }).scope).toMatchObject({
 			id: `repo:${root}`,
 			canonical_path: root,
+			parent_repo_path: null,
 		});
-		const errors = [["repo", join(root, "missing")] as const, ["worktree", filePath] as const].map(
-			([kind, path]) => {
-				try {
-					engine.scopeUpsert({ kind, path });
-				} catch (error) {
-					if (error instanceof PithosError) return error;
-					throw error;
-				}
-				throw new Error("scope upsert should reject non-directory paths");
-			},
-		);
-		expect(errors.map((error) => error.code)).toEqual(["VALIDATION_ERROR", "VALIDATION_ERROR"]);
+		expect(
+			engine.scopeUpsert({ kind: "worktree", path: root, parentRepoPath: parentRepo }).scope,
+		).toMatchObject({
+			id: `worktree:${root}`,
+			canonical_path: root,
+			parent_repo_path: parentRepo,
+		});
+		const errors = [
+			["repo", join(root, "missing"), undefined] as const,
+			["worktree", filePath, parentRepo] as const,
+			["worktree", root, join(parentRepo, "missing")] as const,
+		].map(([kind, path, parentRepoPath]) => {
+			try {
+				engine.scopeUpsert({ kind, path, parentRepoPath });
+			} catch (error) {
+				if (error instanceof PithosError) return error;
+				throw error;
+			}
+			throw new Error("scope upsert should reject non-directory paths");
+		});
+		expect(errors.map((error) => error.code)).toEqual([
+			"VALIDATION_ERROR",
+			"VALIDATION_ERROR",
+			"VALIDATION_ERROR",
+		]);
 		expect(errors.map((error) => error.message)).toEqual([
 			expect.stringContaining("Create the directory first"),
 			expect.stringContaining("Create the directory first"),
+			expect.stringContaining("parent repo directory first"),
 		]);
+	});
+
+	it("scope upsert rejects missing parent repo for worktree scopes", () => {
+		const dbPath = tempDb();
+		const root = mkdtempSync(join(tmpdir(), "pithos-worktree-scope-"));
+		const engine = makeEngine({
+			config: { dbPath },
+			services: services({ existsDirectory: liveServices.fs.existsDirectory }),
+		});
+		engine.init({ fresh: true });
+		expect(() => engine.scopeUpsert({ kind: "worktree", path: root })).toThrow(
+			/missing --parent-repo/,
+		);
 	});
 
 	it("run upsert rejects unknown scopes as PithosError", () => {

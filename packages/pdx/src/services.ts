@@ -1,6 +1,6 @@
 import { Context, Effect, SynchronizedRef } from "effect";
 import type { RepairAlertKind, RunOutput as PithosRunOutput } from "@pdx/pithos";
-import type { HooksConfig } from "@pdx/spawner";
+import type { HooksConfig, RenderedAgent as SpawnerRenderedAgent } from "@pdx/spawner";
 import type { PdxError } from "./errors.js";
 
 export interface ProcessResult {
@@ -75,6 +75,7 @@ export interface PithosReadyTask {
 	readonly scope_id: string;
 	readonly scope_kind: "global" | "repo" | "worktree";
 	readonly canonical_path: string | null;
+	readonly parent_repo_path: string | null;
 	readonly capability: "triage" | "design" | "execute" | "escalate" | "intake";
 }
 
@@ -83,6 +84,7 @@ export interface PithosClientService {
 	readonly scopeUpsert: (input: {
 		readonly kind: "global" | "repo" | "worktree";
 		readonly path?: string;
+		readonly parentRepoPath?: string;
 	}) => Effect.Effect<void, PdxError>;
 	readonly runUpsert: (input: {
 		readonly agent: string;
@@ -170,18 +172,10 @@ export interface LaunchAgentInput {
 	readonly sessionId: string;
 	readonly scopeId: string;
 	readonly cwd: string;
+	readonly parentRepoPath?: string;
 }
 
-export interface RenderedAgent extends LaunchAgentInput {
-	readonly logicalName: string;
-	readonly harness: {
-		readonly kind: "claude" | "pi";
-		readonly argv: readonly string[];
-		readonly env: Record<string, string>;
-	};
-	readonly sessionLogPath: string;
-	readonly prompt: string;
-}
+export type RenderedAgent = SpawnerRenderedAgent;
 
 export interface LaunchAgentResult {
 	readonly agent: "pandora" | "toil" | "greed" | "war" | "envy";

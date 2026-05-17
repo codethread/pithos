@@ -4,26 +4,34 @@ Repo-root default manifest and prompt templates for Pandora's Box.
 
 ## Bundle-owned vs user-owned
 
-`<data-dir>/templates/` is bundle-owned. `pdx init` and `pdx open` always re-seed
-it from the bundled repo defaults (chmod writable → wipe → copy → chmod read-only).
-Files land at mode 0444 (files) / 0555 (directories). Do not edit them directly;
-changes will be overwritten on the next `pdx init` or `pdx open`.
+`<data-dir>/agents.toml` and `<data-dir>/templates/` are bundle-owned canonicals.
+`pdx init` and `pdx open` always re-seed them from the bundled repo defaults
+(chmod writable → wipe → copy → chmod read-only). Files land at mode 0444
+(files) / 0555 (directories). Do not edit them directly; changes will be
+overwritten on the next `pdx init` or `pdx open`.
 
-User customisations live in `<data-dir>/extensions/templates/`. This directory
-mirrors the templates tree and is **never touched by pdx**. Spawner checks
-`extensions/templates/<rel>` first before falling back to `templates/<rel>` for
-every path referenced in the manifest (the `agents.json` file itself, each
-`template`, `includes`, and `appends` entry). The override is per-file — no
-merging. Any declared path that resolves to nothing in either layer is a hard
-error.
+User customisations live in `<user-data-dir>/`, where `<user-data-dir>` is
+`$PDX_USER_DATA_DIR` or defaults to `<data-dir>/config`. That tree is
+**user-owned** and is never overwritten by pdx once scaffolded. Spawner resolves
+config by ordered layers:
+
+- bundled canonical: `<data-dir>`
+- user-wide: `<user-data-dir>`
+- scope-kind user layer: `<user-data-dir>/scopes/<global|repo|worktree>`
+- project-local repo layer: `<repo-root>/.pdx`
+- project-local scope-kind layer: `<repo-root>/.pdx/scopes/<repo|worktree>`
+
+Only `agents.toml` merges across layers. Prompt files under each layer's
+`templates/` directory remain whole-file assets selected by reference name.
 
 ## Lifecycle flags
 
-- `pdx init` / `pdx open` — re-seed bundled templates (always). Leave
-  `extensions/`, db, runs, and logs alone.
-- `--clean` — wipe runtime state only: db, runs, and logs. Keep templates and
-  extensions.
-- `--nuke` — wipe the entire data dir.
+- `pdx init` / `pdx open` — re-seed bundled `<data-dir>/agents.toml` and
+  `<data-dir>/templates/`. Leave user config, db, runs, and logs alone.
+- `--clean` — wipe runtime state only: db, runs, logs. Keep bundled config and
+  user config.
+- `--nuke` — wipe pdx-owned runtime/bundled state while preserving
+  `<user-data-dir>`, then re-seed fresh canonicals.
 - `--clean` and `--nuke` are mutually exclusive.
 
 `--update` has been removed; template updates happen automatically whenever pdx
@@ -31,54 +39,52 @@ is upgraded and `pdx init` or `pdx open` is run.
 
 ## Files
 
-- `agents.json` — agent manifest: mode, harness kind/model/tools, include list, appends list, template file
+- `agents.toml` — canonical bundled render manifest
 - `*.md` — prompt templates per agent kind
 - `_common.md` — shared include
 - `_common-afk.md` — AFK-only runtime rules
 - `_common-hitl.md` — HITL-only runtime rules
 - `war/cwd-guard.md` — War core rule requiring cwd/scope verification before file edits
-- `AGENTS.md` — config-editing guide for direct agent sessions in this directory
-- `CLAUDE.md` — symlink to `AGENTS.md` for Claude Code
+- `AGENTS.md` / `CLAUDE.md` — source text used when pdx scaffolds the user config guide
 
-## `agents.json` contract
+## `agents.toml` contract
 
-`agents.json` is render config, not durable authorization truth. Pithos seeds and enforces authorization; Spawner derives claim/enqueue capabilities from Pithos built-ins.
+`agents.toml` is render config, not durable authorization truth. Pithos seeds and
+enforces authorization; Spawner derives claim/enqueue capabilities from Pithos
+built-ins.
 
-Top-level shape:
+Canonical bundled shape:
 
-```json
-{
-	"agents": [
-		{
-			"agent": "war",
-			"mode": "afk",
-			"harness": {
-				"kind": "pi",
-				"model": "openai-codex/gpt-5.4",
-				"system_prompt_mode": "append",
-				"tools": ["bash", "read"]
-			},
-			"includes": ["_common.md", "_common-afk.md"],
-			"appends": ["~/my-extensions/war-extra.md"],
-			"template": "war.md"
-		}
-	]
-}
+```toml
+[agents.war]
+template = "war.md"
+includes.replace = ["_common.md", "_common-afk.md"]
+appends.replace = []
+
+[agents.war.harness]
+kind = "pi"
+model = "openai-codex/gpt-5.4"
+system_prompt_mode = "append"
+tools.replace = ["bash", "read"]
+argv.replace = []
 ```
 
-| Field                        | Required | Contract                                                                                                                                                                                                                                                                      |
-| ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agents`                     | yes      | array of manifest entries                                                                                                                                                                                                                                                     |
-| `agent`                      | yes      | one of `pandora`, `toil`, `greed`, `war`, `envy`                                                                                                                                                                                                                              |
-| `mode`                       | yes      | `afk` or `hitl`; must match the mode `pdx` requests                                                                                                                                                                                                                           |
-| `harness.kind`               | yes      | `claude` or `pi`                                                                                                                                                                                                                                                              |
-| `harness.model`              | yes      | non-empty model string passed to the Harness CLI                                                                                                                                                                                                                              |
-| `harness.system_prompt_mode` | yes      | `replace` -> `--system-prompt`; `append` -> `--append-system-prompt`                                                                                                                                                                                                          |
-| `harness.tools`              | optional | non-empty array when present; rendered as comma-separated `--tools` value                                                                                                                                                                                                     |
-| `harness.argv`               | optional | verbatim string array; tokens are inserted after the binary name and before all Spawner-managed flags; each element must be non-empty; use for harness features not modeled by other fields, e.g. `["--plugin-dir", "~/my-plugins"]` for Claude Code plugins                  |
-| `includes`                   | optional | unique template paths resolved through the overlay; relative paths resolve from the templates directory; absolute and `~/` paths are allowed; no recursive rendering. Use includes for pre-claim guard/preamble content that must appear before the template's required flow. |
-| `appends`                    | optional | unique template paths resolved through the overlay; concatenated verbatim **after** the rendered template, joined by `\n\n---\n\n`; same path resolution rules as `includes`                                                                                                  |
-| `template`                   | yes      | template path resolved through the overlay; relative paths resolve from the templates directory; absolute and `~/` paths are allowed                                                                                                                                          |
+User and project layers may define partial tables only for the fields they want
+to change. Scalars replace lower-priority values; list fields use explicit
+`replace`, `add`, and `remove` operations as documented in
+[`specs/agent-configuration.md`](../specs/agent-configuration.md).
+
+Supported config fields remain the same conceptual surface as before:
+
+- `agents.<kind>.template`
+- `agents.<kind>.includes`
+- `agents.<kind>.appends`
+- `agents.<kind>.harness.kind`
+- `agents.<kind>.harness.model`
+- `agents.<kind>.harness.system_prompt_mode`
+- `agents.<kind>.harness.tools`
+- `agents.<kind>.harness.argv`
+- `hooks.input`
 
 Current built-in claim/enqueue contract:
 
@@ -92,46 +98,39 @@ Current built-in claim/enqueue contract:
 
 Built-in claim/enqueue authorization stays in Pithos. If you change Agent kinds or Capabilities, update Pithos built-ins and keep the manifest's agent roster aligned.
 
-## Extensions overlay
+## Layered assets and `appends`
 
-Place customisations in `<data-dir>/extensions/templates/` to add or override
-prompt content without touching bundle-owned files. This directory is never
-seeded, never wiped, and never made read-only by pdx — it is entirely yours.
+Place customisations under `<user-data-dir>/templates/`,
+`<user-data-dir>/scopes/<kind>/templates/`, or project-local `.pdx/templates/`
+depending on the scope you want to affect.
 
-**Per-file override** — Spawner resolves every path by first checking
-`extensions/templates/<rel>`, then falling back to `templates/<rel>`. There is
-no merging of file contents; the first file found wins. To override `agents.json`
-or any template, place a complete replacement file at the corresponding path in
-`extensions/templates/`.
+**Per-reference asset override** — manifest paths such as `war.md` or
+`_common.md` are looked up by reference name across eligible layers from highest
+priority to lowest. There is no file-content merge; the first matching
+`templates/<reference>` wins.
 
-**`appends`** — add extra content to a rendered prompt without replacing anything:
+**`appends`** — add extra content without replacing the main template. Example
+user-wide partial:
 
-1. Create your append file anywhere visible to Spawner (e.g.
-   `<data-dir>/extensions/templates/my-war-rules.md`).
-2. Reference it in `extensions/templates/agents.json` under the agent's `appends`
-   list (requires overriding the full `agents.json`):
-
-```json
-{
-	"agent": "war",
-	...
-	"appends": ["my-war-rules.md"]
-}
+```toml
+[agents.war.appends]
+add = ["war-rules.md"]
 ```
 
-Spawner concatenates each append file verbatim after the rendered template,
-separated by `\n\n---\n\n`. Append files go through the same overlay resolution
-as includes and templates; absolute and `~/` paths are accepted.
+If `<user-data-dir>/templates/war-rules.md` exists, Spawner appends it verbatim
+after the rendered template separated by `\n\n---\n\n`. Absolute and `~/` paths
+are also allowed when you intentionally keep prompt assets outside pdx-managed
+directories.
 
 ## Migration note
 
 If you have hand-edited files inside `<data-dir>/templates/`, those edits will be
 **overwritten** the next time `pdx init` or `pdx open` runs. Before upgrading,
-copy any custom content out of `<data-dir>/templates/` and into
-`<data-dir>/extensions/templates/`. Use `appends` for additive content or replace
-individual files wholesale via the overlay. The read-only chmod on
-`<data-dir>/templates/` after seeding surfaces this contract immediately on any
-write attempt.
+copy any custom content out of `<data-dir>/templates/` and into a user-owned
+`templates/` layer under `<user-data-dir>` or a project `.pdx` directory. Use
+`agents.toml` list/scalar overrides plus `appends` for additive behavior. The
+read-only chmod on `<data-dir>/templates/` after seeding surfaces this contract
+immediately on any write attempt.
 
 Pre-v1 command-card rendering changed `{{command_cards}}` from raw help JSON to
 generated Markdown reference content. User extension templates that parsed the
@@ -140,16 +139,12 @@ replace the affected template wholesale with their own command-reference source.
 
 ## `hooks` field
 
-`agents.json` may contain an optional top-level `hooks` block to configure
+`agents.toml` may contain an optional top-level `hooks` block to configure
 pdx-managed external processes:
 
-```json
-{
-  "agents": [...],
-  "hooks": {
-    "input": { "command": ["/path/to/script", "--arg"] }
-  }
-}
+```toml
+[hooks.input]
+command = ["/path/to/script", "--arg"]
 ```
 
 ### `hooks.input` — NDJSON input hook
@@ -192,8 +187,8 @@ Lines that fail validation are logged and skipped; the stream continues.
 **Envy:** intake tasks created by the input hook are claimed by Envy. Envy
 classifies each signal and enqueues a single downstream task (triage, design,
 or escalate). Add workflow-specific classification knowledge through Envy
-template overrides or appends, commonly under `extensions/templates/envy/` in
-the user data dir.
+template overrides or appends in a user-owned or project-local `templates/`
+layer.
 
 ## Template contract
 
@@ -208,7 +203,8 @@ Render order:
    joined by `\n\n---\n\n`.
 
 All path references (`template`, `includes`, `appends`) are resolved through the
-overlay (extensions layer first, bundle fallback) and support three forms:
+eligible layer stack (highest-priority layer first, bundle fallback) and support
+three forms:
 
 - `snippets/common.md` — resolved relative to the templates directory
 - `/absolute/path/common.md` — loaded directly
@@ -245,10 +241,11 @@ Render/preview needs DB context:
 
 Template loading keys off `PDX_DATA_DIR`:
 
-- when `PDX_DATA_DIR` is set, load manifest/templates from `$PDX_DATA_DIR/templates/`
-  with overlay from `$PDX_DATA_DIR/extensions/templates/` (extensions take priority)
-- when `PDX_DATA_DIR` is unset, load the bundled repo-root `templates/` defaults
-  (no extensions layer)
+- when `PDX_DATA_DIR` is set, load the canonical bundle from `$PDX_DATA_DIR/agents.toml`
+  plus `$PDX_DATA_DIR/templates/`, then merge/search user and project layers via
+  `PDX_USER_DATA_DIR` and scope context
+- when `PDX_DATA_DIR` is unset, load the bundled repo-root defaults (`templates/agents.toml`
+  plus `templates/`)
 
 Agent command resolution:
 
@@ -263,3 +260,4 @@ Rendered Harness env includes:
 - `PITHOS_SESSION_ID`
 - `PITHOS_SCOPE_ID`
 - `PDX_DATA_DIR` when provided; `pdx` commands use it as their data-dir default unless `--data-dir` is passed
+- `PDX_USER_DATA_DIR` when provided; direct agents and previews use it as the user config root

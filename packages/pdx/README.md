@@ -102,19 +102,19 @@ Binds services to real implementations:
 - Node `fs`, `child_process`, `crypto`, and `process` are confined here for pdx runtime IO.
 - `PithosClient` wraps `@pdx/pithos` `makeEngine(...)`; this is the library boundary to durable state.
 - `Spawner` wraps `@pdx/spawner` render/launch/Harness session transcript APIs; pdx persists render metadata before launch.
-- `pdx init` materializes the repo-root bundled manifest/templates from `../../templates/` into bundle-owned `<data-dir>/templates/` without starting tmux, the daemon, or Pandora.
-- `pdx open` also re-materializes `<data-dir>/templates/` before startup; user customisations live separately under `<data-dir>/extensions/templates/` and are left untouched.
-- `--clean` wipes runtime state only (DB, runs, logs); `--nuke` wipes the full data dir before init/startup.
+- `pdx init` materializes the repo-root bundled manifest/templates into bundle-owned `<data-dir>/agents.toml` plus `<data-dir>/templates/`, and scaffolds user-owned docs under `<user-data-dir>/`, without starting tmux, the daemon, or Pandora.
+- `pdx open` also re-materializes `<data-dir>/agents.toml` and `<data-dir>/templates/` before startup; existing user files under `<user-data-dir>/` are preserved.
+- `--clean` wipes runtime state only (DB, runs, logs, socket); `--nuke` preserves `<user-data-dir>` while clearing pdx-owned state before init/startup.
 - AFK stdout/stderr files are created under `<data-dir>/runs` before Spawner launches detached work.
 
 ### `src/controller.ts` — supervision policy
 
 Owns pdx behavior:
 
-- `initPdx` creates the data dir, initializes Pithos, creates `runs`, and materializes bundle-owned templates without touching tmux or Harness CLIs.
-- `openPdx` supports normal reuse, `--clean` runtime-state reset, and `--nuke` full data-dir reset before starting the pdx daemon tmux session and waiting for IPC readiness.
+- `initPdx` creates the data dir, initializes Pithos, creates `runs`, materializes bundle-owned config, and preserves user-owned scaffold files without touching tmux or Harness CLIs.
+- `openPdx` supports normal reuse, `--clean` runtime-state reset, and `--nuke` pdx-owned state reset with user-config preservation before starting the pdx daemon tmux session and waiting for IPC readiness.
 - `runDaemon` settles startup orphans, upserts the `pdx` system Run, starts reconcile, and serves IPC.
-- `reconcileTick` performs Cleanup/settlement first, maintains Pandora, sends Nudges for new Escalation tasks, validates launch preconditions, and spawns at most one ready non-Pandora Agent run per tick. After settling, it also forks the input-hook supervisor when `hooks.input` is configured in `agents.json` and no hook child is running.
+- `reconcileTick` performs Cleanup/settlement first, maintains Pandora, sends Nudges for new Escalation tasks, validates launch preconditions, and spawns at most one ready non-Pandora Agent run per tick. After settling, it also forks the input-hook supervisor when `hooks.input` is configured in layered `agents.toml` and no hook child is running.
 - When a ready repo/worktree task's cwd is missing before run creation, pdx uses Pithos' atomic launch-precondition transition to cancel the still-queued task, create a source-linked global Repair Alert (kind=`launch_precondition`) for Pandora, and avoid creating a Run. If the cwd disappears after run creation but before launch succeeds, pdx first calls Pithos' launch-abort transition so the no-claim Run becomes `cancelled` with reason `launch_precondition_failed`, then applies the same atomic task transition.
 - `handleKillRequest` performs Interrupt in Pithos before killing the live resource and enqueues a Repair Alert (kind=`interrupt`) when a Held task was interrupted.
 - `statusPdx`, `logsShowPdx`, `runTranscriptPdx`, `runShowPdx`, and `taskShowPdx` implement operator/Pandora inspection helpers.
@@ -155,16 +155,18 @@ For a data dir `<data-dir>` (`~/.pdx` by default):
 <data-dir>/pithos.sqlite          # Pithos DB used by pdx's PithosClient
 <data-dir>/pdx.sock               # daemon IPC socket
 <data-dir>/pdx.jsonl              # Supervisor log JSONL
-<data-dir>/templates/README.md              # bundle-owned copied template/config docs
-<data-dir>/templates/agents.json            # bundle-owned seeded Spawner manifest (read-only)
-<data-dir>/templates/*.md                   # bundle-owned seeded prompt templates (read-only)
-<data-dir>/templates/_common.md             # bundle-owned seeded shared prompt include
-<data-dir>/extensions/templates/agents.json # optional user-owned manifest override
-<data-dir>/extensions/templates/*.md        # optional user-owned prompt overrides / appends
-<data-dir>/runs/<run>.pid                   # AFK mode pidfiles
+<data-dir>/agents.toml            # bundle-owned seeded Spawner manifest (read-only)
+<data-dir>/templates/*.md         # bundle-owned seeded prompt templates (read-only)
+<data-dir>/templates/_common.md   # bundle-owned seeded shared prompt include
+<data-dir>/runs/<run>.pid         # AFK mode pidfiles
 <data-dir>/runs/<run>.stdout.log
 <data-dir>/runs/<run>.stderr.log
-<data-dir>/runs/hook.stderr.log    # input hook stderr (when hooks.input is configured)
+<data-dir>/runs/hook.stderr.log   # input hook stderr (when hooks.input is configured)
+<user-data-dir>/AGENTS.md         # direct config-editing guide scaffolded once
+<user-data-dir>/CLAUDE.md         # symlink scaffolded once when missing
+<user-data-dir>/README.md         # quickstart scaffolded once when missing
+<user-data-dir>/agents.toml       # optional user-wide manifest partial
+<user-data-dir>/templates/*.md    # optional user-wide prompt assets
 ```
 
 HITL mode runtime state lives in tmux targets. Harness session transcripts live at harness-native session log paths returned by Spawner and stored on Pithos Runs.

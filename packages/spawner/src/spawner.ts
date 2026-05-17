@@ -1,5 +1,4 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
 import {
 	BUILTIN_AGENT_CLAIMS,
 	BUILTIN_AGENT_ENQUEUES,
@@ -8,7 +7,15 @@ import {
 } from "@pdx/pithos/builtins";
 import { Either, ParseResult, Schema } from "effect";
 import { SpawnerError } from "./errors.js";
-import { resolveAgentsPath, resolveExtensionsTemplatesDir, resolveTemplatesDir } from "./paths.js";
+import {
+	loadResolvedAgentConfig,
+	loadResolvedHooks,
+	resolveTemplateAsset,
+	type HooksConfig,
+	type ResolvedAgentManifest,
+	type ResolvedTemplateAsset,
+} from "./manifest.js";
+import { resolveUserDataDir } from "./paths.js";
 import {
 	LiveSpawnerServices,
 	type LaunchServices,
@@ -26,6 +33,7 @@ export interface RenderAgentInput {
 	readonly sessionId: string;
 	readonly scopeId: string;
 	readonly cwd: string;
+	readonly parentRepoPath?: string;
 }
 
 const HarnessKindSchema = Schema.Literal("claude", "pi");
@@ -40,6 +48,34 @@ export interface RenderedAgent extends RenderAgentInput {
 	};
 	readonly sessionLogPath: string;
 	readonly prompt: string;
+	readonly provenance?: {
+		readonly layers: readonly {
+			readonly kind: "bundled" | "user" | "user-scope" | "project" | "project-scope";
+			readonly scopeKind: "global" | "repo" | "worktree";
+			readonly rootDir: string;
+			readonly agentsPath: string;
+		}[];
+		readonly template: {
+			readonly reference: string;
+			readonly pinnedToBundled: boolean;
+			readonly resolved: TemplateProvenance;
+		};
+		readonly includes: readonly TemplateProvenance[];
+		readonly appends: readonly TemplateProvenance[];
+	};
+}
+
+interface TemplateProvenance {
+	readonly reference: string;
+	readonly path: string;
+	readonly source:
+		| { readonly type: "absolute" | "home" }
+		| {
+				readonly type: "layer";
+				readonly kind: "bundled" | "user" | "user-scope" | "project" | "project-scope";
+				readonly scopeKind: "global" | "repo" | "worktree";
+				readonly rootDir: string;
+		  };
 }
 
 export interface LaunchResult {
@@ -60,37 +96,6 @@ export interface RenderSessionTranscriptInput {
 	readonly sessionLogPath: string;
 	readonly limit?: number;
 }
-
-const NonEmptyStringArray = Schema.Array(Schema.NonEmptyString).pipe(Schema.minItems(1));
-
-const HarnessSchema = Schema.Struct({
-	kind: HarnessKindSchema,
-	model: Schema.NonEmptyString,
-	system_prompt_mode: Schema.Literal("replace", "append"),
-	tools: Schema.optional(NonEmptyStringArray),
-	argv: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
-});
-
-const ManifestSchema = Schema.Struct({
-	agent: AgentKindSchema,
-	mode: ModeSchema,
-	harness: HarnessSchema,
-	includes: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
-	appends: Schema.optionalWith(Schema.Array(Schema.NonEmptyString), { default: () => [] }),
-	template: Schema.NonEmptyString,
-});
-
-const HookCommandSchema = Schema.Array(Schema.NonEmptyString).pipe(Schema.minItems(1));
-const InputHookSchema = Schema.Struct({ command: HookCommandSchema });
-const HooksSchema = Schema.Struct({ input: Schema.optional(InputHookSchema) });
-const AgentsFileSchema = Schema.Struct({
-	agents: Schema.Array(ManifestSchema),
-	hooks: Schema.optionalWith(HooksSchema, { default: () => ({}) }),
-});
-
-export type HooksConfig = Schema.Schema.Type<typeof HooksSchema>;
-type AgentsFile = Schema.Schema.Type<typeof AgentsFileSchema>;
-type Manifest = Schema.Schema.Type<typeof ManifestSchema>;
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown, path: string): A => {
 	const decoded = Schema.decodeUnknownEither(schema)(value);
@@ -127,59 +132,10 @@ const validateSessionId = (sessionId: string): void => {
 	}
 };
 
-const readText = (path: string, services: RenderServices): string => {
-	try {
-		return services.readText(path);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new SpawnerError({ code: "TEMPLATE_ERROR", message: `${path}: ${message}` });
-	}
-};
-
-const templateAssetPaths = (services: RenderServices) => {
-	const pdxDataDir = services.env("PDX_DATA_DIR");
-	return {
-		agentsPath: resolveAgentsPath(pdxDataDir),
-		templatesDir: resolveTemplatesDir(pdxDataDir),
-		extensionsTemplatesDir: resolveExtensionsTemplatesDir(pdxDataDir),
-	};
-};
-
-const loadAgentsFile = (services: RenderServices = LiveSpawnerServices): AgentsFile => {
-	const paths = templateAssetPaths(services);
-	const agentsFile = resolveWithOverlayFile(
-		paths.extensionsTemplatesDir,
-		paths.templatesDir,
-		"agents.json",
-		services,
-	);
-	const parsed = decode(Schema.parseJson(AgentsFileSchema), agentsFile.content, agentsFile.path);
-	for (const manifest of parsed.agents) validateManifestContract(manifest);
-	return parsed;
-};
-
-const loadManifests = (services: RenderServices = LiveSpawnerServices): readonly Manifest[] =>
-	loadAgentsFile(services).agents;
+export type { HooksConfig } from "./manifest.js";
 
 export const loadHooks = (services: RenderServices = LiveSpawnerServices): HooksConfig =>
-	loadAgentsFile(services).hooks;
-
-const validateManifestContract = (manifest: Manifest): void => {
-	const includeSet = new Set(manifest.includes);
-	if (includeSet.size !== manifest.includes.length) {
-		throw new SpawnerError({
-			code: "VALIDATION_ERROR",
-			message: `${manifest.agent}: includes must be unique template paths`,
-		});
-	}
-	const appendSet = new Set(manifest.appends);
-	if (appendSet.size !== manifest.appends.length) {
-		throw new SpawnerError({
-			code: "VALIDATION_ERROR",
-			message: `${manifest.agent}: appends must be unique template paths`,
-		});
-	}
-};
+	loadResolvedHooks(services);
 
 const claimForAgent = (agent: SpawnableAgentKind): string => {
 	const claims = BUILTIN_AGENT_CLAIMS[agent];
@@ -206,58 +162,10 @@ const renderTemplate = (template: string, ctx: Record<string, string>): string =
 		return ctx[key] ?? "";
 	});
 
-const resolveTemplateReference = (templatesDir: string, path: string): string => {
-	if (path === "~") return homedir();
-	if (path.startsWith("~/")) return join(homedir(), path.slice(2));
-	if (path.startsWith("/")) return path;
-	return join(templatesDir, path);
-};
-
-const isEnoent = (error: unknown): boolean =>
-	error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
-
-// For templates-relative paths (not absolute or home-relative), prefer
-// extensions/templates/<rel> over templates/<rel> so users can override
-// individual files without modifying the bundle. Only absent files (ENOENT)
-// trigger fallback; permission denied or other IO errors fail loudly.
-const resolveWithOverlayFile = (
-	extensionsTemplatesDir: string | undefined,
-	templatesDir: string,
-	path: string,
-	services: RenderServices,
-): { readonly path: string; readonly content: string } => {
-	if (path === "~" || path.startsWith("~/") || path.startsWith("/")) {
-		const resolvedPath = resolveTemplateReference(templatesDir, path);
-		return { path: resolvedPath, content: readText(resolvedPath, services) };
-	}
-	if (extensionsTemplatesDir !== undefined) {
-		const extensionsPath = join(extensionsTemplatesDir, path);
-		try {
-			return { path: extensionsPath, content: services.readText(extensionsPath) };
-		} catch (error) {
-			if (!isEnoent(error)) {
-				throw new SpawnerError({
-					code: "TEMPLATE_ERROR",
-					message: `${extensionsPath}: ${error instanceof Error ? error.message : String(error)}`,
-				});
-			}
-			// file absent in extensions layer; fall through to bundle
-		}
-	}
-	const bundledPath = join(templatesDir, path);
-	return { path: bundledPath, content: readText(bundledPath, services) };
-};
-
-const resolveWithOverlay = (
-	extensionsTemplatesDir: string | undefined,
-	templatesDir: string,
-	path: string,
-	services: RenderServices,
-): string => resolveWithOverlayFile(extensionsTemplatesDir, templatesDir, path, services).content;
-
 const SpawnerConfigSchema = Schema.Struct({
 	pithosDb: Schema.NonEmptyString,
 	pdxDataDir: Schema.optional(Schema.NonEmptyString),
+	pdxUserDataDir: Schema.optional(Schema.NonEmptyString),
 });
 
 const INITIAL_TASK_MESSAGE = "Claim and process one task, then exit.";
@@ -267,6 +175,7 @@ type SpawnerConfig = Schema.Schema.Type<typeof SpawnerConfigSchema>;
 
 const loadConfig = (services: RenderServices): SpawnerConfig => {
 	const dataDir = services.env("PDX_DATA_DIR");
+	const pdxUserDataDir = resolveUserDataDir(dataDir, services.env("PDX_USER_DATA_DIR"));
 	const pithosDb =
 		services.env("PITHOS_DB") ?? (dataDir === undefined ? undefined : `${dataDir}/pithos.sqlite`);
 	if (pithosDb === undefined) {
@@ -275,7 +184,11 @@ const loadConfig = (services: RenderServices): SpawnerConfig => {
 			message: "PITHOS_DB or PDX_DATA_DIR is required for spawner render/preview",
 		});
 	}
-	return decode(SpawnerConfigSchema, { pithosDb, pdxDataDir: dataDir }, "SpawnerConfig");
+	return decode(
+		SpawnerConfigSchema,
+		{ pithosDb, pdxDataDir: dataDir, pdxUserDataDir },
+		"SpawnerConfig",
+	);
 };
 
 interface CommandHelpCard {
@@ -609,9 +522,15 @@ const hitlShellCommand = (rendered: RenderedAgent, services: LaunchServices): re
 	return ["sh", "-c", script];
 };
 
+const templateProvenance = (asset: ResolvedTemplateAsset): TemplateProvenance => ({
+	reference: asset.reference,
+	path: asset.path,
+	source: asset.layer,
+});
+
 const harnessArgv = (
 	input: RenderAgentInput,
-	manifest: Manifest,
+	manifest: ResolvedAgentManifest,
 	sessionLogPath: string,
 	prompt: string,
 ): readonly string[] => {
@@ -657,52 +576,51 @@ export const renderAgent = (
 	services: RenderServices = LiveSpawnerServices,
 ): RenderedAgent => {
 	validateSessionId(input.sessionId);
-	const manifest = loadManifests(services).find((item) => item.agent === input.agent);
-	if (manifest === undefined)
+	const config = loadConfig(services);
+	const resolved = loadResolvedAgentConfig(input, services);
+	const manifest = resolved.agents[input.agent];
+	if (manifest === undefined) {
 		throw new SpawnerError({ code: "VALIDATION_ERROR", message: `unknown agent ${input.agent}` });
-	if (manifest.mode !== input.mode)
+	}
+	const expectedMode = input.agent === "pandora" || input.agent === "greed" ? "hitl" : "afk";
+	if (input.mode !== expectedMode) {
 		throw new SpawnerError({
 			code: "VALIDATION_ERROR",
-			message: `${input.agent} manifest mode ${manifest.mode} does not match requested mode ${input.mode}`,
+			message: `${input.agent} manifest mode ${expectedMode} does not match requested mode ${input.mode}`,
 		});
-	const paths = templateAssetPaths(services);
-	const config = loadConfig(services);
+	}
 	const claim = claimForAgent(input.agent);
 	const claims = BUILTIN_AGENT_CLAIMS[input.agent];
 	const enqueues = BUILTIN_AGENT_ENQUEUES[input.agent];
+	const includeAssets = manifest.includes.map((include) =>
+		resolveTemplateAsset(include, resolved, services),
+	);
 	const includes = Object.fromEntries(
-		manifest.includes.map((include) => [
-			include,
-			resolveWithOverlay(paths.extensionsTemplatesDir, paths.templatesDir, include, services),
-		]),
+		includeAssets.map((includeAsset) => [includeAsset.reference, includeAsset.content]),
 	);
 	const claimCommand = `pithos task claim --run ${input.runId} --scope ${input.scopeId} --capability ${claim}`;
 	const commandCards = renderCommandCards(input.agent, services);
-	const renderedTemplate = renderTemplate(
-		resolveWithOverlay(
-			paths.extensionsTemplatesDir,
-			paths.templatesDir,
-			manifest.template,
-			services,
-		),
-		{
-			...includes,
-			agent: input.agent,
-			run_id: input.runId,
-			session_id: input.sessionId,
-			scope_id: input.scopeId,
-			cwd: input.cwd,
-			claim_command: claimCommand,
-			command_cards: commandCards,
-			claims: claims.join(", "),
-			enqueues: enqueues.join(", "),
-			model: manifest.harness.model,
-			tools_csv: manifest.harness.tools?.join(", ") ?? "",
-		},
+	const templateAsset = resolveTemplateAsset(manifest.template, resolved, services, {
+		pinToBundled: manifest.templatePinnedToBundled,
+	});
+	const renderedTemplate = renderTemplate(templateAsset.content, {
+		...includes,
+		agent: input.agent,
+		run_id: input.runId,
+		session_id: input.sessionId,
+		scope_id: input.scopeId,
+		cwd: input.cwd,
+		claim_command: claimCommand,
+		command_cards: commandCards,
+		claims: claims.join(", "),
+		enqueues: enqueues.join(", "),
+		model: manifest.harness.model,
+		tools_csv: manifest.harness.tools?.join(", ") ?? "",
+	});
+	const appendAssets = manifest.appends.map((append) =>
+		resolveTemplateAsset(append, resolved, services),
 	);
-	const appendTexts = manifest.appends.map((append) =>
-		resolveWithOverlay(paths.extensionsTemplatesDir, paths.templatesDir, append, services),
-	);
+	const appendTexts = appendAssets.map((appendAsset) => appendAsset.content);
 	const prompt =
 		appendTexts.length > 0
 			? `${renderedTemplate}\n\n---\n\n${appendTexts.join("\n\n---\n\n")}`
@@ -712,7 +630,11 @@ export const renderAgent = (
 		PITHOS_RUN_ID: input.runId,
 		PITHOS_SESSION_ID: input.sessionId,
 		PITHOS_SCOPE_ID: input.scopeId,
+		...(input.parentRepoPath === undefined
+			? {}
+			: { PITHOS_PARENT_REPO_PATH: input.parentRepoPath }),
 		...(config.pdxDataDir === undefined ? {} : { PDX_DATA_DIR: config.pdxDataDir }),
+		...(config.pdxUserDataDir === undefined ? {} : { PDX_USER_DATA_DIR: config.pdxUserDataDir }),
 	};
 	const sessionLogPath = sessionLogPathFor(input, manifest.harness.kind);
 	return {
@@ -725,6 +647,21 @@ export const renderAgent = (
 		},
 		sessionLogPath,
 		prompt,
+		provenance: {
+			layers: resolved.layers.map((layer) => ({
+				kind: layer.kind,
+				scopeKind: layer.scopeKind,
+				rootDir: layer.rootDir,
+				agentsPath: layer.agentsPath,
+			})),
+			template: {
+				reference: manifest.template,
+				pinnedToBundled: manifest.templatePinnedToBundled,
+				resolved: templateProvenance(templateAsset),
+			},
+			includes: includeAssets.map(templateProvenance),
+			appends: appendAssets.map(templateProvenance),
+		},
 	};
 };
 

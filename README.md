@@ -68,32 +68,46 @@ Requires `~/.local/bin` to be on your `PATH`.
 Repo defaults live in [`./templates/`](./templates/) and are documented in
 [`./templates/README.md`](./templates/README.md).
 
-Run `pdx init` to create the data dir and seed the bundle-owned
-`<data-dir>/templates/` before Pandora starts. `pdx init` and `pdx open`
-always re-seed that directory from repo defaults.
+Run `pdx init` to create the data dir and seed the bundle-owned canonical
+config before Pandora starts:
 
-Put customisations in `<data-dir>/extensions/templates/`. To change which
-harness/model/tools each agent runs with, override
-`<data-dir>/extensions/templates/agents.json`. To change prompts, add or
-override agent `.md` files there, or use `appends`.
+- `<data-dir>/agents.toml`
+- `<data-dir>/templates/`
+
+`pdx init` and `pdx open` always re-seed those bundle-owned files from repo
+defaults.
+
+User customisation lives in `<user-data-dir>/`, where `<user-data-dir>` is
+`$PDX_USER_DATA_DIR` or defaults to `<data-dir>/config`. That directory is
+scaffolded once with `AGENTS.md`, `CLAUDE.md`, and `README.md` so you can `cd`
+into it and ask a direct harness session to edit config safely.
+
+Typical files:
+
+- `<user-data-dir>/agents.toml` — optional user-wide manifest partial
+- `<user-data-dir>/templates/` — optional user-wide prompt assets
+- `<user-data-dir>/scopes/global|repo|worktree/` — scope-kind overrides
+
+Project-local overrides live in `<repo-root>/.pdx/` and are layered for repo
+and worktree launches.
 
 You can also ask an agent to reconfigure Pandora's Box for you:
 
 ```sh
-mkdir -p ~/.pdx/extensions/templates
-cd ~/.pdx
+pdx init
+cd ~/.pdx/config
 claude
 # or your preferred harness
 ```
 
-Use `templates/AGENTS.md` / `templates/CLAUDE.md` as the config guide, but put
-actual overrides under `extensions/templates/`.
+Use the scaffolded `AGENTS.md` in that user config directory as the guide.
+Validate changes with `pandora-spawn preview`.
 
 Useful reset modes:
 
-- `pdx init` or `pdx open` — re-seed `<data-dir>/templates/`; keep extensions, DB, runs, and logs
-- `pdx init --clean` or `pdx open --clean` — wipe runtime state only (DB, runs, logs); keep templates and extensions
-- `pdx init --nuke` or `pdx open --nuke` — wipe the full pdx data dir and start from a blank slate
+- `pdx init` or `pdx open` — re-seed `<data-dir>/agents.toml` and `<data-dir>/templates/`; keep user config, DB, runs, and logs
+- `pdx init --clean` or `pdx open --clean` — wipe runtime state only (DB, runs, logs); keep bundle-owned config and user config
+- `pdx init --nuke` or `pdx open --nuke` — wipe pdx-owned runtime/bundled state, preserve `<user-data-dir>`, then reseed fresh canonical config
 
 ### Uninstall
 

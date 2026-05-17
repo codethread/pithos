@@ -45,6 +45,7 @@ export interface Engine {
 	readonly scopeUpsert: (input: {
 		readonly kind: ScopeKind;
 		readonly path: string | undefined;
+		readonly parentRepoPath?: string | undefined;
 		readonly description?: string | undefined;
 	}) => {
 		readonly ok: true;
@@ -212,6 +213,7 @@ export interface TaskSummaryOutput {
 	readonly scope_id: string;
 	readonly scope_kind: ScopeKind;
 	readonly canonical_path: string | null;
+	readonly parent_repo_path: string | null;
 	readonly scope_description: string | null;
 	readonly capability: Capability;
 	readonly status: TaskStatus;
@@ -494,6 +496,7 @@ export interface ScopeIdentityOutput {
 	readonly id: string;
 	readonly kind: ScopeKind;
 	readonly canonical_path: string | null;
+	readonly parent_repo_path: string | null;
 	readonly archived_at: string | null;
 	readonly description: string | null;
 }
@@ -632,15 +635,17 @@ const upsertScopePreserveDescription = sql`
 INSERT INTO scopes(
 	id,
 	kind,
-	canonical_path
-) VALUES (?, ?, ?)
+	canonical_path,
+	parent_repo_path
+) VALUES (?, ?, ?, ?)
 ON CONFLICT(id)
 DO UPDATE SET
 	kind = excluded.kind,
 	canonical_path = excluded.canonical_path,
+	parent_repo_path = excluded.parent_repo_path,
 	archived_at = NULL,
 	updated_at = CURRENT_TIMESTAMP
-RETURNING id, kind, canonical_path, archived_at, description
+RETURNING id, kind, canonical_path, parent_repo_path, archived_at, description
 `;
 
 // Used when --description is explicitly provided: sets or clears the description.
@@ -649,16 +654,18 @@ INSERT INTO scopes(
 	id,
 	kind,
 	canonical_path,
+	parent_repo_path,
 	description
-) VALUES (?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id)
 DO UPDATE SET
 	kind = excluded.kind,
 	canonical_path = excluded.canonical_path,
+	parent_repo_path = excluded.parent_repo_path,
 	description = excluded.description,
 	archived_at = NULL,
 	updated_at = CURRENT_TIMESTAMP
-RETURNING id, kind, canonical_path, archived_at, description
+RETURNING id, kind, canonical_path, parent_repo_path, archived_at, description
 `;
 
 const upsertRun = sql`
@@ -715,7 +722,7 @@ FROM runs
 `;
 
 const scopeSelect = sql`
-SELECT id, kind, canonical_path, archived_at, description
+SELECT id, kind, canonical_path, parent_repo_path, archived_at, description
 FROM scopes
 `;
 
@@ -837,6 +844,7 @@ const TaskSummaryRowSchema = Schema.extend(
 	Schema.Struct({
 		scope_kind: Schema.Literal("global", "repo", "worktree"),
 		canonical_path: Schema.NullOr(Schema.String),
+		parent_repo_path: Schema.NullOr(Schema.String),
 		scope_description: Schema.NullOr(Schema.String),
 		completed_at: Schema.NullOr(Schema.String),
 	}),
@@ -858,7 +866,7 @@ const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
 	).map((r) => r.id);
 
 const taskSummarySelect = sql`
-SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, s.description AS scope_description, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at, t.completed_at
+SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, s.parent_repo_path, s.description AS scope_description, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at, t.completed_at
 FROM tasks t
 JOIN scopes s ON s.id = t.scope_id
 `;
@@ -868,6 +876,7 @@ const toTaskSummary = (row: TaskSummaryRow): TaskSummary => ({
 	scope_id: row.scope_id,
 	scope_kind: row.scope_kind,
 	canonical_path: row.canonical_path,
+	parent_repo_path: row.parent_repo_path,
 	scope_description: row.scope_description,
 	capability: row.capability,
 	status: row.status,
@@ -913,6 +922,7 @@ const toScopeIdentityOutput = (row: ScopeRow): ScopeIdentityOutput => ({
 	id: row.id,
 	kind: row.kind,
 	canonical_path: row.canonical_path,
+	parent_repo_path: row.parent_repo_path,
 	archived_at: row.archived_at,
 	description: row.description,
 });
@@ -1532,6 +1542,7 @@ const graphForIds = (
 			scope_id: task.scope_id,
 			scope_kind: task.scope_kind,
 			canonical_path: task.canonical_path,
+			parent_repo_path: task.parent_repo_path,
 			scope_description: task.scope_description,
 			capability: task.capability,
 			status: task.status,
@@ -1611,7 +1622,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		}
 		return { ok: true };
 	},
-	scopeUpsert: ({ kind, path, description }) =>
+	scopeUpsert: ({ kind, path, parentRepoPath, description }) =>
 		withDb(ctx, (db) => {
 			if (!(["global", "repo", "worktree"] as const).includes(kind)) {
 				fail("VALIDATION_ERROR", `invalid scope kind: ${kind}`);
@@ -1631,11 +1642,43 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					);
 				}
 			}
+			const canonicalParentRepoPath =
+				kind === "worktree"
+					? resolve(
+							requireNonEmpty(
+								parentRepoPath ??
+									fail("VALIDATION_ERROR", "missing --parent-repo for worktree scope"),
+								"--parent-repo",
+							),
+						)
+					: parentRepoPath === undefined
+						? null
+						: fail(
+								"VALIDATION_ERROR",
+								`--parent-repo is only valid for worktree scope upsert; got ${kind}`,
+							);
+			if (kind === "worktree") {
+				const worktreeParentRepoPath =
+					canonicalParentRepoPath ?? fail("INTERNAL_ERROR", "missing worktree parent repo path");
+				const existsDirectory = Effect.runSync(
+					ctx.services.fs.existsDirectory(worktreeParentRepoPath),
+				);
+				if (!existsDirectory) {
+					fail(
+						"VALIDATION_ERROR",
+						`worktree parent repo path must exist as a directory before upsert: ${worktreeParentRepoPath}. Create or restore the parent repo directory first, then upsert the scope.`,
+					);
+				}
+			}
 			const sid = kind === "global" ? "global" : `${kind}:${canonical}`;
 			const scopeRow = parseScopeIdentity(
 				description !== undefined
-					? db.prepare(upsertScopeSetDescription).get(sid, kind, canonical, description)
-					: db.prepare(upsertScopePreserveDescription).get(sid, kind, canonical),
+					? db
+							.prepare(upsertScopeSetDescription)
+							.get(sid, kind, canonical, canonicalParentRepoPath, description)
+					: db
+							.prepare(upsertScopePreserveDescription)
+							.get(sid, kind, canonical, canonicalParentRepoPath),
 				`scope not found after upsert: ${sid}`,
 			);
 			return { ok: true, scope: scopeRow };
@@ -1649,6 +1692,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						s.id,
 						s.kind,
 						s.canonical_path,
+						s.parent_repo_path,
 						s.archived_at,
 						s.description,
 						COUNT(DISTINCT t.id) AS task_count,
@@ -1657,7 +1701,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					LEFT JOIN tasks t ON t.scope_id = s.id
 					LEFT JOIN runs r ON r.scope_id = s.id
 					${all ? "" : "WHERE s.archived_at IS NULL"}
-					GROUP BY s.id, s.kind, s.canonical_path, s.archived_at, s.description
+					GROUP BY s.id, s.kind, s.canonical_path, s.parent_repo_path, s.archived_at, s.description
 					ORDER BY s.archived_at IS NOT NULL ASC, s.kind ASC, s.canonical_path ASC, s.id ASC
 				`)
 				.all()
@@ -1678,6 +1722,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							s.id,
 							s.kind,
 							s.canonical_path,
+							s.parent_repo_path,
 							s.archived_at,
 							s.description,
 							COUNT(DISTINCT t.id) AS task_count,
@@ -1688,7 +1733,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						LEFT JOIN tasks t ON t.scope_id = s.id
 						LEFT JOIN runs r ON r.scope_id = s.id
 						WHERE s.id = ?
-						GROUP BY s.id, s.kind, s.canonical_path, s.archived_at, s.description
+						GROUP BY s.id, s.kind, s.canonical_path, s.parent_repo_path, s.archived_at, s.description
 					`)
 							.get(scopeId),
 						`scope not found: ${scopeId}`,
@@ -1716,7 +1761,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 					const archivedScope = parseScopeIdentity(
 						db
 							.prepare(
-								sql`UPDATE scopes SET archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, kind, canonical_path, archived_at, description`,
+								sql`UPDATE scopes SET archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, kind, canonical_path, parent_repo_path, archived_at, description`,
 							)
 							.get(scopeId),
 						`scope not found after archive: ${scopeId}`,
@@ -2858,6 +2903,12 @@ const scopeForCapability = (db: Db, scopeId: string, cap: Capability): ScopeRow 
 		fail(
 			"VALIDATION_ERROR",
 			`execute requires repo/worktree scope with canonical_path; got ${scopeId} kind=${s.kind}`,
+		);
+	}
+	if (cap === "execute" && s.kind === "worktree" && s.parent_repo_path === null) {
+		fail(
+			"VALIDATION_ERROR",
+			`execute requires worktree scope with parent_repo_path; got ${scopeId}`,
 		);
 	}
 

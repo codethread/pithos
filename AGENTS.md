@@ -34,9 +34,10 @@ Use an isolated temp data dir for manual smoke tests; never point smoke runs at 
 
 ```sh
 export PDX_DATA_DIR="$(mktemp -d)/pdx"
+export PDX_USER_DATA_DIR="$(mktemp -d)/pdx-user-config"
 export PITHOS_DB="$PDX_DATA_DIR/pithos.sqlite"
 export TMUX_TMPDIR="$PDX_DATA_DIR/tmux"
-mkdir -p "$PDX_DATA_DIR" "$TMUX_TMPDIR"
+mkdir -p "$PDX_DATA_DIR" "$PDX_USER_DATA_DIR" "$TMUX_TMPDIR"
 pnpm run build
 pithos init --fresh
 pdx init --data-dir "$PDX_DATA_DIR"
@@ -48,9 +49,10 @@ pdx close --data-dir "$PDX_DATA_DIR"
 Notes:
 
 - `PITHOS_DB` is required by the `pithos` CLI.
-- `PDX_DATA_DIR` should be passed to `pdx` as `--data-dir "$PDX_DATA_DIR"`; Spawner loads bundled templates from `$PDX_DATA_DIR/templates` with overlay from `$PDX_DATA_DIR/extensions/templates`.
-- `pdx init` re-seeds `$PDX_DATA_DIR/templates` from the repo-root defaults without starting tmux/Harness sessions.
-- `pdx open` also re-seeds `$PDX_DATA_DIR/templates` before starting the daemon/Pandora.
+- `PDX_DATA_DIR` should be passed to `pdx` as `--data-dir "$PDX_DATA_DIR"`; Spawner loads the bundled canonical config from `$PDX_DATA_DIR/agents.toml` and `$PDX_DATA_DIR/templates/`.
+- `PDX_USER_DATA_DIR` isolates editable user config for smoke runs; use an explicit temp dir to exercise the layered manifest flow outside the runtime dir too.
+- `pdx init` re-seeds `$PDX_DATA_DIR/agents.toml` and `$PDX_DATA_DIR/templates/`, and scaffolds `$PDX_USER_DATA_DIR` when missing, without starting tmux/Harness sessions.
+- `pdx open` also re-seeds `$PDX_DATA_DIR/agents.toml` and `$PDX_DATA_DIR/templates/` before starting the daemon/Pandora.
 - `TMUX_TMPDIR` isolates the tmux server for smoke runs; otherwise `pdx open` can fail with `pdx--daemon already exists` even when `PDX_DATA_DIR` is isolated.
 - Agents resolve `pithos` and `pdx` as bare commands from PATH. Use `make local` or `make install` once to symlink stable global bins into `~/.local/bin`; smoke-test data dirs do not need their own bin copies.
 - Spawner sets `PITHOS_RUN_ID`, `PITHOS_SESSION_ID`, and `PITHOS_SCOPE_ID` for launched Agent runs; do not invent them in supervisor code.

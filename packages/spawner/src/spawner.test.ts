@@ -422,12 +422,12 @@ const makeLaunchServices = (
 
 describe("bundled agent templates", () => {
 	it.each([
-		["pandora", "hitl", [] as readonly string[]],
-		["toil", "afk", ["Repository default-branch guard"]],
-		["greed", "hitl", ["Repository default-branch guard"]],
-		["war", "afk", ["cwd/scope guard"]],
-		["envy", "afk", [] as readonly string[]],
-	] as const)("render %s bundled template", (agent, mode, expectedGuards) => {
+		["pandora", "hitl", false],
+		["toil", "afk", false],
+		["greed", "hitl", false],
+		["war", "afk", true],
+		["envy", "afk", false],
+	] as const)("render %s bundled template", (agent, mode, expectsCwdGuard) => {
 		const rendered = renderAgent(
 			{ ...base, agent, mode },
 			{
@@ -446,11 +446,8 @@ describe("bundled agent templates", () => {
 			},
 		);
 
-		for (const guard of ["Repository default-branch guard", "cwd/scope guard"]) {
-			expect(rendered.prompt.includes(guard)).toBe(
-				expectedGuards.some((expected) => expected === guard),
-			);
-		}
+		expect(rendered.prompt.includes("cwd/scope guard")).toBe(expectsCwdGuard);
+		expect(rendered.prompt).not.toContain("Repository default-branch guard");
 	});
 
 	it("keeps bundled Pandora sitrep flow aligned with briefing before graph inspect", () => {
@@ -518,7 +515,9 @@ describe("bundled agent templates", () => {
 		expect(templateText).toContain("Use `pithos scope list` to discover existing scopes");
 		expect(templateText).not.toContain("$PITHOS_BIN");
 		expect(templateText).not.toContain("$PDX_BIN");
-		expect(templateText).toContain("Execution work should usually target a worktree scope");
+		expect(templateText).toContain(
+			"execution tasks must target one of those filesystem-backed scopes",
+		);
 		expect(templateText).toContain("use `pdx run show <run-id>` if you know the run");
 		expect(templateText).not.toContain("--depends-on <held-task-id>");
 		expect(templateText).not.toContain("Use Pithos task commands for inspect");

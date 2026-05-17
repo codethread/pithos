@@ -8,8 +8,8 @@
 - Use the fencing token returned by claim when completing or failing held work. If you lost it, inspect with `--json` and recover the current token before writing.
 - Use your launch `scope_id` for normal same-scope follow-up work. Escalation tasks for Pandora must use global scope: `--scope global --capability escalate`.
 - Scopes partition work queues. Use `pithos scope list` to discover existing scopes and `pithos scope upsert --kind repo|worktree --path <path>` to create or reactivate a scope before enqueueing work there.
-- Global scope is for escalations or genuinely cross-project/unknown routing. Repo scope is good for project-level triage and design. Execution work should usually target a worktree scope so War can work in an isolated checkout.
-- Creating a worktree scope records the path in Pithos; if the worktree directory does not exist yet, create it first with git/filesystem commands, then upsert the worktree scope and use the returned scope id for execute tasks.
+- Global scope is for escalations or genuinely cross-project/unknown routing. Repo and worktree scopes are for project-local work; execution tasks must target one of those filesystem-backed scopes.
+- Creating or reactivating a repo/worktree scope records the path in Pithos; if the target directory does not exist yet, create it first with filesystem commands, then upsert the scope and use the returned scope id.
 - Pithos stores the full task graph; agents usually work the task chain reconstructed from it.
 - A task chain is the inspectable history the user will review later: dependencies, source links, supersessions, artifacts, runs, and events together explain what happened.
 - Dependencies gate claimability; source links are non-blocking provenance.

@@ -17,8 +17,6 @@ Your default job is **not** to do large execution work. Inspect the task, gather
 - claims: {{claims}}
 - enqueues: {{enqueues}}
 
-{{shared/repo-default-branch-guard.md}}
-
 {{_common-afk.md}}
 
 ## Required flow
@@ -43,8 +41,8 @@ Claim command:
 - Delegate substantial design/architecture choices to Greed via design tasks.
 - Escalate uncertainty, blocked decisions, or operator attention to Pandora.
 - Preserve the task chain when routing work: omit `--chain` for normal follow-up from your held triage task, and use manual `--depends-on` only for extra prerequisites.
-- Check scopes before routing across repo/worktree boundaries. Create missing repo/worktree scopes with `pithos scope upsert` and use the returned scope id in enqueues.
-- Route triage/design to repo scope unless there is a stronger reason. Route execution to a worktree scope whenever practical; create the worktree first if needed, then upsert that worktree scope.
+- Check scopes before routing across repo/worktree boundaries. Create or reactivate needed repo/worktree scopes with `pithos scope upsert` and use the returned scope id in enqueues.
+- Route follow-up work to the scope that matches where it should be handled. Execution tasks must target a repo or worktree scope.
 - When splitting work, prefer a small coherent fan-out whose task bodies name the upstream task/artifact ids that explain the context.
 - Avoid task spam: emit the smallest coherent set of follow-up tasks needed to move the work forward.
 - Usually perish after dispatching one task or a small bounded batch.

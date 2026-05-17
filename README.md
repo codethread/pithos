@@ -21,13 +21,13 @@ You don't run shell commands in the loop — Pandora does.
 
 **The Evils**
 
-| Evil    | Mode | Claims             | Role                                                           |
-| ------- | ---- | ------------------ | -------------------------------------------------------------- |
-| Pandora | HITL | `escalate`         | Long-lived. Talks to you. Routes the chain.                    |
-| Envy    | AFK  | `intake`           | Classifies external signals into follow-up work.               |
-| Toil    | AFK  | `triage`           | Decomposes incoming work; routes to design or execute.         |
-| Greed   | HITL | `design`, `review` | Produces design briefs and requested reviews before execution. |
-| War     | AFK  | `execute`          | Runs in a repo/worktree and changes code.                      |
+| Evil    | Mode | Claims             | Role                                                     |
+| ------- | ---- | ------------------ | -------------------------------------------------------- |
+| Pandora | HITL | `escalate`         | Long-lived. Talks to you. Routes the chain.              |
+| Envy    | AFK  | `intake`           | Classifies external signals into follow-up work.         |
+| Toil    | AFK  | `triage`           | Decomposes incoming work; routes to design or execute.   |
+| Greed   | HITL | `design`, `review` | Produces design briefs and explicitly requested reviews. |
+| War     | AFK  | `execute`          | Runs in a repo/worktree and changes code.                |
 
 **Built with**
 
@@ -149,6 +149,9 @@ Then put work into the queue through her:
 Every conversation deposits durable context — scopes, tasks, artifacts,
 chain edges — that survives runs. Old work stays queryable, so the next
 delegation needs less re-explaining. Pandora gets sharper as you go.
+
+Reviews are explicit work, not automatic gates: ask Pandora or Toil to queue a
+`review` task when you want Greed to walk through scoped work with you.
 
 When something goes sideways, she also drives the cleanup:
 

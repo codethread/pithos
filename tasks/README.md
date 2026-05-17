@@ -6,9 +6,8 @@ Implement the planned scoped `review` capability change. The MVP adds `review` a
 
 ## Important references
 
-- `specs/scoped-review-capability.md` — temporary change spec and source of truth for this plan.
-- `specs/task-graph.md` — base task graph semantics to fold into after implementation.
-- `specs/control-plane-supervision.md` — base control-plane lifecycle and Greed/Pandora behavior context.
+- `specs/task-graph.md` — durable task graph semantics and review-as-ordinary-work behavior.
+- `specs/control-plane-supervision.md` — control-plane lifecycle, built-in claim/enqueue contract, and Greed/Pandora review behavior.
 - `specs/agent-configuration.md` — built-in capability/agent configuration context if affected.
 - `UBIQUITOUS_LANGUAGE.md` — domain terminology to update after implementation.
 - `packages/pithos/src/builtins.ts` — built-in Agent kinds, Capabilities, claim rules, enqueue rules.
@@ -49,3 +48,10 @@ Append notes here. Do not rewrite earlier notes.
 - Pandora and Toil prompts can enqueue requested review tasks with narrowest-useful-scope guidance and global review payload requirements.
 - `pandora-spawn preview` succeeded for Greed (`review` selected), Pandora, and Toil in an isolated PDX/Pithos data configuration.
 - Validation: `pnpm verify` passed. A flaky live ID format assertion was broadened to allow hyphenated word-list entries such as `yo-yo`.
+
+### Task 3 implementation — 2026-05-17
+
+- Folded `review` into permanent terminology and base specs as Greed-claimed, explicitly requested, ordinary non-escalation work.
+- Updated control-plane docs with Greed review launch/lifecycle and readiness escalation to Pandora.
+- Removed the temporary scoped review change spec from the specs index and filesystem.
+- Validation: `pnpm verify` passed.

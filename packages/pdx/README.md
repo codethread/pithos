@@ -30,7 +30,7 @@ pdx --help-json
 
 - one long-lived Pandora HITL Agent run
 - AFK mode Agent runs for Toil/War/Envy
-- HITL mode Agent runs for Greed
+- HITL mode Agent runs for Greed design and requested review work
 - tmux as the current Control-plane backend
 - a local pdx daemon tmux session and Unix socket
 - the in-memory Registry of supervised Agent runs

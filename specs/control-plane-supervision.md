@@ -64,16 +64,16 @@ Agents claim work themselves through Pithos. pdx never injects Task content into
 
 Pithos seeds and enforces the built-in Agent kinds, Capabilities, claim authorization, and enqueue authorization.
 
-| Agent kind | Mode today   | Claims     | Enqueues                                  |
-| ---------- | ------------ | ---------- | ----------------------------------------- |
-| `pdx`      | system actor | —          | `escalate`, `intake`                      |
-| `pandora`  | HITL         | `escalate` | `triage`, `design`, `escalate`            |
-| `envy`     | AFK          | `intake`   | `triage`, `design`, `escalate`            |
-| `toil`     | AFK          | `triage`   | `triage`, `design`, `execute`, `escalate` |
-| `greed`    | HITL         | `design`   | `triage`, `design`, `escalate`            |
-| `war`      | AFK          | `execute`  | `escalate`                                |
+| Agent kind | Mode today   | Claims             | Enqueues                                            |
+| ---------- | ------------ | ------------------ | --------------------------------------------------- |
+| `pdx`      | system actor | —                  | `escalate`, `intake`                                |
+| `pandora`  | HITL         | `escalate`         | `triage`, `design`, `execute`, `review`, `escalate` |
+| `envy`     | AFK          | `intake`           | `triage`, `design`, `escalate`                      |
+| `toil`     | AFK          | `triage`           | `triage`, `design`, `execute`, `review`, `escalate` |
+| `greed`    | HITL         | `design`, `review` | `triage`, `design`, `escalate`                      |
+| `war`      | AFK          | `execute`          | `escalate`                                          |
 
-Capabilities are `intake`, `triage`, `design`, `execute`, and `escalate`. `execute` work must be in repo/worktree Scope. `intake` and `escalate` work lives in global Scope. Pithos enforces the durable authorization contract; templates describe workflow policy but are not authorization truth.
+Capabilities are `intake`, `triage`, `design`, `execute`, `review`, and `escalate`. `execute` work must be in repo/worktree Scope. `intake` and `escalate` work lives in global Scope. `review` work may be global, repo, or worktree scoped and is ordinary non-escalation work claimed by Greed. Pithos enforces the durable authorization contract; templates describe workflow policy but are not authorization truth.
 
 ## 4. pdx Lifecycle
 
@@ -103,7 +103,7 @@ Each tick settles lifecycle before spawning:
 7. maintain the Pandora singleton
 8. send a content-free Nudge when claimable Escalation work appears
 9. validate launch cwd for one selected claimable non-Pandora Task
-10. spawn at most one Agent through Spawner, in built-in order with Envy before Toil/Greed/War
+10. spawn at most one Agent through Spawner, in built-in order with Envy before Toil/Greed/War; claimable `design` and `review` work both launch Greed with the selected claim Capability passed to Spawner for deterministic claim-command rendering
 11. supervise the configured input hook, if any
 
 Registry entries in `launching`, `live`, and `terminating` states count against caps. The MVP cap is one live entry per `(Agent kind, Scope)` plus the global AFK cap.
@@ -112,7 +112,11 @@ Registry entries in `launching`, `live`, and `terminating` states count against 
 
 `pdx close` stops spawning, kills supervised AFK/HITL resources including Pandora, confirms they are gone, calls Pithos Cleanup for in-memory Agent runs, cleans up the `pdx` system Run last, and closes the daemon tmux session.
 
-## 5. Repair Alerts and Broken Chains
+## 5. Greed Review Lifecycle
+
+Greed handles `review` Tasks as requested HITL assessment: inspect the Task graph and scoped context, prepare the walkthrough, then enqueue a global `escalate` readiness Task so Pandora can route the user to Greed's live session. Greed records the outcome in a `review-report` artifact and completes the review Task; rejected work is routed onward through Pandora/Toil rather than silently rewriting the chain.
+
+## 6. Repair Alerts and Broken Chains
 
 A **Repair Alert** is a system-authored global Escalation task with a typed `kind`. It is durable, claimable by Pandora, and paired with Pithos graph provenance when it names affected work.
 
@@ -131,7 +135,7 @@ Repair Alerts that reference one affected Task carry a `repair_source` Source li
 
 Task-failure, dead-letter, and interrupt Repair Alerts are created by Pithos in the relevant Task/Run transition. pdx owns invoking Interrupt before killing the live resource, but Pithos owns the durable Alert side effect transactionally. Launch-precondition Repair Alerts are created by a Pithos atomic transition that cancels the still-queued Task, records repair provenance, creates the Escalation task, and emits Events in one transaction.
 
-## 6. Kill, Cleanup, Timeout, and Launch Abort
+## 7. Kill, Cleanup, Timeout, and Launch Abort
 
 ### Cleanup
 
@@ -167,7 +171,7 @@ Pruning is maintenance, not invariant storage: Pithos' Run timeout/launch-abort 
 
 If pdx creates a Run row but the launch cannot complete before the Agent claims work, pdx uses the Pithos launch-abort transition. The no-claim Run becomes `cancelled`, no Task is mutated by that Run transition, and launch-precondition task repair runs separately only when the original queued Task still matches expected preconditions.
 
-## 7. Spawner Boundary
+## 8. Spawner Boundary
 
 pdx renders before it launches:
 
@@ -190,7 +194,7 @@ Spawner owns:
 
 Spawner does not own Pithos graph policy, live Registry state, Kill, Cleanup, Interrupt, Cancel, or Nudge policy.
 
-## 8. Input Hook
+## 9. Input Hook
 
 Layered `agents.toml` may configure `hooks.input.command` through the global config layers. pdx runs that command as a producer process after Pandora is live. The hook writes newline-delimited JSON on stdout; each valid line with non-empty `title` and `body` creates a global `intake` Task for Envy. Invalid lines are logged and skipped.
 
@@ -204,7 +208,7 @@ pdx supervises the hook independently:
 - repeated crashes create an `input_hook_stuck` Repair Alert and stop restarting until pdx is restarted
 - `pdx close` sends SIGTERM
 
-## 9. Operator and Pandora Interfaces
+## 10. Operator and Pandora Interfaces
 
 The public `pdx` surface is the operator/Pandora control surface:
 
@@ -217,7 +221,7 @@ All commands resolve data dir as `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/
 
 `pdx daemon logs` reads structured Supervisor log JSONL even after the daemon stops. These are Supervisor logs, not Harness transcripts. `pdx run transcript` reads the Pithos Run transcript metadata and delegates Harness-log parsing to Spawner. System Runs fail loudly for transcript rendering and point to Supervisor logs.
 
-## 10. Code Locations and Tests
+## 11. Code Locations and Tests
 
 - `packages/pdx/src/controller.ts` — lifecycle, reconcile, Kill, launch-precondition handling, input hook supervision
 - `packages/pdx/src/live.ts` — live service bindings, Pithos/Spawner integration, template materialization

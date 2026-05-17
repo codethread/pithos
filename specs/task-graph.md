@@ -74,7 +74,9 @@ Claim increments Attempts, sets a fresh Fencing token, and stores the Held task 
 - `held` requires a Held task and adds it as a Dependency.
 - `source` requires a held Escalation task with a `chain_source` and depends on that source.
 
-Automatic chaining keeps ordinary follow-up work connected, but Escalation tasks are not auto-blocked. Escalations created from held work receive a non-blocking `chain_source`; Repair Alerts receive a `repair_source` and must be repaired with Supersession or explicit replanning rather than ordinary continuation.
+Automatic chaining keeps ordinary follow-up work connected. `review` is ordinary non-escalation work: requested review Tasks normally depend on the work they assess, and fan-in reviews use `--chain none` with explicit `--depends-on` edges for each prerequisite.
+
+Escalation tasks are not auto-blocked. Escalations created from held work receive a non-blocking `chain_source`; Repair Alerts receive a `repair_source` and must be repaired with Supersession or explicit replanning rather than ordinary continuation.
 
 ### Supersession
 

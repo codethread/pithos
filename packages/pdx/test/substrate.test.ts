@@ -1286,15 +1286,19 @@ describe("pdx substrate", () => {
 		);
 		await run(handle.close);
 		expect(calls).toContain("pruneEvents");
-		expect(logRecords).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					span: "pdx.maintenance",
-					msg: "event prune completed",
-					data: expect.objectContaining({ deleted_heartbeat: 7, deleted_other: 2 }),
-				}),
-			]),
-		);
+		expect(
+			logRecords.some(
+				(record) =>
+					record.span === "pdx.maintenance" &&
+					record.msg === "event prune completed" &&
+					typeof record.data === "object" &&
+					record.data !== null &&
+					"deleted_heartbeat" in record.data &&
+					"deleted_other" in record.data &&
+					record.data.deleted_heartbeat === 7 &&
+					record.data.deleted_other === 2,
+			),
+		).toBe(true);
 	});
 
 	it("daemon reports Pandora launch failures in lifecycle output before later ticks retry", async () => {

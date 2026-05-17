@@ -55,3 +55,9 @@ Append notes here. Do not rewrite earlier notes.
 - Updated control-plane docs with Greed review launch/lifecycle and readiness escalation to Pandora.
 - Removed the temporary scoped review change spec from the specs index and filesystem.
 - Validation: `pnpm verify` passed.
+
+### Task 4 verification — 2026-05-17
+
+- Isolated `pandora-spawn preview` succeeded for Greed with `--selected-capability review`, Pandora, and Toil after fresh `pithos init --fresh` and `pdx init` in temp data/user dirs.
+- `pnpm verify` passed from the repo root.
+- No temporary scoped review spec remains under `specs/`; no integration repairs were needed.

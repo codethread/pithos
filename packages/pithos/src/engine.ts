@@ -292,10 +292,31 @@ const ansi = {
 	green: "\u001b[32m",
 	yellow: "\u001b[33m",
 	blue: "\u001b[34m",
+	cyan: "\u001b[36m",
 };
 
 const color = (enabled: boolean, code: string, text: string): string =>
 	enabled ? `${code}${text}${ansi.reset}` : text;
+
+const taskStatusColor = (status: TaskStatus): string => {
+	switch (status) {
+		case "queued":
+			return ansi.yellow;
+		case "claimed":
+		case "running":
+			return ansi.blue;
+		case "done":
+			return ansi.green;
+		case "failed":
+			return ansi.red;
+		case "dead_letter":
+			return `${ansi.bold}${ansi.red}`;
+		case "cancelled":
+			return ansi.dim;
+	}
+};
+
+const capabilityColor = (_capability: Capability): string => `${ansi.dim}${ansi.cyan}`;
 
 const taskTitleLineColored = (
 	task: {
@@ -307,23 +328,9 @@ const taskTitleLineColored = (
 	},
 	enabled: boolean,
 ): string => {
-	const line = taskTitleLine(task);
-	if (!enabled) return line;
-	switch (task.status) {
-		case "queued":
-			return color(enabled, ansi.yellow, line);
-		case "claimed":
-		case "running":
-			return color(enabled, ansi.blue, line);
-		case "done":
-			return color(enabled, ansi.green, line);
-		case "failed":
-			return color(enabled, ansi.red, line);
-		case "dead_letter":
-			return color(enabled, `${ansi.bold}${ansi.red}`, line);
-		case "cancelled":
-			return color(enabled, ansi.dim, line);
-	}
+	if (!enabled) return taskTitleLine(task);
+	const status = effectiveTaskStatus(task);
+	return `${color(enabled, taskStatusColor(task.status), task.id)} ${color(enabled, capabilityColor(task.capability), `[${task.capability}]`)} [${status}] ${task.title}`;
 };
 
 const fencedMarkdown = (body: string): string => {

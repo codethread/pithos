@@ -492,7 +492,12 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 		if (typeof result === "string") {
 			yield* ctx.services.output.write(result);
 		} else if (input.command === "task.claim" && tty) {
-			yield* ctx.services.output.write(colorText(true, successGreen, json(result)));
+			const claimJson = json(result);
+			const subtleClaimJson = claimJson.replace(
+				'"status":"claimed"',
+				`"status":"${colorText(true, successGreen, "claimed")}"`,
+			);
+			yield* ctx.services.output.write(subtleClaimJson);
 		} else {
 			yield* writeJson(result);
 		}

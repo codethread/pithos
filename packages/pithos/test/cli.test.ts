@@ -1097,8 +1097,8 @@ describe("pithos cli", () => {
 			const text =
 				(await runCli(["graph", "inspect", "--task", taskId], dbPath, undefined, { isTty: true }))
 					.stdout[0] ?? "";
-			expect(text).toContain("\u001b[32m");
-			expect(text).toContain(`${taskId} [triage] [done] Done leaf`);
+			expect(text).toContain(`- [32m${taskId}[0m [2m[36m[triage][0m [done] Done leaf`);
+			expect(text).not.toContain(`[32m[done]`);
 		});
 
 		it("adds ANSI colors to task claim success and no-work failures in a tty", async () => {
@@ -1114,8 +1114,9 @@ describe("pithos cli", () => {
 				undefined,
 				{ isTty: true },
 			);
-			expect(claimed.stdout[0]).toContain("\u001b[32m");
+			expect(claimed.stdout[0]).toContain('"status":"[32mclaimed[0m"');
 			expect(claimed.stdout[0]).toContain('"ok":true');
+			expect(claimed.stdout[0]).not.toContain('[32m{"ok":true');
 
 			const noWork = await runCli(
 				["task", "claim", "--run", "run_other", "--scope", "global", "--capability", "triage"],

@@ -36,6 +36,7 @@ export {
 } from "./chain-policy.js";
 export {
 	makeEngine,
+	parseGraphSinceCutoff,
 	PDX_SYSTEM_RUN_ID,
 	renderBriefingText,
 	renderGraphInspectText,

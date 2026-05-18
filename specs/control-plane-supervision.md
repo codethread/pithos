@@ -228,7 +228,7 @@ All commands resolve data dir as `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/
 - `packages/pdx/src/main.ts` — public CLI and IPC dispatch
 - `packages/pdx/src/services.ts` — injected services and Registry interface
 - `packages/pdx/src/log.ts` — Supervisor log JSONL
-- `packages/pithos/src/engine.ts` and `packages/pithos/src/engine/*` — Run/Task transitions, Repair Alert creation, Engine output contracts, and text renderers
+- `packages/pithos/src/engine.ts` and `packages/pithos/src/engine/*` — Run/Task transitions, Repair Alert creation, Task/Scope read models, graph inspection, Engine output contracts, and text renderers
 - `packages/spawner/src/spawner.ts` — render/launch/transcript behavior
 - `resources/README.md` — manifest, layered template/config contract, input hook contract
 

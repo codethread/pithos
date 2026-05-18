@@ -2,15 +2,7 @@ import { Effect, Either, Schema } from "effect";
 import { resolve } from "node:path";
 import { finalDependencyIds, resolveChainPolicy } from "./chain-policy.js";
 import type { Db } from "./db.js";
-import {
-	migrate,
-	openDb,
-	sql,
-	type Capability,
-	type HarnessKind,
-	type SourceKind,
-	type TaskStatus,
-} from "./db.js";
+import { migrate, openDb, sql, type Capability, type HarnessKind } from "./db.js";
 import { fail } from "./errors.js";
 import {
 	decodeRow,
@@ -24,6 +16,30 @@ import {
 } from "./rows.js";
 import { withCollisionGuard, withDb } from "./engine/db-helpers.js";
 import { event, eventsTail, pruneEvents } from "./engine/event-log.js";
+import { inspectGraph } from "./engine/graph-inspect.js";
+import {
+	insertTaskSource,
+	isClaimable,
+	parseScopeArchiveCheck,
+	parseScopeIdentity,
+	parseScopeOutput,
+	parseTaskDetail,
+	parseTaskSummary,
+	taskArtifacts,
+	taskDetail,
+	taskInspectTask,
+	taskLineage,
+	taskSourceEdge,
+	taskSourceSummary,
+	taskSummary,
+	taskSummarySelect,
+	taskSupersessionLinks,
+	toScopeOutput,
+	type TaskSummary,
+	unresolvedDependencies,
+	validateReferenceTaskCurrent,
+} from "./engine/task-read-model.js";
+export { parseGraphSinceCutoff } from "./engine/graph-inspect.js";
 export {
 	renderBriefingText,
 	renderGraphInspectText,
@@ -32,23 +48,13 @@ export {
 export { PDX_SYSTEM_RUN_ID } from "./engine/types.js";
 import { PDX_SYSTEM_RUN_ID } from "./engine/types.js";
 import type {
-	ArtifactOutput,
 	ChainOutput,
 	Engine,
 	EngineContext,
-	GraphInspectOutput,
-	GraphSelectorOutput,
-	GraphSinceCutoff,
 	LaunchPreconditionEscalationOutput,
-	LineageEntryOutput,
 	RepairAlertOutput,
 	RunOutput,
-	ScopeIdentityOutput,
 	ScopeOutput,
-	TaskDetailOutput,
-	TaskInspectTaskOutput,
-	TaskSourceSummaryOutput,
-	TaskSummaryOutput,
 } from "./engine/types.js";
 export type {
 	ArtifactOutput,
@@ -320,296 +326,6 @@ const authorized = (
 	return r;
 };
 
-export type TaskSummary = TaskSummaryOutput;
-
-const TaskSummaryRowSchema = Schema.extend(
-	TaskRowSchema,
-	Schema.Struct({
-		scope_kind: Schema.Literal("global", "repo", "worktree"),
-		canonical_path: Schema.NullOr(Schema.String),
-		parent_repo_path: Schema.NullOr(Schema.String),
-		scope_description: Schema.NullOr(Schema.String),
-		completed_at: Schema.NullOr(Schema.String),
-	}),
-);
-type TaskSummaryRow = typeof TaskSummaryRowSchema.Type;
-
-const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
-	(
-		db
-			.prepare(sql`
-			SELECT td.depends_on_task_id AS id
-			FROM task_dependencies td
-			JOIN tasks dep ON dep.id = td.depends_on_task_id
-			WHERE td.task_id = ?
-			  AND dep.status <> 'done'
-			ORDER BY td.created_at ASC, td.depends_on_task_id ASC
-		`)
-			.all(taskId) as { readonly id: string }[]
-	).map((r) => r.id);
-
-const taskSummarySelect = sql`
-SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, s.parent_repo_path, s.description AS scope_description, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at, t.completed_at
-FROM tasks t
-JOIN scopes s ON s.id = t.scope_id
-`;
-
-const toTaskSummary = (row: TaskSummaryRow): TaskSummary => ({
-	id: row.id,
-	scope_id: row.scope_id,
-	scope_kind: row.scope_kind,
-	canonical_path: row.canonical_path,
-	parent_repo_path: row.parent_repo_path,
-	scope_description: row.scope_description,
-	capability: row.capability,
-	status: row.status,
-	title: row.title,
-	created_at: row.created_at,
-	completed_at: row.completed_at,
-});
-
-const parseTaskSummary = (value: unknown, message: string): TaskSummary =>
-	toTaskSummary(decodeRow(TaskSummaryRowSchema, value, message));
-
-const parseTaskDetail = (value: unknown, message: string): TaskDetailOutput => {
-	const row = decodeRow(TaskSummaryRowSchema, value, message);
-	return {
-		...toTaskSummary(row),
-		body: row.body,
-		fencing_token: row.fencing_token,
-		attempts: row.attempts,
-		max_attempts: row.max_attempts,
-	};
-};
-
-const ScopeListRowSchema = Schema.extend(
-	ScopeRowSchema,
-	Schema.Struct({
-		task_count: Schema.Number,
-		run_count: Schema.Number,
-	}),
-);
-
-const ScopeArchiveCheckRowSchema = Schema.extend(
-	ScopeListRowSchema,
-	Schema.Struct({
-		live_run_count: Schema.Number,
-		active_task_count: Schema.Number,
-	}),
-);
-
-type ScopeListRow = typeof ScopeListRowSchema.Type;
-type ScopeArchiveCheckRow = typeof ScopeArchiveCheckRowSchema.Type;
-
-const toScopeIdentityOutput = (row: ScopeRow): ScopeIdentityOutput => ({
-	id: row.id,
-	kind: row.kind,
-	canonical_path: row.canonical_path,
-	parent_repo_path: row.parent_repo_path,
-	archived_at: row.archived_at,
-	description: row.description,
-});
-
-const parseScopeIdentity = (value: unknown, message: string): ScopeIdentityOutput =>
-	toScopeIdentityOutput(decodeRow(ScopeRowSchema, value, message));
-
-const toScopeOutput = (row: ScopeListRow): ScopeOutput => ({
-	...toScopeIdentityOutput(row),
-	task_count: row.task_count,
-	run_count: row.run_count,
-});
-
-const parseScopeOutput = (value: unknown, message: string): ScopeOutput =>
-	toScopeOutput(decodeRow(ScopeListRowSchema, value, message));
-
-const parseScopeArchiveCheck = (value: unknown, message: string): ScopeArchiveCheckRow =>
-	decodeRow(ScopeArchiveCheckRowSchema, value, message);
-
-const ArtifactRowSchema = Schema.Struct({
-	id: Schema.String,
-	kind: Schema.String,
-	title: Schema.String,
-	body: Schema.String,
-	created_at: Schema.String,
-});
-
-const parseArtifact = (value: unknown): ArtifactOutput =>
-	decodeRow(ArtifactRowSchema, value, "malformed artifact row");
-
-const SourceKindSchema = Schema.Literal("chain_source", "repair_source");
-
-const TaskSourceEdgeRowSchema = Schema.Struct({
-	task_id: Schema.String,
-	source_task_id: Schema.String,
-	kind: SourceKindSchema,
-});
-
-type TaskSourceEdgeRow = typeof TaskSourceEdgeRowSchema.Type;
-
-const parseTaskSourceEdge = (value: unknown): TaskSourceEdgeRow =>
-	decodeRow(TaskSourceEdgeRowSchema, value, "malformed task source edge row");
-
-const compareTaskCreatedAt = <T extends { readonly created_at: string; readonly id: string }>(
-	a: T,
-	b: T,
-): number => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id);
-
-const taskSummary = (db: Db, taskId: string): TaskSummary =>
-	parseTaskSummary(
-		db.prepare(`${taskSummarySelect} WHERE t.id = ?`).get(taskId),
-		`task not found: ${taskId}`,
-	);
-
-const taskDetail = (db: Db, taskId: string): TaskDetailOutput =>
-	parseTaskDetail(
-		db.prepare(`${taskSummarySelect} WHERE t.id = ?`).get(taskId),
-		`task not found: ${taskId}`,
-	);
-
-const taskArtifacts = (db: Db, taskId: string): readonly ArtifactOutput[] =>
-	db
-		.prepare(
-			sql`SELECT id, kind, title, body, created_at FROM artifacts WHERE task_id=? ORDER BY created_at ASC, id ASC`,
-		)
-		.all(taskId)
-		.map(parseArtifact);
-
-const taskSupersessionLinks = (
-	db: Db,
-	taskId: string,
-): { readonly supersedes: string | null; readonly superseded_by: string | null } => ({
-	supersedes:
-		(db
-			.prepare(sql`SELECT old_task_id FROM task_supersessions WHERE new_task_id=?`)
-			.pluck()
-			.get(taskId) as string | undefined) ?? null,
-	superseded_by:
-		(db
-			.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
-			.pluck()
-			.get(taskId) as string | undefined) ?? null,
-});
-
-const taskSourceEdges = (db: Db): readonly TaskSourceEdgeRow[] =>
-	db
-		.prepare(sql`SELECT task_id, source_task_id, kind FROM task_sources`)
-		.all()
-		.map(parseTaskSourceEdge);
-
-const taskSourceEdge = (db: Db, taskId: string): TaskSourceEdgeRow | null => {
-	const row = db
-		.prepare(sql`SELECT task_id, source_task_id, kind FROM task_sources WHERE task_id=?`)
-		.get(taskId);
-	return row === undefined ? null : parseTaskSourceEdge(row);
-};
-
-const taskSourceSummary = (db: Db, taskId: string): TaskSourceSummaryOutput | null => {
-	const edge = taskSourceEdge(db, taskId);
-	return edge === null ? null : { ...taskSummary(db, edge.source_task_id), source_kind: edge.kind };
-};
-
-const validateReferenceTaskCurrent = (db: Db, taskId: string, label: string): void => {
-	const exists = db.prepare(sql`SELECT 1 FROM tasks WHERE id = ?`).get(taskId);
-	if (exists === undefined) fail("NOT_FOUND", `${label} task not found: ${taskId}`);
-	const replacement = db
-		.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id = ?`)
-		.pluck()
-		.get(taskId) as string | undefined;
-	if (replacement !== undefined)
-		fail("VALIDATION_ERROR", `${label} task ${taskId} was superseded by ${replacement}`);
-};
-
-const insertTaskSource = (
-	db: Db,
-	taskId: string,
-	sourceTaskId: string,
-	sourceRunId: string,
-	kind: SourceKind,
-): void => {
-	const inserted = db
-		.prepare(sql`
-			INSERT INTO task_sources(task_id, source_task_id, source_run_id, kind)
-			SELECT ?, t.id, ?, ?
-			FROM tasks t
-			WHERE t.id = ?
-			  AND NOT EXISTS (
-				SELECT 1 FROM task_supersessions ts WHERE ts.old_task_id = t.id
-			  )
-		`)
-		.run(taskId, sourceRunId, kind, sourceTaskId);
-	if (inserted.changes === 1) return;
-	validateReferenceTaskCurrent(db, sourceTaskId, "source");
-	fail("STALE_TOKEN_RACE", "source task changed before source link write");
-};
-
-const sortTaskIdsDeterministically = (db: Db, taskIds: readonly string[]): readonly string[] =>
-	taskIds
-		.map((taskId) => taskSummary(db, taskId))
-		.sort(compareTaskCreatedAt)
-		.map((task) => task.id);
-
-const isClaimable = (db: Db, task: { readonly id: string; readonly status: string }): boolean =>
-	task.status === "queued" && unresolvedDependencies(db, task.id).length === 0;
-
-const taskInspectTask = (db: Db, taskId: string): TaskInspectTaskOutput => {
-	const task = taskDetail(db, taskId);
-	return {
-		...task,
-		claimable: isClaimable(db, task),
-		unresolved_dependency_ids: unresolvedDependencies(db, taskId),
-	};
-};
-
-const taskLineage = (db: Db, taskId: string): readonly LineageEntryOutput[] => {
-	const parentsByTaskId = new Map<string, string[]>();
-	for (const row of db
-		.prepare(
-			sql`SELECT task_id, depends_on_task_id FROM task_dependencies ORDER BY created_at ASC, task_id ASC, depends_on_task_id ASC`,
-		)
-		.all() as {
-		readonly task_id: string;
-		readonly depends_on_task_id: string;
-	}[]) {
-		parentsByTaskId.set(row.task_id, [
-			...(parentsByTaskId.get(row.task_id) ?? []),
-			row.depends_on_task_id,
-		]);
-	}
-	const lineage = new Map<string, { depth: number; via_task_ids: Set<string> }>();
-	const queue: { readonly taskId: string; readonly depth: number }[] = [{ taskId, depth: 0 }];
-	let index = 0;
-	while (index < queue.length) {
-		const current = queue[index] ?? fail("INTERNAL_ERROR", "missing lineage queue item");
-		index += 1;
-		for (const parentTaskId of parentsByTaskId.get(current.taskId) ?? []) {
-			const depth = current.depth + 1;
-			const existing = lineage.get(parentTaskId);
-			if (existing === undefined || depth < existing.depth) {
-				lineage.set(parentTaskId, { depth, via_task_ids: new Set([current.taskId]) });
-				queue.push({ taskId: parentTaskId, depth });
-				continue;
-			}
-			if (depth === existing.depth) {
-				existing.via_task_ids.add(current.taskId);
-			}
-		}
-	}
-	return [...lineage.entries()]
-		.map(([ancestorTaskId, state]) => {
-			const task = taskInspectTask(db, ancestorTaskId);
-			const supersession = taskSupersessionLinks(db, ancestorTaskId);
-			return {
-				depth: state.depth,
-				via_task_ids: sortTaskIdsDeterministically(db, [...state.via_task_ids]),
-				task,
-				supersedes: supersession.supersedes,
-				superseded_by: supersession.superseded_by,
-				artifacts: taskArtifacts(db, ancestorTaskId),
-			};
-		})
-		.sort((a, b) => b.depth - a.depth || compareTaskCreatedAt(a.task, b.task));
-};
-
 const runById = (db: Db, runId: string): RunRow =>
 	decodeRow(
 		RunRowSchema,
@@ -759,244 +475,6 @@ const createRepairAlertTask = (
 			};
 		})(),
 	);
-};
-
-const statusFilterSql = (statuses: readonly TaskStatus[]): string =>
-	statuses.length === 0 ? "" : ` AND status IN (${statuses.map(() => "?").join(",")})`;
-
-const requireNonEmptySearchTerms = (search: readonly string[]): readonly string[] =>
-	search.map((term) => requireNonEmpty(term.trim(), "--search"));
-
-const searchFilterSql = (search: readonly string[]): string =>
-	search
-		.map(() => " AND (instr(lower(title), lower(?)) > 0 OR instr(lower(body), lower(?)) > 0)")
-		.join("");
-
-const searchFilterParams = (search: readonly string[]): readonly string[] =>
-	search.flatMap((term) => [term, term]);
-
-const sinceFilterSql = (since: GraphSinceCutoff | undefined): string =>
-	since === undefined ? "" : " AND (created_at >= ? OR updated_at >= ? OR completed_at >= ?)";
-
-const sinceFilterParams = (since: GraphSinceCutoff | undefined): readonly string[] =>
-	since === undefined ? [] : [since.dbTimestamp, since.dbTimestamp, since.dbTimestamp];
-
-const toDbTimestamp = (date: Date): string => {
-	if (Number.isNaN(date.getTime())) fail("VALIDATION_ERROR", "invalid --since cutoff");
-	return date
-		.toISOString()
-		.replace("T", " ")
-		.replace(/\.\d{3}Z$/, "");
-};
-
-const startOfLocalDay = (date: Date): Date =>
-	new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
-
-export const parseGraphSinceCutoff = (raw: string, nowIso: string): GraphSinceCutoff => {
-	const value = requireNonEmpty(raw.trim(), "--since");
-	const now = new Date(nowIso);
-	if (Number.isNaN(now.getTime())) {
-		fail("INTERNAL_ERROR", `clock returned invalid ISO timestamp: ${nowIso}`);
-	}
-	if (value === "today") return { dbTimestamp: toDbTimestamp(startOfLocalDay(now)) };
-	const relative = /^(\d+)([hd])$/.exec(value);
-	if (relative !== null) {
-		const amount = Number(relative[1]);
-		if (!Number.isSafeInteger(amount) || amount < 1) {
-			fail("VALIDATION_ERROR", "invalid --since cutoff");
-		}
-		const unit = relative[2];
-		const millis = amount * (unit === "h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000);
-		return { dbTimestamp: toDbTimestamp(new Date(now.getTime() - millis)) };
-	}
-	const localDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-	if (localDate !== null) {
-		const year = Number(localDate[1]);
-		const month = Number(localDate[2]);
-		const day = Number(localDate[3]);
-		const cutoff = new Date(year, month - 1, day, 0, 0, 0, 0);
-		if (
-			cutoff.getFullYear() !== year ||
-			cutoff.getMonth() !== month - 1 ||
-			cutoff.getDate() !== day
-		) {
-			fail("VALIDATION_ERROR", "invalid --since cutoff");
-		}
-		return { dbTimestamp: toDbTimestamp(cutoff) };
-	}
-	const isoTimestamp =
-		/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/.exec(
-			value,
-		);
-	if (isoTimestamp !== null) {
-		const parsed = new Date(value);
-		if (Number.isNaN(parsed.getTime())) fail("VALIDATION_ERROR", "invalid --since cutoff");
-		const offset = isoTimestamp[8] ?? fail("INTERNAL_ERROR", "missing ISO timestamp offset");
-		const offsetMinutes =
-			offset === "Z" ? 0 : Number(offset.slice(1, 3)) * 60 + Number(offset.slice(4, 6));
-		const localInstant = new Date(
-			parsed.getTime() + (offset.startsWith("-") ? -offsetMinutes : offsetMinutes) * 60_000,
-		);
-		const [year, month, day, hour, minute, second] = [
-			localInstant.getUTCFullYear(),
-			localInstant.getUTCMonth() + 1,
-			localInstant.getUTCDate(),
-			localInstant.getUTCHours(),
-			localInstant.getUTCMinutes(),
-			localInstant.getUTCSeconds(),
-		];
-		if (
-			year !== Number(isoTimestamp[1]) ||
-			month !== Number(isoTimestamp[2]) ||
-			day !== Number(isoTimestamp[3]) ||
-			hour !== Number(isoTimestamp[4]) ||
-			minute !== Number(isoTimestamp[5]) ||
-			second !== Number(isoTimestamp[6])
-		) {
-			fail("VALIDATION_ERROR", "invalid --since cutoff");
-		}
-		return { dbTimestamp: toDbTimestamp(parsed) };
-	}
-	return fail("VALIDATION_ERROR", "invalid --since cutoff");
-};
-
-const graphForIds = (
-	db: Db,
-	selector: GraphSelectorOutput,
-	seedIds: readonly string[],
-): GraphInspectOutput => {
-	const ids = new Set(seedIds);
-	let changed = true;
-	while (changed) {
-		changed = false;
-		for (const row of db
-			.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`)
-			.all() as { task_id: string; depends_on_task_id: string }[]) {
-			if (ids.has(row.task_id) || ids.has(row.depends_on_task_id)) {
-				if (!ids.has(row.task_id)) {
-					ids.add(row.task_id);
-					changed = true;
-				}
-				if (!ids.has(row.depends_on_task_id)) {
-					ids.add(row.depends_on_task_id);
-					changed = true;
-				}
-			}
-		}
-		for (const row of taskSourceEdges(db)) {
-			if (row.kind === "repair_source" && selector.kind === "scope") {
-				// For scope-based graphs, repair_source expansion is one-directional:
-				// follow alert → affected task, but not the reverse. This prevents
-				// global Repair Alert tasks from leaking into scoped (repo/worktree)
-				// graph views just because a failed task in that scope is in the
-				// seed set. For task-by-ID graphs the bidirectional path below is
-				// intentional so the repair alert is visible when inspecting the
-				// affected task directly.
-				if (ids.has(row.task_id) && !ids.has(row.source_task_id)) {
-					ids.add(row.source_task_id);
-					changed = true;
-				}
-			} else if (ids.has(row.task_id) || ids.has(row.source_task_id)) {
-				if (!ids.has(row.task_id)) {
-					ids.add(row.task_id);
-					changed = true;
-				}
-				if (!ids.has(row.source_task_id)) {
-					ids.add(row.source_task_id);
-					changed = true;
-				}
-			}
-		}
-		for (const row of db
-			.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`)
-			.all() as { old_task_id: string; new_task_id: string }[]) {
-			if (ids.has(row.old_task_id) || ids.has(row.new_task_id)) {
-				if (!ids.has(row.old_task_id)) {
-					ids.add(row.old_task_id);
-					changed = true;
-				}
-				if (!ids.has(row.new_task_id)) {
-					ids.add(row.new_task_id);
-					changed = true;
-				}
-			}
-		}
-	}
-	const nodes = [...ids]
-		.map((id) => taskSummary(db, id))
-		.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
-		.map((task) => ({
-			id: task.id,
-			scope_id: task.scope_id,
-			scope_kind: task.scope_kind,
-			canonical_path: task.canonical_path,
-			parent_repo_path: task.parent_repo_path,
-			scope_description: task.scope_description,
-			capability: task.capability,
-			status: task.status,
-			title: task.title,
-			created_at: task.created_at,
-			completed_at: task.completed_at,
-			claimable: isClaimable(db, task),
-			unresolved_dependency_ids: unresolvedDependencies(db, task.id),
-			supersedes_task_id:
-				(db
-					.prepare(sql`SELECT old_task_id FROM task_supersessions WHERE new_task_id=?`)
-					.pluck()
-					.get(task.id) as string | undefined) ?? null,
-			superseded_by_task_id:
-				(db
-					.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
-					.pluck()
-					.get(task.id) as string | undefined) ?? null,
-			source_task_id: taskSourceEdge(db, task.id)?.source_task_id ?? null,
-			source_kind: taskSourceEdge(db, task.id)?.kind ?? null,
-		}));
-	const edges = [
-		...(
-			db.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`).all() as {
-				task_id: string;
-				depends_on_task_id: string;
-			}[]
-		)
-			.filter((e) => ids.has(e.task_id) && ids.has(e.depends_on_task_id))
-			.map((e) => ({
-				kind: "depends_on" as const,
-				from_task_id: e.task_id,
-				to_task_id: e.depends_on_task_id,
-				satisfied:
-					(db
-						.prepare(sql`SELECT status FROM tasks WHERE id=?`)
-						.pluck()
-						.get(e.depends_on_task_id) as string) === "done",
-			})),
-		...taskSourceEdges(db)
-			.filter((e) => ids.has(e.task_id) && ids.has(e.source_task_id))
-			.map((e) => ({
-				kind: "source" as const,
-				from_task_id: e.task_id,
-				to_task_id: e.source_task_id,
-				source_kind: e.kind,
-			})),
-		...(
-			db.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`).all() as {
-				old_task_id: string;
-				new_task_id: string;
-			}[]
-		)
-			.filter((e) => ids.has(e.old_task_id) && ids.has(e.new_task_id))
-			.map((e) => ({
-				kind: "supersedes" as const,
-				from_task_id: e.new_task_id,
-				to_task_id: e.old_task_id,
-			})),
-	].sort(
-		(a, b) =>
-			a.kind.localeCompare(b.kind) ||
-			a.from_task_id.localeCompare(b.from_task_id) ||
-			a.to_task_id.localeCompare(b.to_task_id),
-	);
-	return { ok: true as const, graph: { selector, nodes, edges } };
 };
 
 export const makeEngine = (ctx: EngineContext): Engine => ({
@@ -1855,86 +1333,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			};
 		}),
 	graphInspect: ({ taskId, scope, all, status = [], search = [], sinceCutoff }) =>
-		withDb(ctx, (db) => {
-			const searchTerms = requireNonEmptySearchTerms(search);
-			const selectorCount = [taskId, scope, all === true ? "all" : undefined].filter(
-				(v) => v !== undefined,
-			).length;
-			if (selectorCount !== 1) fail("VALIDATION_ERROR", "provide exactly one graph selector");
-
-			const defaultVisibility =
-				status.length === 0 && searchTerms.length === 0 && sinceCutoff === undefined
-					? " AND (status <> 'cancelled' OR completed_at > datetime('now', '-1 hour'))"
-					: "";
-			const statusClause = statusFilterSql(status);
-			const searchClause = searchFilterSql(searchTerms);
-			const sinceClause = sinceFilterSql(sinceCutoff);
-			const filterParams = [
-				...status,
-				...searchFilterParams(searchTerms),
-				...sinceFilterParams(sinceCutoff),
-			];
-
-			if (taskId !== undefined) {
-				taskSummary(db, taskId);
-				return graphForIds(
-					db,
-					{ kind: "task", value: taskId },
-					(
-						db
-							.prepare(sql`
-								SELECT id
-								FROM tasks
-								WHERE id=?
-								  ${statusClause}
-								  ${searchClause}
-								  ${sinceClause}
-							`)
-							.all(taskId, ...filterParams) as { id: string }[]
-					).map((r) => r.id),
-				);
-			}
-
-			if (scope !== undefined) {
-				const scopeExists = db.prepare(sql`SELECT 1 FROM scopes WHERE id=?`).get(scope);
-				if (scopeExists === undefined) fail("NOT_FOUND", `scope not found: ${scope}`);
-				return graphForIds(
-					db,
-					{ kind: "scope", value: scope },
-					(
-						db
-							.prepare(sql`
-								SELECT id
-								FROM tasks
-								WHERE scope_id=?
-								  ${defaultVisibility}
-								  ${statusClause}
-								  ${searchClause}
-								  ${sinceClause}
-							`)
-							.all(scope, ...filterParams) as { id: string }[]
-					).map((r) => r.id),
-				);
-			}
-
-			return graphForIds(
-				db,
-				{ kind: "all" },
-				(
-					db
-						.prepare(sql`
-							SELECT id
-							FROM tasks
-							WHERE 1=1
-							  ${defaultVisibility}
-							  ${statusClause}
-							  ${searchClause}
-							  ${sinceClause}
-						`)
-						.all(...filterParams) as { id: string }[]
-				).map((r) => r.id),
-			);
-		}),
+		withDb(ctx, (db) => inspectGraph(db, { taskId, scope, all, status, search, sinceCutoff })),
 	briefing: ({ agent }) =>
 		withDb(ctx, (db) => {
 			const caps =

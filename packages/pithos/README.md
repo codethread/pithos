@@ -56,7 +56,7 @@ The composed behavior is specified in [`../../specs/control-plane-supervision.md
 Exported from `@pdx/pithos`:
 
 - CLI helpers: `makePithosCommand`, `runPithosCli`, `renderPithosHelpJson`.
-- Engine boundary: `makeEngine`, `Engine`, render helpers for briefing/graph/task inspect text, and library-only event pruning used by `pdx` maintenance.
+- Engine boundary: `makeEngine`, `Engine`, graph `--since` cutoff parsing, render helpers for briefing/graph/task inspect text, and library-only event pruning used by `pdx` maintenance.
 - Schema/DB helpers: `migrate`, `openDb`, row schemas, decoded row helpers.
 - Chain helpers: chain-policy resolution and graph dependency utilities.
 - Config/services/errors: `loadConfig`, `liveServices`, `PithosError`.
@@ -105,6 +105,8 @@ Important details:
 - `src/engine/render.ts` — pure task/graph/briefing text rendering.
 - `src/engine/db-helpers.ts` — shared Engine DB open/migrate/close and ID-collision handling.
 - `src/engine/event-log.ts` — durable event insert, tail, and retention pruning logic.
+- `src/engine/task-read-model.ts` — DB row parsing and reusable Task/Scope read-model queries used by transitions and inspections.
+- `src/engine/graph-inspect.ts` — graph selector filtering, `--since` cutoff parsing, and dependency/source/supersession closure assembly.
 
 `src/engine.ts` still implements the state-transition methods for:
 

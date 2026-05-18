@@ -49,6 +49,7 @@ Refactor approach:
 - Keep public package boundaries stable. Consumers should still import from documented package roots unless the task explicitly changes the API.
 - Keep dependency direction simple. Avoid circular imports and sibling `src/*` imports from other packages.
 - Update README/docs when module layout or public boundaries change.
+- After extraction, scan specs and docs for stale references to the old file as the sole implementation location. Update them to mention the new module set or package boundary where appropriate.
 
 Tests during refactor:
 
@@ -60,6 +61,7 @@ Tests during refactor:
 Review gate:
 
 - After the refactor compiles and focused tests pass, seek code review before deleting any scaffold tests or committing.
+- Include doc/spec alignment in the review brief when files moved or package boundaries changed.
 - Address review findings, then re-run validation.
 
 Validation and commit:

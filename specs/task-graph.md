@@ -124,7 +124,7 @@ Briefing owns agenda questions: ready work, blocked work, recent completions, an
 The durable schema and Engine implementation live in:
 
 - `packages/pithos/src/db.ts` — schema, migrations, seeded built-ins
-- `packages/pithos/src/engine.ts` — state transitions and inspection operations
+- `packages/pithos/src/engine.ts` and `packages/pithos/src/engine/*` — state transitions, inspection operations, Engine output contracts, and text renderers
 - `packages/pithos/src/chain-policy.ts` — chain, dependency, source, supersession helpers
 - `packages/pithos/src/cli.ts` — public CLI and help JSON
 - `packages/pithos/src/rows.ts` — SQLite row parsing

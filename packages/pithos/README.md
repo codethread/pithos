@@ -99,10 +99,14 @@ Important details:
 
 ### `src/engine.ts` and `src/engine/*` — durable state transitions
 
-`src/engine.ts` owns the Pithos domain API used by both the CLI and `pdx`, while focused engine submodules hold stable shared types and pure text renderers:
+`src/engine.ts` owns the Pithos domain API used by both the CLI and `pdx`, while focused engine submodules hold stable shared contracts and cohesive helpers:
 
 - `src/engine/types.ts` — public Engine input/output contracts.
 - `src/engine/render.ts` — pure task/graph/briefing text rendering.
+- `src/engine/db-helpers.ts` — shared Engine DB open/migrate/close and ID-collision handling.
+- `src/engine/event-log.ts` — durable event insert, tail, and retention pruning logic.
+
+`src/engine.ts` still implements the state-transition methods for:
 
 - scope upsert/list/archive, including repo/worktree directory admission checks
 - Run upsert/inspect/Cleanup/Interrupt/timeout/launch-abort
@@ -112,7 +116,7 @@ Important details:
 - graph inspect
 - briefing
 - event tail
-- library-only `pruneEvents` retention maintenance (default: heartbeat events older than 1 day, other events older than 7 days)
+- library-only `pruneEvents` retention maintenance (default: heartbeat events older than 1 day, other events older than 7 days) through `src/engine/event-log.ts`
 - text renderers for task/graph/briefing views
 
 Engine code opens the SQLite DB, runs migrations, executes transition logic, and closes the DB per operation. Race-sensitive updates run inside SQLite transactions and use fenced preconditions so stale writes fail rather than drifting state. Scope/task admission validates external filesystem state at the Pithos boundary: repo/worktree paths must exist as directories when scopes are upserted and when tasks are enqueued or superseded into those scopes.

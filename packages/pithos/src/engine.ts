@@ -1,4 +1,4 @@
-import { Effect, Either, ParseResult, Schema } from "effect";
+import { Effect, Either, Schema } from "effect";
 import { resolve } from "node:path";
 import { finalDependencyIds, resolveChainPolicy } from "./chain-policy.js";
 import type { Db } from "./db.js";
@@ -14,7 +14,6 @@ import {
 import { fail } from "./errors.js";
 import {
 	decodeRow,
-	EventRowSchema,
 	RepairAlertKindSchema,
 	RunRowSchema,
 	ScopeRowSchema,
@@ -23,6 +22,8 @@ import {
 	type RunRow,
 	type ScopeRow,
 } from "./rows.js";
+import { withCollisionGuard, withDb } from "./engine/db-helpers.js";
+import { event, eventsTail, pruneEvents } from "./engine/event-log.js";
 export {
 	renderBriefingText,
 	renderGraphInspectText,
@@ -38,7 +39,6 @@ import type {
 	GraphInspectOutput,
 	GraphSelectorOutput,
 	GraphSinceCutoff,
-	Json,
 	LaunchPreconditionEscalationOutput,
 	LineageEntryOutput,
 	RepairAlertOutput,
@@ -80,8 +80,6 @@ export type {
 	TaskSummaryOutput,
 } from "./engine/types.js";
 
-const HEARTBEAT_EVENT_TYPES = ["run.heartbeat", "task.heartbeat"] as const;
-
 const toRunOutput = (row: RunRow): RunOutput => ({
 	id: row.id,
 	agent: row.agent_kind,
@@ -96,14 +94,6 @@ const toRunOutput = (row: RunRow): RunOutput => ({
 	created_at: row.created_at,
 	updated_at: row.updated_at,
 });
-
-const eventPayload = sql`
-INSERT INTO events(
-	id, type, task_id, run_id, actor_run_id, payload_json
-) VALUES (
-	?,?,?,?,?,?
-)
-`;
 
 const claimableTaskQuery = sql`
 SELECT id
@@ -156,13 +146,6 @@ const parseHarnessKind = (value: unknown): HarnessKind =>
 
 const requireNonEmpty = (value: string, name: string): string => {
 	if (value.length === 0) fail("VALIDATION_ERROR", `${name} must be non-empty`);
-	return value;
-};
-
-const requirePositiveInteger = (value: number, name: string): number => {
-	if (!Number.isSafeInteger(value) || value < 1) {
-		fail("VALIDATION_ERROR", `${name} must be a positive integer`);
-	}
 	return value;
 };
 
@@ -288,69 +271,6 @@ const scopeSelect = sql`
 SELECT id, kind, canonical_path, parent_repo_path, archived_at, description
 FROM scopes
 `;
-
-// Surfaces SQLite PRIMARY KEY constraint violations as ID_COLLISION errors.
-// The transaction rolls back automatically (better-sqlite3 throws on error).
-const withCollisionGuard = <A>(id: string, fn: () => A): A => {
-	try {
-		return fn();
-	} catch (error) {
-		if (
-			error !== null &&
-			typeof error === "object" &&
-			"code" in error &&
-			error.code === "SQLITE_CONSTRAINT_PRIMARYKEY"
-		) {
-			fail("ID_COLLISION", `generated ID already exists: ${id}`);
-		}
-		throw error;
-	}
-};
-
-const event = (
-	ctx: EngineContext,
-	db: Db,
-	type: string,
-	payload: { task_id?: string; run_id?: string; actor_run_id?: string; payload: Json },
-): void => {
-	const eventId = Effect.runSync(ctx.services.ids.make("event"));
-	withCollisionGuard(eventId, () =>
-		db
-			.prepare(eventPayload)
-			.run(
-				eventId,
-				type,
-				payload.task_id ?? null,
-				payload.run_id ?? null,
-				payload.actor_run_id ?? null,
-				JSON.stringify(payload.payload),
-			),
-	);
-};
-
-const withDb = <A>(ctx: EngineContext, f: (db: Db) => A): A => {
-	const db = openDb(ctx.config.dbPath);
-	migrate(db);
-	try {
-		return f(db);
-	} finally {
-		db.close();
-	}
-};
-
-const EventPayloadSchema = Schema.parseJson(Schema.Unknown);
-
-const decodeEventPayload = (payloadJson: string, eventId: string): Json => {
-	const decoded = Schema.decodeUnknownEither(EventPayloadSchema)(payloadJson);
-	return Either.match(decoded, {
-		onLeft: (error) =>
-			fail(
-				"INTERNAL_ERROR",
-				`malformed event payload_json for ${eventId}: ${ParseResult.TreeFormatter.formatErrorSync(error)}`,
-			),
-		onRight: (payload) => payload as Json,
-	});
-};
 
 const liveRun = (db: Db, runId: string): RunRow => {
 	const r = decodeRow(
@@ -1598,69 +1518,8 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			})();
 			return { ok: true, run: toRunOutput(finalRun) };
 		}),
-	eventsTail: ({ limit }) =>
-		withDb(ctx, (db) => {
-			if (limit !== undefined && limit < 1) fail("VALIDATION_ERROR", "--limit must be positive");
-			const rows = db
-				.prepare(
-					sql`
-					SELECT id,type,task_id,run_id,actor_run_id,payload_json,created_at
-					FROM events
-					ORDER BY created_at DESC, id DESC
-					LIMIT ?
-					`,
-				)
-				.all(limit ?? 100)
-				.map((row) => decodeRow(EventRowSchema, row, "malformed event row"));
-			return {
-				ok: true,
-				events: rows.reverse().map((row) => ({
-					id: row.id,
-					type: row.type,
-					task_id: row.task_id,
-					run_id: row.run_id,
-					actor_run_id: row.actor_run_id,
-					payload: decodeEventPayload(row.payload_json, row.id),
-					created_at: row.created_at,
-				})),
-			};
-		}),
-	pruneEvents: (input) =>
-		withDb(ctx, (db) => {
-			const heartbeatOlderThanDays = requirePositiveInteger(
-				input?.heartbeatOlderThanDays ?? 1,
-				"heartbeatOlderThanDays",
-			);
-			const otherOlderThanDays = requirePositiveInteger(
-				input?.otherOlderThanDays ?? 7,
-				"otherOlderThanDays",
-			);
-			const nowIso = Effect.runSync(ctx.services.clock.nowIso());
-			const now = new Date(nowIso);
-			if (Number.isNaN(now.getTime())) {
-				fail("INTERNAL_ERROR", `clock returned invalid ISO timestamp: ${nowIso}`);
-			}
-			const heartbeatCutoff = toDbTimestamp(
-				new Date(now.getTime() - heartbeatOlderThanDays * 24 * 60 * 60 * 1000),
-			);
-			const otherCutoff = toDbTimestamp(
-				new Date(now.getTime() - otherOlderThanDays * 24 * 60 * 60 * 1000),
-			);
-			const deleted = db.transaction(() => {
-				const deletedHeartbeat = db
-					.prepare(sql`DELETE FROM events WHERE type IN (?, ?) AND created_at < ?`)
-					.run(HEARTBEAT_EVENT_TYPES[0], HEARTBEAT_EVENT_TYPES[1], heartbeatCutoff).changes;
-				const deletedOther = db
-					.prepare(sql`DELETE FROM events WHERE type NOT IN (?, ?) AND created_at < ?`)
-					.run(HEARTBEAT_EVENT_TYPES[0], HEARTBEAT_EVENT_TYPES[1], otherCutoff).changes;
-				return { deletedHeartbeat, deletedOther };
-			})();
-			return {
-				ok: true,
-				deleted_heartbeat: deleted.deletedHeartbeat,
-				deleted_other: deleted.deletedOther,
-			};
-		}),
+	eventsTail: ({ limit }) => eventsTail(ctx, limit),
+	pruneEvents: (input) => pruneEvents(ctx, input),
 	enqueue: ({ scope, capability, title, body, bodyFile, runId, dependsOn, chain }) =>
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);

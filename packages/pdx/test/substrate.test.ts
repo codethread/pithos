@@ -95,9 +95,9 @@ case "$cmd" in
     printf '%s\n' 'no server running on /tmp/tmux-test/default' >&2
     exit 1
     ;;
-  switch-client)
+  switch-client|attach)
     if [ "$1" = "-t" ]; then
-      printf '%s\n' "$2" >> "$PDX_TEST_TMUX_LOG"
+      printf '%s:%s\n' "$cmd" "$2" >> "$PDX_TEST_TMUX_LOG"
       exit 0
     fi
     ;;
@@ -267,6 +267,7 @@ const alwaysLiveTmux = Tmux.of({
 	newSession: () => Effect.void,
 	killSession: () => Effect.void,
 	switchClient: () => Effect.void,
+	attachSession: () => Effect.void,
 	sendLiteralLine: () => Effect.void,
 	pasteBuffer: () => Effect.void,
 	presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -484,7 +485,15 @@ describe("pdx substrate", () => {
 			...tmux.env(),
 			PDX_USER_DATA_DIR: userDataDir,
 		});
-		expect(stdout).toBe(`${dataDir}\n`);
+		expect(stdout).toBe(
+			[
+				"Pandora's Box initialized.",
+				`Data dir: ${dataDir}`,
+				`User config dir: ${userDataDir}`,
+				"",
+				"Next: run `pdx open` to release Pandora.",
+			].join("\n") + "\n",
+		);
 		expect(existsSync(join(dataDir, "pithos.sqlite"))).toBe(true);
 		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
 		expect(await readFile(join(dataDir, "AGENTS.md"), "utf8")).toContain(
@@ -618,6 +627,23 @@ describe("pdx substrate", () => {
 			},
 			{ file: "tmux", args: ["send-keys", "-t", "pdx--pandora", "Enter"], cwd: undefined },
 		]);
+	});
+
+	it("attaches to tmux through the foreground process path", async () => {
+		const calls: { file: string; args: readonly string[] }[] = [];
+		const process = Process.of({
+			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+			foreground: (file, args) =>
+				Effect.sync(() => {
+					calls.push({ file, args });
+					return { exitCode: 0, stdout: "", stderr: "" };
+				}),
+			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
+		});
+		const tmux = await run(makeTmux.pipe(Effect.provideService(Process, process)));
+		await run(tmux.attachSession(PANDORA_TARGET));
+		expect(calls).toEqual([{ file: "tmux", args: ["attach", "-t", PANDORA_TARGET] }]);
 	});
 
 	it("writes supervisor logs with required fields", async () => {
@@ -993,6 +1019,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1034,6 +1061,7 @@ describe("pdx substrate", () => {
 				}),
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1094,6 +1122,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1141,6 +1170,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1235,6 +1265,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1437,6 +1468,7 @@ describe("pdx substrate", () => {
 					killedSessions.push(target);
 				}),
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1535,6 +1567,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: (target) => Effect.sync(() => killed.push(target)),
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1659,6 +1692,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1699,6 +1733,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -1968,6 +2003,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -2028,6 +2064,7 @@ describe("pdx substrate", () => {
 							newSession: () => Effect.void,
 							killSession: () => Effect.void,
 							switchClient: (target) => Effect.sync(() => switches.push(target)),
+							attachSession: () => Effect.void,
 							sendLiteralLine: () => Effect.void,
 							pasteBuffer: () => Effect.void,
 							presence: () =>
@@ -2197,7 +2234,9 @@ describe("pdx substrate", () => {
 				run_id: "run_hitl",
 				task_id: enqueued.task.id,
 			});
-			expect(await readFile(join(fakeTmux.binDir, "tmux.log"), "utf8")).toBe("pdx--greed\n");
+			expect(await readFile(join(fakeTmux.binDir, "tmux.log"), "utf8")).toBe(
+				"switch-client:pdx--greed\n",
+			);
 		} finally {
 			await run(server.close);
 		}
@@ -2290,6 +2329,7 @@ describe("pdx substrate", () => {
 						newSession: () => Effect.void,
 						killSession: () => Effect.void,
 						switchClient: () => Effect.void,
+						attachSession: () => Effect.void,
 						sendLiteralLine: () => Effect.void,
 						pasteBuffer: () => Effect.void,
 						presence: () =>
@@ -2421,6 +2461,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -2692,6 +2733,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3017,6 +3059,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3092,6 +3135,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3164,6 +3208,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3242,6 +3287,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3470,6 +3516,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: (target) => Effect.sync(() => killed.push(target)),
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3568,6 +3615,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: (target) => Effect.sync(() => killed.push(target)),
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: () => Effect.void,
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3844,6 +3892,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 0, lastActivityUnix: null as number | null }),
@@ -3918,6 +3967,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 1, lastActivityUnix: nowUnix - 1 }),
@@ -3969,6 +4019,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 1, lastActivityUnix: nowUnix - 5 }),
@@ -4015,6 +4066,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
 			pasteBuffer: () => Effect.void,
 			presence: () =>
@@ -4083,6 +4135,7 @@ describe("pdx substrate", () => {
 			newSession: () => Effect.void,
 			killSession: () => Effect.void,
 			switchClient: () => Effect.void,
+			attachSession: () => Effect.void,
 			sendLiteralLine: (target, text) => Effect.sync(() => sends.push(`${target}:${text}`)),
 			pasteBuffer: () => Effect.void,
 			presence: () => Effect.succeed({ attached: 1, lastActivityUnix: nowUnix - 1 }),

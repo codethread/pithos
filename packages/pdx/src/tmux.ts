@@ -60,6 +60,20 @@ export const makeTmux = Effect.gen(function* () {
 						requireOk("tmux switch-client", result.exitCode, result.stderr),
 					),
 				),
+		attachSession: (target) => {
+			const foreground = processService.foreground;
+			if (foreground === undefined) {
+				return Effect.fail(
+					new PdxError({
+						code: "PROCESS_ERROR",
+						message: "tmux attach requires foreground process support",
+					}),
+				);
+			}
+			return foreground("tmux", ["attach", "-t", target]).pipe(
+				Effect.flatMap((result) => requireOk("tmux attach", result.exitCode, result.stderr)),
+			);
+		},
 		sendLiteralLine: (target, text) =>
 			processService.execFile("tmux", ["send-keys", "-t", target, "-l", "--", text]).pipe(
 				Effect.flatMap((result) =>

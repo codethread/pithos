@@ -88,7 +88,7 @@ Capabilities are `intake`, `triage`, `design`, `execute`, `review`, and `escalat
 
 ### `pdx open`
 
-`pdx open` runs init behavior, fails if the `pdx--daemon` tmux session already exists, starts the daemon in tmux, waits for IPC readiness, and prints the Pandora attach target. The daemon settles deterministic old pdx-owned tmux/AFK leftovers, upserts the `pdx` system Run, starts Pandora, and begins reconciliation.
+`pdx open` runs init behavior, fails if the `pdx--daemon` tmux session already exists, starts the daemon in tmux, waits for IPC readiness, and attaches the operator to Pandora's tmux session. The daemon settles deterministic old pdx-owned tmux/AFK leftovers, upserts the `pdx` system Run, starts Pandora, and begins reconciliation.
 
 ### Reconcile tick
 

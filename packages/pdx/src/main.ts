@@ -9,6 +9,7 @@ import {
 	killPdx,
 	logsShowPdx,
 	openPdx,
+	PANDORA_TARGET,
 	runDaemon,
 	runShowPdx,
 	runTranscriptPdx,
@@ -176,14 +177,24 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 				yield* initPdx(config, { clean: input.clean, nuke: input.nuke }).pipe(
 					Effect.provide(provided),
 				);
-				yield* Effect.sync(() => process.stdout.write(`${config.dataDir}\n`));
+				yield* Effect.sync(() =>
+					process.stdout.write(
+						[
+							"Pandora's Box initialized.",
+							`Data dir: ${config.dataDir}`,
+							`User config dir: ${config.userDataDir}`,
+							"",
+							"Next: run `pdx open` to release Pandora.",
+						].join("\n") + "\n",
+					),
+				);
 				return;
 			case "open":
 				yield* openPdx(config, input.maxAfk, input.intervalSeconds, {
 					clean: input.clean,
 					nuke: input.nuke,
 				}).pipe(Effect.provide(provided));
-				yield* Effect.sync(() => process.stdout.write("tmux attach -t pdx--pandora\n"));
+				yield* tmux.attachSession(PANDORA_TARGET);
 				return;
 			case "close":
 				return yield* closePdx(config).pipe(Effect.provide(provided));

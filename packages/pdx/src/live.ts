@@ -13,7 +13,7 @@ import {
 	symlink,
 	writeFile,
 } from "node:fs/promises";
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
@@ -80,6 +80,25 @@ const execFileEffect = (
 
 export const ProcessLive = Process.of({
 	execFile: execFileEffect,
+	foreground: (file, args, options) =>
+		Effect.try({
+			try: () => {
+				const result = spawnSync(file, [...args], {
+					cwd: options?.cwd,
+					env: { ...process.env, ...options?.env },
+					stdio: "inherit",
+				});
+				if (result.error !== undefined) {
+					throw result.error;
+				}
+				return { exitCode: result.status ?? 0, stdout: "", stderr: "" };
+			},
+			catch: (error) =>
+				new PdxError({
+					code: "PROCESS_ERROR",
+					message: `${file} foreground failed: ${String(error)}`,
+				}),
+		}),
 	isAlive: (pid) =>
 		Effect.gen(function* () {
 			try {

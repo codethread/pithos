@@ -15,6 +15,11 @@ export interface ProcessService {
 		args: readonly string[],
 		options?: { readonly cwd?: string; readonly env?: Record<string, string> },
 	) => Effect.Effect<ProcessResult, PdxError>;
+	readonly foreground?: (
+		file: string,
+		args: readonly string[],
+		options?: { readonly cwd?: string; readonly env?: Record<string, string> },
+	) => Effect.Effect<ProcessResult, PdxError>;
 	readonly isAlive: (pid: number) => Effect.Effect<boolean, PdxError>;
 	readonly kill: (pid: number, signal: "SIGTERM" | "SIGKILL") => Effect.Effect<void, PdxError>;
 }
@@ -57,6 +62,7 @@ export interface TmuxService {
 	}) => Effect.Effect<void, PdxError>;
 	readonly killSession: (target: string) => Effect.Effect<void, PdxError>;
 	readonly switchClient: (target: string) => Effect.Effect<void, PdxError>;
+	readonly attachSession: (target: string) => Effect.Effect<void, PdxError>;
 	readonly sendLiteralLine: (target: string, text: string) => Effect.Effect<void, PdxError>;
 	readonly pasteBuffer: (target: string, content: string) => Effect.Effect<void, PdxError>;
 	readonly presence: (target: string) => Effect.Effect<TmuxPresence, PdxError>;

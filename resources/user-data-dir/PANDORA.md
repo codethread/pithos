@@ -19,7 +19,7 @@ If you version-control your config directory, add `PANDORA.md` to `.gitignore` u
 - `<data-dir>/` is pdx-owned runtime state plus bundled canonical config reference.
   `pdx init` and `pdx open` overwrite `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`.
 - `<user-data-dir>/` is user-owned config.
-  `pdx` scaffolds `<user-data-dir>/AGENTS.md` once and re-seeds this `PANDORA.md` reference on `init` / `open`.
+  `pdx` scaffolds `<user-data-dir>/AGENTS.md`, `<user-data-dir>/CLAUDE.md`, and `<user-data-dir>/agents.toml` once and re-seeds this `PANDORA.md` reference on `init` / `open`.
 - `<repo-root>/.pdx/` is optional project-local config for repo/worktree launches.
 
 Defaults and related env vars:
@@ -95,7 +95,7 @@ add = ["war-local.md"]
 - Put user-wide template files under `<user-data-dir>/templates/`
 - Put scope-kind template files under `<user-data-dir>/scopes/<global|repo|worktree>/templates/`
 - Put project-local template files under `<repo-root>/.pdx/templates/` or `.pdx/scopes/<repo|worktree>/templates/`
-- Asset references like `war.md` or `_common.md` resolve by reference name through the eligible layers from highest priority to lowest
+- Asset references like `agents/war.md` or `common/base.md` resolve by reference name through the eligible layers from highest priority to lowest
 - Template files do not merge; the first matching file wins
 - Use `appends` when you want additive prompt text without replacing the main template file
 

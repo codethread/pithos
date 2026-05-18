@@ -16,7 +16,7 @@ Implement the planned scoped `review` capability change. The MVP adds `review` a
 - `packages/pdx/src/controller.ts` and `packages/pdx/src/services.ts` — supervision launch policy and capability unions.
 - `packages/spawner/src/spawner.ts` — selected-capability claim command rendering for agents, including multi-claim Greed.
 - `packages/pithos/test/`, `packages/pdx/test/`, `packages/spawner/src/spawner.test.ts` — behavior, seed, CLI/help, supervision, and prompt-rendering contract tests.
-- `templates/_common.md`, `templates/greed.md`, `templates/pandora.md`, `templates/toil.md`, `templates/README.md` — prompt and template docs to update.
+- `resources/data-dir/templates/common/base.md`, `resources/data-dir/templates/agents/greed.md`, `resources/data-dir/templates/agents/pandora.md`, `resources/data-dir/templates/agents/toil.md`, `resources/README.md` — prompt and template docs to update.
 
 ## Task strategy
 

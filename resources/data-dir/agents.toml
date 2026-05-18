@@ -1,6 +1,6 @@
 [agents.pandora]
-template = "pandora.md"
-includes.replace = ["_common.md", "_common-hitl.md"]
+template = "agents/pandora.md"
+includes.replace = ["common/base.md", "common/hitl.md"]
 appends.replace = []
 
 [agents.pandora.harness]
@@ -11,8 +11,8 @@ tools.replace = ["bash", "read"]
 argv.replace = []
 
 [agents.toil]
-template = "toil.md"
-includes.replace = ["_common.md", "_common-afk.md"]
+template = "agents/toil.md"
+includes.replace = ["common/base.md", "common/afk.md"]
 appends.replace = []
 
 [agents.toil.harness]
@@ -23,8 +23,8 @@ tools.replace = ["bash", "read", "grep", "find", "ls", "subagent"]
 argv.replace = []
 
 [agents.greed]
-template = "greed.md"
-includes.replace = ["_common.md", "_common-hitl.md"]
+template = "agents/greed.md"
+includes.replace = ["common/base.md", "common/hitl.md"]
 appends.replace = []
 
 [agents.greed.harness]
@@ -34,8 +34,8 @@ system_prompt_mode = "replace"
 argv.replace = []
 
 [agents.war]
-template = "war.md"
-includes.replace = ["_common.md", "_common-afk.md", "war/cwd-guard.md"]
+template = "agents/war.md"
+includes.replace = ["common/base.md", "common/afk.md", "war/cwd-guard.md"]
 appends.replace = []
 
 [agents.war.harness]
@@ -45,8 +45,8 @@ system_prompt_mode = "append"
 argv.replace = []
 
 [agents.envy]
-template = "envy.md"
-includes.replace = ["_common.md", "_common-afk.md"]
+template = "agents/envy.md"
+includes.replace = ["common/base.md", "common/afk.md"]
 appends.replace = []
 
 [agents.envy.harness]

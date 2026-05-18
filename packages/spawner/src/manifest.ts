@@ -5,6 +5,7 @@ import { Either, ParseResult, Schema } from "effect";
 import * as Toml from "@iarna/toml";
 import { SpawnerError } from "./errors.js";
 import {
+	bundledDataDirResourcesDir,
 	resolveAgentsPath,
 	resolveTemplatesDir,
 	resolveUserDataDir,
@@ -354,7 +355,7 @@ const resolveLayer = (
 const bundledLayerFor = (services: RenderServices): ConfigLayer => {
 	const dataDir = services.env("PDX_DATA_DIR");
 	return {
-		rootDir: dataDir ?? resolveTemplatesDir(undefined),
+		rootDir: dataDir ?? bundledDataDirResourcesDir,
 		templatesDir: resolveTemplatesDir(dataDir),
 		agentsPath: resolveAgentsPath(dataDir),
 		scopeKind: "global",

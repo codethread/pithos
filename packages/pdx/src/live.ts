@@ -19,7 +19,9 @@ import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import {
 	bundledAgentsPath,
+	bundledDataDirResourcesDir,
 	bundledTemplatesDir,
+	bundledUserDataDirResourcesDir,
 	launchRenderedAgent,
 	loadHooks,
 	LiveSpawnerServices as liveSpawnerServices,
@@ -318,11 +320,6 @@ const copyBundledTemplates = async (sourceDir: string, targetDir: string): Promi
 
 const ensureUserScaffold = async (userDataDir: string): Promise<void> => {
 	await mkdir(userDataDir, { recursive: true });
-	const scaffoldAgents = await readFile(join(bundledTemplatesDir, "AGENTS.md"), "utf8");
-	const bundledPandora = await readFile(
-		join(bundledTemplatesDir, "user-config-PANDORA.md"),
-		"utf8",
-	);
 	const writeIfMissing = async (path: string, content: string): Promise<void> => {
 		try {
 			await stat(path);
@@ -331,8 +328,23 @@ const ensureUserScaffold = async (userDataDir: string): Promise<void> => {
 			await writeFile(path, content, "utf8");
 		}
 	};
-	await writeIfMissing(join(userDataDir, "AGENTS.md"), scaffoldAgents);
-	await writeFile(join(userDataDir, "PANDORA.md"), bundledPandora, "utf8");
+	await writeIfMissing(
+		join(userDataDir, "AGENTS.md"),
+		await readFile(join(bundledUserDataDirResourcesDir, "AGENTS.md"), "utf8"),
+	);
+	await writeIfMissing(
+		join(userDataDir, "CLAUDE.md"),
+		await readFile(join(bundledUserDataDirResourcesDir, "CLAUDE.md"), "utf8"),
+	);
+	await writeIfMissing(
+		join(userDataDir, "agents.toml"),
+		await readFile(join(bundledUserDataDirResourcesDir, "agents.toml"), "utf8"),
+	);
+	await writeFile(
+		join(userDataDir, "PANDORA.md"),
+		await readFile(join(bundledUserDataDirResourcesDir, "PANDORA.md"), "utf8"),
+		"utf8",
+	);
 };
 
 // Full re-seed: used by materializeTemplates() on pdx init/open.
@@ -360,7 +372,7 @@ const reseedSpawnerTemplates = async (dataDir: string, userDataDir: string): Pro
 	await writeFile(join(dataDir, "agents.toml"), await readFile(bundledAgentsPath, "utf8"), "utf8");
 	await writeFile(
 		join(dataDir, "AGENTS.md"),
-		await readFile(join(bundledTemplatesDir, "data-dir-AGENTS.md"), "utf8"),
+		await readFile(join(bundledDataDirResourcesDir, "AGENTS.md"), "utf8"),
 		"utf8",
 	);
 	await chmod(join(dataDir, "agents.toml"), 0o444);

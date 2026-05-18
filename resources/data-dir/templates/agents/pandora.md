@@ -17,7 +17,7 @@ Your role is not to personally do execution work. Discuss decisions with the use
 - claims: {{claims}}
 - enqueues: {{enqueues}}
 
-{{_common-hitl.md}}
+{{common/hitl.md}}
 
 ## Required flow
 
@@ -151,6 +151,6 @@ Lead with ready/blocked items needing the user, then in-progress work, then rece
 - Do not poll in loops by default. If the user explicitly asks you to watch or poll something, do it on demand and keep the cadence bounded and visible.
 - Keep your tone warm, friendly, and lightly playful while staying precise about state and risks.
 
-{{_common.md}}
+{{common/base.md}}
 
 {{command_cards}}

@@ -79,7 +79,7 @@ Capabilities are `intake`, `triage`, `design`, `execute`, `review`, and `escalat
 
 ### `pdx init`
 
-`pdx init` prepares the data dir, initializes Pithos, creates runtime directories, materializes bundle-owned `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`, preserves scaffold-once `<user-data-dir>/AGENTS.md`, and re-seeds installed `<user-data-dir>/PANDORA.md`. It does not touch tmux or Harness CLIs.
+`pdx init` prepares the data dir, initializes Pithos, creates runtime directories, materializes bundle-owned `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`, preserves scaffold-once `<user-data-dir>/AGENTS.md`, `<user-data-dir>/CLAUDE.md`, and `<user-data-dir>/agents.toml`, and re-seeds installed `<user-data-dir>/PANDORA.md`. It does not touch tmux or Harness CLIs.
 
 - normal init reuses existing state
 - `--clean` removes DB, runs, and logs while preserving bundled config and user config
@@ -230,6 +230,6 @@ All commands resolve data dir as `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/
 - `packages/pdx/src/log.ts` — Supervisor log JSONL
 - `packages/pithos/src/engine.ts` — Run/Task transitions and Repair Alert creation
 - `packages/spawner/src/spawner.ts` — render/launch/transcript behavior
-- `templates/README.md` — manifest, layered template/config contract, input hook contract
+- `resources/README.md` — manifest, layered template/config contract, input hook contract
 
 Automated coverage lives primarily in `packages/pdx/test/substrate.test.ts`, `packages/pithos/test/`, and `packages/spawner/src/spawner.test.ts`.

@@ -14,7 +14,7 @@ pandora-spawn preview --help
 Preview renders the Agent run plan as JSON, including config/template provenance for layered `agents.toml` debugging. It does not mutate Pithos, create a Run, touch tmux, or launch a Harness session.
 
 For the actual agent manifest and prompt-template contract, see the repo-root
-[`templates/`](../../templates/) directory and [`templates/README.md`](../../templates/README.md).
+[`resources/`](../../resources/) directory and [`resources/README.md`](../../resources/README.md).
 
 ## Boundaries
 
@@ -61,8 +61,8 @@ Specs describe the full control plane: [`../../specs/control-plane-supervision.m
 | `src/services.ts`           | Render/Launch service interfaces, live Node IO, fake services               |
 | `src/paths.ts`              | template asset discovery for repo-root bundled defaults and data-dir copies |
 | `src/errors.ts`             | `SpawnerError` codes and CLI exit mapping                                   |
-| `../../templates/README.md` | manifest/template contract and operator-facing config docs                  |
-| `../../templates/`          | bundled default manifest and prompts seeded into `<data-dir>/templates/`    |
+| `../../resources/README.md` | manifest/template contract and operator-facing config docs                  |
+| `../../resources/`          | bundled default manifest and prompts seeded into `<data-dir>/templates/`    |
 | `src/spawner.test.ts`       | behavior examples for render, launch, transcript, and manifest failures     |
 
 ## Public library surface
@@ -83,7 +83,7 @@ Exported from `@pdx/spawner`:
 ## Manifest/template config
 
 Spawner intentionally keeps the render contract in the repo-root
-[`templates/README.md`](../../templates/README.md) next to the bundled default
+[`resources/README.md`](../../resources/README.md) next to the bundled default
 `agents.toml` and prompt templates themselves.
 
 Use that doc for:
@@ -97,7 +97,7 @@ Use that doc for:
 
 Read `src/spawner.ts` for exact argv construction. Stable behavior worth knowing before editing:
 
-- `harness.argv` in `agents.toml` is an optional escape hatch: tokens are inserted verbatim after the binary name and before all Spawner-managed flags. See [`templates/README.md`](../../templates/README.md) for the full contract.
+- `harness.argv` in `agents.toml` is an optional escape hatch: tokens are inserted verbatim after the binary name and before all Spawner-managed flags. See [`resources/README.md`](../../resources/README.md) for the full contract.
 - AFK mode uses Harness print mode with the message `Claim and process one task, then exit.`
 - HITL mode launches under tmux.
 - HITL prompt delivery uses a temp-file shell wrapper for every Harness to keep rendered prompts out of the `tmux new-session` argv.

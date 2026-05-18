@@ -6,12 +6,15 @@ export type ScopeKind = "global" | "repo" | "worktree";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../..");
-if (!existsSync(resolve(repoRoot, "templates/agents.toml"))) {
-	throw new Error(`repo templates not found from ${here}`);
+export const bundledDataDirResourcesDir = resolve(repoRoot, "resources", "data-dir");
+export const bundledUserDataDirResourcesDir = resolve(repoRoot, "resources", "user-data-dir");
+
+if (!existsSync(resolve(bundledDataDirResourcesDir, "agents.toml"))) {
+	throw new Error(`repo resources not found from ${here}`);
 }
 
-export const bundledTemplatesDir = resolve(repoRoot, "templates");
-export const bundledAgentsPath = resolve(repoRoot, "templates", "agents.toml");
+export const bundledTemplatesDir = resolve(bundledDataDirResourcesDir, "templates");
+export const bundledAgentsPath = resolve(bundledDataDirResourcesDir, "agents.toml");
 
 export const resolveUserDataDir = (
 	pdxDataDir: string | undefined,

@@ -19,7 +19,7 @@ Spawner renders generated Markdown command references into Agent prompts through
 
 ### Non-Goals
 
-- No replacement for role templates or `_common.md` workflow policy.
+- No replacement for role templates or `common/base.md` workflow policy.
 - No raw help JSON injection into prompts.
 - No dependency on human `--help` formatting.
 - No authorization policy in templates; Pithos built-ins own claim/enqueue truth.
@@ -112,7 +112,7 @@ Pandora's `pithos graph inspect` annotations summarize the implemented graph con
 
 - `packages/spawner/src/spawner.ts` — command tree parsing, role filters, annotations, Markdown rendering
 - `packages/spawner/src/spawner.test.ts` — role filtering, raw-JSON regression coverage, annotation validation
-- `templates/README.md` — template variable and extension contract
+- `resources/README.md` — template variable and extension contract
 - `packages/pithos/src/cli.ts` — Pithos help JSON source
 - `packages/pdx/src/main.ts` — pdx help JSON source
 ```

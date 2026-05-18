@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,10 @@ import {
 	type RenderedAgent,
 } from "./spawner.js";
 
-const templateDir = join(dirname(fileURLToPath(import.meta.url)), "../../../templates");
+const templateDir = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"../../../resources/data-dir/templates",
+);
 const noopExec = () => ({ status: 0, stdout: "", stderr: "" });
 
 const base = {
@@ -591,13 +594,15 @@ describe("bundled agent templates", () => {
 	});
 
 	it("document the stdin payload contract", () => {
-		const templateText = readdirSync(templateDir)
-			.filter(
-				(entry) =>
-					entry === "_common.md" ||
-					["pandora.md", "toil.md", "greed.md", "war.md", "envy.md"].includes(entry),
-			)
-			.map((entry) => readFileSync(join(templateDir, entry), "utf8"))
+		const templateText = [
+			join(templateDir, "common", "base.md"),
+			join(templateDir, "agents", "pandora.md"),
+			join(templateDir, "agents", "toil.md"),
+			join(templateDir, "agents", "greed.md"),
+			join(templateDir, "agents", "war.md"),
+			join(templateDir, "agents", "envy.md"),
+		]
+			.map((path) => readFileSync(path, "utf8"))
 			.join("\n");
 
 		expect(templateText).not.toContain("--body");

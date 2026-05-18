@@ -18,4 +18,9 @@ export {
 	type FakeSpawnerServicesInput,
 } from "./services.js";
 export { SpawnerError, type ErrorCode } from "./errors.js";
-export { bundledAgentsPath, bundledTemplatesDir } from "./paths.js";
+export {
+	bundledAgentsPath,
+	bundledTemplatesDir,
+	bundledDataDirResourcesDir,
+	bundledUserDataDirResourcesDir,
+} from "./paths.js";

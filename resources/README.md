@@ -1,11 +1,20 @@
-# Templates
+# Resources
 
-Repo-root default manifest and prompt templates for Pandora's Box.
+Repo-root seed resources for Pandora's Box.
+
+Source buckets mirror install destinations:
+
+```text
+resources/
+  data-dir/       # re-seeded into <data-dir>
+  user-data-dir/  # scaffolded/re-seeded into <user-data-dir>
+```
 
 ## Bundle-owned vs user-owned
 
-`<data-dir>/agents.toml` and `<data-dir>/templates/` are bundle-owned canonicals.
-`pdx init` and `pdx open` always re-seed them from the bundled repo defaults
+`resources/data-dir/agents.toml` and `resources/data-dir/templates/` are the
+sources for bundle-owned `<data-dir>/agents.toml` and `<data-dir>/templates/`.
+`pdx init` and `pdx open` always re-seed them from these bundled defaults
 (chmod writable → wipe → copy → chmod read-only). Files land at mode 0444
 (files) / 0555 (directories). Do not edit them directly; changes will be
 overwritten on the next `pdx init` or `pdx open`.
@@ -13,8 +22,8 @@ overwritten on the next `pdx init` or `pdx open`.
 User customisations live in `<user-data-dir>/`, where `<user-data-dir>` is
 `$PDX_USER_DATA_DIR` or defaults to `<data-dir>/config`. That tree is
 **user-owned** except for the installed reference file `PANDORA.md`, which pdx
-re-seeds on `init` / `open`; the direct-agent pointer `AGENTS.md` is scaffolded
-once only. Spawner resolves config by ordered layers:
+re-seeds on `init` / `open`; `AGENTS.md`, `CLAUDE.md`, and `agents.toml` are
+scaffolded once only. Spawner resolves config by ordered layers:
 
 - bundled canonical: `<data-dir>`
 - user-wide: `<user-data-dir>`
@@ -28,9 +37,10 @@ Only `agents.toml` merges across layers. Prompt files under each layer's
 ## Lifecycle flags
 
 - `pdx init` / `pdx open` — re-seed bundled `<data-dir>/agents.toml`,
-  `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`, plus installed
-  `<user-data-dir>/PANDORA.md`. Leave other user config, db, runs, and logs
-  alone.
+  `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`; scaffold missing
+  `<user-data-dir>/AGENTS.md`, `<user-data-dir>/CLAUDE.md`, and
+  `<user-data-dir>/agents.toml`; re-seed installed `<user-data-dir>/PANDORA.md`.
+  Leave existing user config, db, runs, and logs alone.
 - `--clean` — wipe runtime state only: db, runs, logs. Keep bundled config and
   user config.
 - `--nuke` — wipe pdx-owned runtime/bundled state while preserving
@@ -42,15 +52,22 @@ is upgraded and `pdx init` or `pdx open` is run.
 
 ## Files
 
+`resources/data-dir/`:
+
 - `agents.toml` — canonical bundled render manifest
-- `*.md` — prompt templates per agent kind
-- `_common.md` — shared include
-- `_common-afk.md` — AFK-only runtime rules
-- `_common-hitl.md` — HITL-only runtime rules
-- `war/cwd-guard.md` — War core rule requiring cwd/scope verification before file edits
-- `AGENTS.md` — source text for the scaffold-once user config pointer
+- `templates/agents/*.md` — prompt templates per agent kind
+- `templates/common/base.md` — shared include
+- `templates/common/afk.md` — AFK-only runtime rules
+- `templates/common/hitl.md` — HITL-only runtime rules
+- `templates/war/cwd-guard.md` — War core rule requiring cwd/scope verification before file edits
+- `AGENTS.md` — source text for the re-seeded data-dir runtime note
+
+`resources/user-data-dir/`:
+
+- `AGENTS.md` — source text for the scaffold-once direct-agent pointer
+- `CLAUDE.md` — source text for the scaffold-once Claude direct-agent pointer
+- `agents.toml` — source text for scaffold-once user manifest comments
 - `PANDORA.md` — source text for the re-seeded installed user config reference
-- `data-dir-AGENTS.md` — source text for the re-seeded data-dir runtime note
 
 ## `agents.toml` contract
 
@@ -62,8 +79,8 @@ Canonical bundled shape:
 
 ```toml
 [agents.war]
-template = "war.md"
-includes.replace = ["_common.md", "_common-afk.md"]
+template = "agents/war.md"
+includes.replace = ["common/base.md", "common/afk.md"]
 appends.replace = []
 
 [agents.war.harness]
@@ -109,8 +126,8 @@ Place customisations under `<user-data-dir>/templates/`,
 `<user-data-dir>/scopes/<kind>/templates/`, or project-local `.pdx/templates/`
 depending on the scope you want to affect.
 
-**Per-reference asset override** — manifest paths such as `war.md` or
-`_common.md` are looked up by reference name across eligible layers from highest
+**Per-reference asset override** — manifest paths such as `agents/war.md` or
+`common/base.md` are looked up by reference name across eligible layers from highest
 priority to lowest. There is no file-content merge; the first matching
 `templates/<reference>` wins.
 
@@ -230,7 +247,7 @@ Available template variables:
 - `enqueues` (derived from built-in Pithos authorization)
 - `model`
 - `tools_csv`
-- one variable per include path exactly as listed, for example `{{_common.md}}`, `{{snippets/common.md}}`, or `{{~/agent/common.md}}`
+- one variable per include path exactly as listed, for example `{{common/base.md}}`, `{{snippets/common.md}}`, or `{{~/agent/common.md}}`
 
 `{{command_reference}}` is not a supported variable. Keep the variable name
 `{{command_cards}}` unless Spawner explicitly adds and documents a new one.
@@ -249,8 +266,8 @@ Template loading keys off `PDX_DATA_DIR`:
 - when `PDX_DATA_DIR` is set, load the canonical bundle from `$PDX_DATA_DIR/agents.toml`
   plus `$PDX_DATA_DIR/templates/`, then merge/search user and project layers via
   `PDX_USER_DATA_DIR` and scope context
-- when `PDX_DATA_DIR` is unset, load the bundled repo-root defaults (`templates/agents.toml`
-  plus `templates/`)
+- when `PDX_DATA_DIR` is unset, load the bundled repo-root defaults
+  (`resources/data-dir/agents.toml` plus `resources/data-dir/templates/`)
 
 Agent command resolution:
 

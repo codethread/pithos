@@ -186,7 +186,7 @@ Before substantial work, read the orientation docs in this order:
 2. `UBIQUITOUS_LANGUAGE.md` for project terms and aliases to avoid.
 3. `specs/README.md` for the spec index.
 4. The specific specs relevant to the work.
-5. `templates/README.md` when touching agent manifest/prompt config.
+5. `resources/README.md` when touching agent manifest/prompt config.
 6. The nested `README.md` files for touched packages/directories.
 
 Reference map:
@@ -194,7 +194,7 @@ Reference map:
 - `README.md`: user-facing project intro and architecture overview
 - `UBIQUITOUS_LANGUAGE.md`: domain terms and aliases to avoid; do not duplicate it here
 - `specs/README.md`: index for system specs
-- `templates/README.md`: agent manifest and prompt-template config contract
+- `resources/README.md`: agent manifest and prompt-template config contract
 - `packages/<package>/README.md`: package-local developer docs
 - `CONTRIBUTING.md`: human-facing contribution overview; agents should rely on `AGENTS.md` for workflow rules
 

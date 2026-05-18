@@ -102,8 +102,8 @@ Binds services to real implementations:
 - Node `fs`, `child_process`, `crypto`, and `process` are confined here for pdx runtime IO.
 - `PithosClient` wraps `@pdx/pithos` `makeEngine(...)`; this is the library boundary to durable state.
 - `Spawner` wraps `@pdx/spawner` render/launch/Harness session transcript APIs; pdx persists render metadata before launch.
-- `pdx init` materializes the repo-root bundled manifest/templates into bundle-owned `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`, and seeds user-config docs under `<user-data-dir>/`, without starting tmux, the daemon, or Pandora.
-- `pdx open` also re-materializes `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md` before startup; `<user-data-dir>/AGENTS.md` is preserved while `<user-data-dir>/PANDORA.md` is re-seeded.
+- `pdx init` materializes repo-root `resources/data-dir/` into bundle-owned `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`, and seeds user-config docs under `<user-data-dir>/`, without starting tmux, the daemon, or Pandora.
+- `pdx open` also re-materializes `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md` before startup; `<user-data-dir>/AGENTS.md`, `<user-data-dir>/CLAUDE.md`, and `<user-data-dir>/agents.toml` are preserved while `<user-data-dir>/PANDORA.md` is re-seeded.
 - `--clean` wipes runtime state only (DB, runs, logs, socket); `--nuke` preserves `<user-data-dir>` while clearing pdx-owned state before init/startup.
 - AFK stdout/stderr files are created under `<data-dir>/runs` before Spawner launches detached work.
 
@@ -158,15 +158,16 @@ For a data dir `<data-dir>` (`~/.pdx` by default):
 <data-dir>/pdx.jsonl              # Supervisor log JSONL
 <data-dir>/agents.toml            # bundle-owned seeded Spawner manifest (read-only)
 <data-dir>/templates/*.md         # bundle-owned seeded prompt templates (read-only)
-<data-dir>/templates/_common.md   # bundle-owned seeded shared prompt include
+<data-dir>/templates/common/base.md # bundle-owned seeded shared prompt include
 <data-dir>/runs/<run>.pid         # AFK mode pidfiles
 <data-dir>/runs/<run>.stdout.log
 <data-dir>/runs/<run>.stderr.log
 <data-dir>/runs/hook.stderr.log   # input hook stderr (when hooks.input is configured)
 <data-dir>/AGENTS.md              # bundle-owned runtime note for global-agent cwd
 <user-data-dir>/AGENTS.md         # direct-agent pointer scaffolded once
+<user-data-dir>/CLAUDE.md         # Claude direct-agent pointer scaffolded once
+<user-data-dir>/agents.toml       # user-wide manifest partial scaffolded once
 <user-data-dir>/PANDORA.md        # installed user-config reference, re-seeded on init/open
-<user-data-dir>/agents.toml       # optional user-wide manifest partial
 <user-data-dir>/templates/*.md    # optional user-wide prompt assets
 ```
 

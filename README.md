@@ -65,8 +65,8 @@ Requires `~/.local/bin` to be on your `PATH`.
 
 ### Configuration
 
-Repo defaults live in [`./templates/`](./templates/) and are documented in
-[`./templates/README.md`](./templates/README.md).
+Repo defaults live in [`./resources/`](./resources/) and are documented in
+[`./resources/README.md`](./resources/README.md).
 
 Run `pdx init` to create the data dir and seed the bundle-owned canonical
 config before Pandora starts:
@@ -80,14 +80,16 @@ defaults.
 
 User customisation lives in `<user-data-dir>/`, where `<user-data-dir>` is
 `$PDX_USER_DATA_DIR` or defaults to `<data-dir>/config`. That directory keeps a
-scaffold-once `AGENTS.md` pointer plus a re-seeded `PANDORA.md` reference so
-you can `cd` into it and ask a direct harness session to edit config safely.
+scaffold-once `AGENTS.md`, `CLAUDE.md`, and `agents.toml` plus a re-seeded
+`PANDORA.md` reference so you can `cd` into it and ask a direct harness session
+to edit config safely.
 
 Typical files:
 
 - `<user-data-dir>/AGENTS.md` — tiny user-owned pointer to `PANDORA.md`
+- `<user-data-dir>/CLAUDE.md` — same pointer for Claude direct sessions
+- `<user-data-dir>/agents.toml` — scaffolded user-wide manifest partial
 - `<user-data-dir>/PANDORA.md` — installed config reference, overwritten on `pdx init` / `pdx open`
-- `<user-data-dir>/agents.toml` — optional user-wide manifest partial
 - `<user-data-dir>/templates/` — optional user-wide prompt assets
 - `<user-data-dir>/scopes/global|repo|worktree/` — scope-kind overrides
 
@@ -109,7 +111,7 @@ is only the tiny direct-agent pointer. Validate changes with
 
 Useful reset modes:
 
-- `pdx init` or `pdx open` — re-seed `<data-dir>/agents.toml`, `<data-dir>/templates/`, `<data-dir>/AGENTS.md`, and `<user-data-dir>/PANDORA.md`; keep user config, DB, runs, and logs
+- `pdx init` or `pdx open` — re-seed `<data-dir>/agents.toml`, `<data-dir>/templates/`, `<data-dir>/AGENTS.md`, and `<user-data-dir>/PANDORA.md`; scaffold missing `<user-data-dir>/AGENTS.md`, `<user-data-dir>/CLAUDE.md`, and `<user-data-dir>/agents.toml`; keep user config, DB, runs, and logs
 - `pdx init --clean` or `pdx open --clean` — wipe runtime state only (DB, runs, logs); keep bundle-owned config and user config
 - `pdx init --nuke` or `pdx open --nuke` — wipe pdx-owned runtime/bundled state, preserve `<user-data-dir>`, then reseed fresh canonical config
 

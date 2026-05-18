@@ -93,8 +93,9 @@ Invalid path relationships fail loudly before scaffolding or launch. This preven
 ```text
 $PDX_USER_DATA_DIR/
   AGENTS.md          # tiny direct-agent pointer scaffolded once
+  CLAUDE.md          # Claude direct-agent pointer scaffolded once
+  agents.toml        # user-wide partial manifest scaffolded once
   PANDORA.md         # installed config reference, re-seeded on init/open
-  agents.toml        # optional user-wide partial manifest
   templates/         # optional user-wide prompt/include/append files
   scopes/
     global/
@@ -214,7 +215,7 @@ Template references from the resolved manifest use the same layer order, highest
 
 Template references are overlay keys, not source-relative imports. A higher-priority `templates/<reference>` file intentionally overrides that reference even when a lower-priority manifest layer introduced the path. Preview/provenance output must show the final file path used for each reference so shadowing is visible.
 
-User-wide worktree defaults can override `war.md` for all worktree launches by providing `$PDX_USER_DATA_DIR/scopes/worktree/templates/war.md`. Repo-owned worktree policy can override it for a repo's worktrees through `<parent-repo-root>/.pdx/scopes/worktree/templates/war.md`.
+User-wide worktree defaults can override `agents/war.md` for all worktree launches by providing `$PDX_USER_DATA_DIR/scopes/worktree/templates/agents/war.md`. Repo-owned worktree policy can override it for a repo's worktrees through `<parent-repo-root>/.pdx/scopes/worktree/templates/agents/war.md`.
 
 ## 5. `agents.toml` Contract
 
@@ -226,8 +227,8 @@ The canonical manifest must define complete config for every spawnable Agent kin
 
 ```toml
 [agents.war]
-template = "war.md"
-includes.replace = ["_common.md", "_common-afk.md"]
+template = "agents/war.md"
+includes.replace = ["common/base.md", "common/afk.md"]
 appends.replace = []
 
 [agents.war.harness]
@@ -276,7 +277,7 @@ template.default = true
 
 `default = true` is mutually exclusive with setting the scalar value in the same layer. It ignores all non-bundled lower-priority overrides for that field and restores the canonical bundled state from `$PDX_DATA_DIR/agents.toml`. If the canonical manifest omits an optional scalar, reset restores that absence; if the final resolved config then lacks a required scalar, resolved-config validation fails. This lets a narrower scope undo a user-wide scalar override without copying the bundled value and drifting after upgrades.
 
-For the path-like `agents.<kind>.template` scalar, `template.default = true` also pins asset resolution to the canonical bundled template file for that Agent. It does not continue searching higher-priority user/project `templates/` directories for the restored canonical path.
+For the path-like `agents.<kind>.template` scalar, `template.default = true` also pins asset resolution to the canonical bundled template file for that Agent. It does not continue searching higher-priority user/project `resources/` directories for the restored canonical path.
 
 `mode` is not configurable in `agents.toml`; pdx/Pithos launch policy supplies the mode for each Agent kind.
 
@@ -332,14 +333,14 @@ claude
 
 Because user config is partial TOML, the direct Agent can focus on intentional deltas rather than diffing copied full manifests. It can inspect canonical bundled config through `$PDX_DATA_DIR` and edit only `$PDX_USER_DATA_DIR` or project `.pdx` files.
 
-The scaffolded `AGENTS.md` should include concise examples and direct-editing guidance.
+The scaffolded `AGENTS.md` and `CLAUDE.md` are tiny pointers to `PANDORA.md`; the installed `PANDORA.md` carries concise examples and direct-editing guidance.
 
 ## 7. Implementation Phases
 
 ### Phase 1: Config paths and TOML parser
 
 - [ ] Add `PDX_USER_DATA_DIR` parsing to pdx and Spawner config services.
-- [ ] Change bundled materialization from `templates/agents.json` to `$PDX_DATA_DIR/agents.toml` plus `$PDX_DATA_DIR/templates/`.
+- [ ] Change bundled materialization from the legacy bundled `agents.json` to `$PDX_DATA_DIR/agents.toml` plus `$PDX_DATA_DIR/templates/`.
 - [ ] Add TOML parsing dependency or implementation at the Spawner IO boundary.
 - [ ] Define schemas for partial `agents.toml`, list operations, hooks, and resolved complete Agent config.
 
@@ -353,13 +354,13 @@ The scaffolded `AGENTS.md` should include concise examples and direct-editing gu
 
 ### Phase 3: User config scaffolding and lifecycle
 
-- [ ] On `pdx init`, create `$PDX_USER_DATA_DIR` if missing, scaffold `AGENTS.md` once, and re-seed installed `PANDORA.md`, not full copied overrides.
+- [ ] On `pdx init`, create `$PDX_USER_DATA_DIR` if missing; scaffold `AGENTS.md`, `CLAUDE.md`, and `agents.toml` once; and re-seed installed `PANDORA.md`, not full copied overrides.
 - [ ] Validate `PDX_USER_DATA_DIR` path relationships before scaffolding, launch, clean, or nuke.
 - [ ] Extend Pithos/pdx worktree scope creation to record a durable parent repo root for config layering, and fail/migrate existing worktree scopes that lack it before launch.
 - [ ] Preserve `$PDX_USER_DATA_DIR` during `--clean` and `--nuke`, including the default nested path.
 - [ ] Update `specs/control-plane-supervision.md` so `--nuke` no longer claims to delete the full data dir unconditionally.
 - [ ] Remove or replace docs that refer to `extensions/templates` and `agents.json`.
-- [ ] Update `templates/AGENTS.md` guidance into the new user config scaffold.
+- [ ] Update `resources/user-data-dir/AGENTS.md` guidance into the new user config scaffold.
 
 ### Phase 4: Validation and diagnostics
 
@@ -372,7 +373,7 @@ The scaffolded `AGENTS.md` should include concise examples and direct-editing gu
 
 - [ ] Remove `extensions/templates` lookup.
 - [ ] Remove `agents.json` schema and docs.
-- [ ] Update package READMEs, `templates/README.md`, and the user-facing root README configuration section.
+- [ ] Update package READMEs, `resources/README.md`, and the user-facing root README configuration section.
 
 ## 8. Code Locations
 
@@ -389,7 +390,7 @@ The scaffolded `AGENTS.md` should include concise examples and direct-editing gu
 | `packages/pithos/src/`                 | Store/inspect required parent repo metadata for worktree scopes; migrate or fail legacy scopes missing it. |
 | `packages/pdx/README.md`               | Document runtime vs user config paths.                                                                     |
 | `packages/spawner/README.md`           | Document TOML manifest and resolver boundary.                                                              |
-| `templates/`                           | Move bundled manifest to TOML and remove config-editing `AGENTS.md` from data-dir root materialization.    |
+| `resources/`                           | Move bundled manifest to TOML and remove config-editing `AGENTS.md` from data-dir root materialization.    |
 | `README.md`                            | Update user configuration instructions.                                                                    |
 
 ## 9. Validation Strategy

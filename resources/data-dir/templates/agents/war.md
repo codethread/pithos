@@ -17,7 +17,7 @@ Claim one execute task and perform the requested implementation work in the prov
 
 {{war/cwd-guard.md}}
 
-{{_common-afk.md}}
+{{common/afk.md}}
 
 ## Required flow
 
@@ -53,6 +53,6 @@ Attach it with `--kind war-completion`. The completion artifact should include:
 - issues encountered and how they were resolved
 - current state and recommended next steps, if any
 
-{{_common.md}}
+{{common/base.md}}
 
 {{command_cards}}

@@ -493,6 +493,12 @@ describe("pdx substrate", () => {
 		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toContain(
 			"See `PANDORA.md` for the installed configuration reference.",
 		);
+		expect(await readFile(join(userDataDir, "CLAUDE.md"), "utf8")).toContain(
+			"See `PANDORA.md` for the installed configuration reference.",
+		);
+		expect(await readFile(join(userDataDir, "agents.toml"), "utf8")).toContain(
+			"User-wide Pandora's Box manifest overrides.",
+		);
 		expect(await readFile(join(userDataDir, "PANDORA.md"), "utf8")).toContain(
 			"Pandora's Box config reference",
 		);
@@ -881,7 +887,9 @@ describe("pdx substrate", () => {
 		expect(await readFile(join(dataDir, "AGENTS.md"), "utf8")).toContain(
 			"pdx runtime directory note",
 		);
-		expect(await readFile(join(dataDir, "templates", "war.md"), "utf8")).not.toHaveLength(0);
+		expect(await readFile(join(dataDir, "templates", "agents", "war.md"), "utf8")).not.toHaveLength(
+			0,
+		);
 		expect(await readFile(join(dataDir, "templates", "war", "cwd-guard.md"), "utf8")).toContain(
 			"cwd/scope guard",
 		);
@@ -902,7 +910,7 @@ describe("pdx substrate", () => {
 		expect(agentsMode).toBe(0o444);
 		const dataDirAgentsMode = (await stat(join(dataDir, "AGENTS.md"))).mode & 0o777;
 		expect(dataDirAgentsMode).toBe(0o444);
-		const warMode = (await stat(join(templatesDir, "war.md"))).mode & 0o777;
+		const warMode = (await stat(join(templatesDir, "agents", "war.md"))).mode & 0o777;
 		expect(warMode).toBe(0o444);
 	});
 
@@ -930,11 +938,15 @@ describe("pdx substrate", () => {
 		});
 		await run(spawner.materializeTemplates());
 		await writeFile(join(userDataDir, "AGENTS.md"), "custom agent note\n", "utf8");
+		await writeFile(join(userDataDir, "CLAUDE.md"), "custom claude note\n", "utf8");
+		await writeFile(join(userDataDir, "agents.toml"), "# custom manifest\n", "utf8");
 		await writeFile(join(userDataDir, "PANDORA.md"), "stale pandora ref\n", "utf8");
 		await chmod(join(dataDir, "AGENTS.md"), 0o644);
 		await writeFile(join(dataDir, "AGENTS.md"), "stale runtime note\n", "utf8");
 		await run(spawner.materializeTemplates());
 		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toBe("custom agent note\n");
+		expect(await readFile(join(userDataDir, "CLAUDE.md"), "utf8")).toBe("custom claude note\n");
+		expect(await readFile(join(userDataDir, "agents.toml"), "utf8")).toBe("# custom manifest\n");
 		expect(await readFile(join(userDataDir, "PANDORA.md"), "utf8")).toContain(
 			"Pandora's Box config reference",
 		);
@@ -4132,7 +4144,7 @@ describe("pdx substrate", () => {
 
 	it("Pandora template documents nudge marker recognition", async () => {
 		const template = await readFile(
-			new URL("../../../templates/pandora.md", import.meta.url),
+			new URL("../../../resources/data-dir/templates/agents/pandora.md", import.meta.url),
 			"utf8",
 		);
 		expect(template).toContain("<pithos-event>escalation-ready</pithos-event>");

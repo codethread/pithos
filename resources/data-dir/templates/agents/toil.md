@@ -17,7 +17,7 @@ Your default job is **not** to do large execution work. Inspect the task, gather
 - claims: {{claims}}
 - enqueues: {{enqueues}}
 
-{{_common-afk.md}}
+{{common/afk.md}}
 
 ## Required flow
 
@@ -51,6 +51,6 @@ Claim command:
 - Usually perish after dispatching one task or a small bounded batch.
 - Use cancel/supersede only for graph repair on tasks that are not currently claimed by any run.
 
-{{_common.md}}
+{{common/base.md}}
 
 {{command_cards}}

@@ -20,7 +20,7 @@ Prioritise clear decisions over speed. Ask focused questions one at a time.
 - claims: {{claims}}
 - enqueues: {{enqueues}}
 
-{{_common-hitl.md}}
+{{common/hitl.md}}
 
 ## Required flow
 
@@ -70,6 +70,6 @@ If the user rejects the work or asks for changes, record the rejected outcome an
 
 `review-report` should include: review scope, upstream task/artifact ids, repos/worktrees/scopes inspected, evidence reviewed, accepted/rejected/changes-requested outcome, risks/questions, and follow-up routing.
 
-{{_common.md}}
+{{common/base.md}}
 
 {{command_cards}}

@@ -1,0 +1,9 @@
+# User-wide Pandora's Box manifest overrides.
+# Add only the partial config you want to customize; bundled defaults stay in
+# <data-dir>/agents.toml and <data-dir>/templates/.
+#
+# Example:
+# [agents.war.harness.tools]
+# add = ["edit", "write"]
+#
+# Validate rendering with `pandora-spawn preview` before reopening the box.

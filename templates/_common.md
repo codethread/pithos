@@ -53,7 +53,7 @@ pithos task fail --run $PITHOS_RUN_ID --token <token> --reason '<reason>' <task-
 Enqueue with default auto chaining:
 
 ```sh
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute|review> --title '<title>' --stdin <<'EOF'
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <capability-from-your-enqueues> --title '<title>' --stdin <<'EOF'
 <task body>
 EOF
 ```
@@ -61,7 +61,7 @@ EOF
 Enqueue with `--chain none` (manual chaining):
 
 ```sh
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <triage|design|execute|review> --title '<title>' --stdin --chain none [--depends-on <task-id>] <<'EOF'
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <capability-from-your-enqueues> --title '<title>' --stdin --chain none [--depends-on <task-id>] <<'EOF'
 <task body>
 EOF
 ```

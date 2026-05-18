@@ -12,8 +12,9 @@ overwritten on the next `pdx init` or `pdx open`.
 
 User customisations live in `<user-data-dir>/`, where `<user-data-dir>` is
 `$PDX_USER_DATA_DIR` or defaults to `<data-dir>/config`. That tree is
-**user-owned** and is never overwritten by pdx once scaffolded. Spawner resolves
-config by ordered layers:
+**user-owned** except for the installed reference file `PANDORA.md`, which pdx
+re-seeds on `init` / `open`; the direct-agent pointer `AGENTS.md` is scaffolded
+once only. Spawner resolves config by ordered layers:
 
 - bundled canonical: `<data-dir>`
 - user-wide: `<user-data-dir>`
@@ -26,8 +27,10 @@ Only `agents.toml` merges across layers. Prompt files under each layer's
 
 ## Lifecycle flags
 
-- `pdx init` / `pdx open` — re-seed bundled `<data-dir>/agents.toml` and
-  `<data-dir>/templates/`. Leave user config, db, runs, and logs alone.
+- `pdx init` / `pdx open` — re-seed bundled `<data-dir>/agents.toml`,
+  `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`, plus installed
+  `<user-data-dir>/PANDORA.md`. Leave other user config, db, runs, and logs
+  alone.
 - `--clean` — wipe runtime state only: db, runs, logs. Keep bundled config and
   user config.
 - `--nuke` — wipe pdx-owned runtime/bundled state while preserving
@@ -45,7 +48,9 @@ is upgraded and `pdx init` or `pdx open` is run.
 - `_common-afk.md` — AFK-only runtime rules
 - `_common-hitl.md` — HITL-only runtime rules
 - `war/cwd-guard.md` — War core rule requiring cwd/scope verification before file edits
-- `AGENTS.md` / `CLAUDE.md` — source text used when pdx scaffolds the user config guide
+- `AGENTS.md` — source text for the scaffold-once user config pointer
+- `PANDORA.md` — source text for the re-seeded installed user config reference
+- `data-dir-AGENTS.md` — source text for the re-seeded data-dir runtime note
 
 ## `agents.toml` contract
 
@@ -90,7 +95,7 @@ Current built-in claim/enqueue contract:
 
 | Agent kind | Mode today | Claims             | Enqueues                                            |
 | ---------- | ---------- | ------------------ | --------------------------------------------------- |
-| `pandora`  | `hitl`     | `escalate`         | `triage`, `design`, `execute`, `review`, `escalate` |
+| `pandora`  | `hitl`     | `escalate`         | `triage`, `design`, `review`, `escalate`            |
 | `toil`     | `afk`      | `triage`           | `triage`, `design`, `execute`, `review`, `escalate` |
 | `greed`    | `hitl`     | `design`, `review` | `triage`, `design`, `escalate`                      |
 | `war`      | `afk`      | `execute`          | `escalate`                                          |

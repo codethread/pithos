@@ -171,6 +171,11 @@ export const initPdx = (
 		yield* pithos.init();
 		yield* fs.mkdir(config.runsDir);
 		yield* spawner.materializeTemplates();
+		yield* pithos.scopeUpsert({
+			kind: "repo",
+			path: config.userDataDir,
+			description: "User config for Pandora's Box",
+		});
 	});
 
 export const openPdx = (
@@ -961,16 +966,27 @@ const spawnReadyAgent = (config: PdxConfig, maxAfk: number) =>
 			const runId = yield* ids.nextRunId;
 			const sessionId = yield* ids.nextSessionId;
 			const launchedAt = yield* Clock.pipe(Effect.flatMap((clock) => clock.nowIso));
-			const rendered = yield* spawner.renderAgent({
-				agent,
+			const renderInput = {
 				mode,
 				runId,
 				sessionId,
 				scopeId: task.scope_id,
 				cwd,
 				...(task.parent_repo_path === null ? {} : { parentRepoPath: task.parent_repo_path }),
-				selectedCapability: task.capability,
-			});
+			} as const;
+			const selectedCapability =
+				task.capability === "design" || task.capability === "review" ? task.capability : undefined;
+			const rendered =
+				agent === "greed"
+					? selectedCapability === undefined
+						? yield* Effect.fail(
+								new PdxError({
+									code: "VALIDATION_ERROR",
+									message: `greed cannot launch capability ${task.capability}`,
+								}),
+							)
+						: yield* spawner.renderAgent({ ...renderInput, agent, selectedCapability })
+					: yield* spawner.renderAgent({ ...renderInput, agent });
 			const cwdExistsBeforeRunUpsert = yield* cwdExists(cwd);
 			if (!cwdExistsBeforeRunUpsert) {
 				if (task.scope_kind === "global") {

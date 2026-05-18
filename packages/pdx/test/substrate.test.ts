@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readlink, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -487,10 +487,16 @@ describe("pdx substrate", () => {
 		expect(stdout).toBe(`${dataDir}\n`);
 		expect(existsSync(join(dataDir, "pithos.sqlite"))).toBe(true);
 		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
-		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toContain(
-			"pdx user config agent guide",
+		expect(await readFile(join(dataDir, "AGENTS.md"), "utf8")).toContain(
+			"pdx runtime directory note",
 		);
-		expect(await readlink(join(userDataDir, "CLAUDE.md"))).toBe("AGENTS.md");
+		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toContain(
+			"See `PANDORA.md` for the installed configuration reference.",
+		);
+		expect(await readFile(join(userDataDir, "PANDORA.md"), "utf8")).toContain(
+			"Pandora's Box config reference",
+		);
+		expect(existsSync(join(dataDir, "CLAUDE.md"))).toBe(false);
 		expect(existsSync(join(dataDir, "runs"))).toBe(true);
 		expect(existsSync(join(tmux.binDir, "tmux.log"))).toBe(false);
 	});
@@ -741,6 +747,7 @@ describe("pdx substrate", () => {
 			"init",
 			"mkdir:/tmp/pdx-init/runs",
 			"materializeTemplates",
+			"scopeUpsert:repo",
 		]);
 	});
 
@@ -780,6 +787,7 @@ describe("pdx substrate", () => {
 			"init",
 			"mkdir:/tmp/pdx-clean/runs",
 			"materializeTemplates",
+			"scopeUpsert:repo",
 		]);
 	});
 
@@ -818,6 +826,7 @@ describe("pdx substrate", () => {
 			"init",
 			"mkdir:/tmp/pdx-nuke/runs",
 			"materializeTemplates",
+			"scopeUpsert:repo",
 		]);
 	});
 
@@ -869,12 +878,12 @@ describe("pdx substrate", () => {
 		);
 		expect(error.code).toBe("VALIDATION_ERROR");
 		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
+		expect(await readFile(join(dataDir, "AGENTS.md"), "utf8")).toContain(
+			"pdx runtime directory note",
+		);
 		expect(await readFile(join(dataDir, "templates", "war.md"), "utf8")).not.toHaveLength(0);
 		expect(await readFile(join(dataDir, "templates", "war", "cwd-guard.md"), "utf8")).toContain(
 			"cwd/scope guard",
-		);
-		expect(await readFile(join(dataDir, "config", "README.md"), "utf8")).toContain(
-			"pdx user config",
 		);
 	});
 
@@ -891,6 +900,8 @@ describe("pdx substrate", () => {
 		expect(dirMode).toBe(0o555);
 		const agentsMode = (await stat(join(dataDir, "agents.toml"))).mode & 0o777;
 		expect(agentsMode).toBe(0o444);
+		const dataDirAgentsMode = (await stat(join(dataDir, "AGENTS.md"))).mode & 0o777;
+		expect(dataDirAgentsMode).toBe(0o444);
 		const warMode = (await stat(join(templatesDir, "war.md"))).mode & 0o777;
 		expect(warMode).toBe(0o444);
 	});
@@ -908,23 +919,28 @@ describe("pdx substrate", () => {
 		expect(await readFile(join(dataDir, "agents.toml"), "utf8")).toContain("[agents.pandora]");
 	});
 
-	it("materialization scaffolds user config idempotently without overwriting edits", async () => {
+	it("materialization scaffolds user config once and re-seeds installed reference docs", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-spawner-"));
 		const userDataDir = join(dataDir, "config");
 		await mkdir(userDataDir, { recursive: true });
-		await writeFile(join(userDataDir, "README.md"), "my custom readme", "utf8");
 		const spawner = makeSpawnerLive({
 			dataDir,
 			userDataDir,
 			pithosDbPath: join(dataDir, "pithos.sqlite"),
 		});
 		await run(spawner.materializeTemplates());
+		await writeFile(join(userDataDir, "AGENTS.md"), "custom agent note\n", "utf8");
+		await writeFile(join(userDataDir, "PANDORA.md"), "stale pandora ref\n", "utf8");
+		await chmod(join(dataDir, "AGENTS.md"), 0o644);
+		await writeFile(join(dataDir, "AGENTS.md"), "stale runtime note\n", "utf8");
 		await run(spawner.materializeTemplates());
-		expect(await readFile(join(userDataDir, "README.md"), "utf8")).toBe("my custom readme");
-		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toContain(
-			"pdx user config agent guide",
+		expect(await readFile(join(userDataDir, "AGENTS.md"), "utf8")).toBe("custom agent note\n");
+		expect(await readFile(join(userDataDir, "PANDORA.md"), "utf8")).toContain(
+			"Pandora's Box config reference",
 		);
-		expect(await readlink(join(userDataDir, "CLAUDE.md"))).toBe("AGENTS.md");
+		expect(await readFile(join(dataDir, "AGENTS.md"), "utf8")).toContain(
+			"pdx runtime directory note",
+		);
 	});
 
 	it("maps spawner boundary validation errors without flattening to process errors", async () => {

@@ -8,7 +8,7 @@ import { AgentKindSchema, ModeSchema, renderAgent } from "./spawner.js";
 
 const CapabilitySchema = Schema.Literal(...BUILTIN_CAPABILITIES);
 
-const PreviewInputSchema = Schema.Struct({
+const PreviewInputRawSchema = Schema.Struct({
 	agent: AgentKindSchema,
 	mode: ModeSchema,
 	runId: Schema.NonEmptyString,
@@ -19,7 +19,26 @@ const PreviewInputSchema = Schema.Struct({
 	selectedCapability: Schema.optional(CapabilitySchema),
 });
 
-type PreviewInput = Schema.Schema.Type<typeof PreviewInputSchema>;
+type PreviewInputRaw = Schema.Schema.Type<typeof PreviewInputRawSchema>;
+
+interface PreviewInputBase {
+	readonly mode: "afk" | "hitl";
+	readonly runId: string;
+	readonly sessionId: string;
+	readonly scopeId: string;
+	readonly cwd: string;
+	readonly parentRepoPath?: string;
+}
+
+type PreviewInput =
+	| (PreviewInputBase & {
+			readonly agent: "greed";
+			readonly selectedCapability: "design" | "review";
+	  })
+	| (PreviewInputBase & {
+			readonly agent: "pandora" | "toil" | "war" | "envy";
+			readonly selectedCapability?: never;
+	  });
 
 const opt = <A>(value: Option.Option<A>): A | undefined => Option.getOrUndefined(value);
 
@@ -45,23 +64,45 @@ const decode = <A, I>(
 		),
 	);
 
-const preview = (raw: PreviewInput) =>
-	Effect.gen(function* () {
-		const input = yield* decode(PreviewInputSchema, raw);
-		writeJson(
-			renderAgent({
-				agent: input.agent,
+const invalidPreview = (message: string): SpawnerError =>
+	new SpawnerError({ code: "VALIDATION_ERROR", message: `invalid preview invocation\n${message}` });
+
+const parsePreviewInput = (raw: PreviewInputRaw): Effect.Effect<PreviewInput, SpawnerError> =>
+	decode(PreviewInputRawSchema, raw).pipe(
+		Effect.flatMap((input): Effect.Effect<PreviewInput, SpawnerError> => {
+			const base = {
 				mode: input.mode,
 				runId: input.runId,
 				sessionId: input.sessionId,
 				scopeId: input.scopeId,
 				cwd: input.cwd,
 				...(input.parentRepoPath === undefined ? {} : { parentRepoPath: input.parentRepoPath }),
-				...(input.selectedCapability === undefined
-					? {}
-					: { selectedCapability: input.selectedCapability }),
-			}),
-		);
+			} as const;
+			if (input.agent === "greed") {
+				if (input.selectedCapability !== "design" && input.selectedCapability !== "review") {
+					return Effect.fail(
+						invalidPreview("greed preview requires --selected-capability design|review"),
+					);
+				}
+				return Effect.succeed<PreviewInput>({
+					...base,
+					agent: "greed",
+					selectedCapability: input.selectedCapability,
+				});
+			}
+			if (input.selectedCapability !== undefined) {
+				return Effect.fail(
+					invalidPreview(`${input.agent} preview must not set --selected-capability`),
+				);
+			}
+			return Effect.succeed<PreviewInput>({ ...base, agent: input.agent });
+		}),
+	);
+
+const preview = (raw: PreviewInputRaw) =>
+	Effect.gen(function* () {
+		const input = yield* parsePreviewInput(raw);
+		writeJson(renderAgent(input));
 	});
 
 const previewCommand = Command.make(

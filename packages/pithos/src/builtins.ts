@@ -28,7 +28,7 @@ export const BUILTIN_AGENT_CLAIMS = {
 
 export const BUILTIN_AGENT_ENQUEUES = {
 	pdx: ["escalate", "intake"],
-	pandora: ["triage", "design", "execute", "review", "escalate"],
+	pandora: ["triage", "design", "review", "escalate"],
 	toil: ["triage", "design", "execute", "review", "escalate"],
 	greed: ["triage", "design", "escalate"],
 	war: ["escalate"],

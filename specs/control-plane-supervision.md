@@ -67,7 +67,7 @@ Pithos seeds and enforces the built-in Agent kinds, Capabilities, claim authoriz
 | Agent kind | Mode today   | Claims             | Enqueues                                            |
 | ---------- | ------------ | ------------------ | --------------------------------------------------- |
 | `pdx`      | system actor | —                  | `escalate`, `intake`                                |
-| `pandora`  | HITL         | `escalate`         | `triage`, `design`, `execute`, `review`, `escalate` |
+| `pandora`  | HITL         | `escalate`         | `triage`, `design`, `review`, `escalate`            |
 | `envy`     | AFK          | `intake`           | `triage`, `design`, `escalate`                      |
 | `toil`     | AFK          | `triage`           | `triage`, `design`, `execute`, `review`, `escalate` |
 | `greed`    | HITL         | `design`, `review` | `triage`, `design`, `escalate`                      |
@@ -79,7 +79,7 @@ Capabilities are `intake`, `triage`, `design`, `execute`, `review`, and `escalat
 
 ### `pdx init`
 
-`pdx init` prepares the data dir, initializes Pithos, creates runtime directories, materializes bundle-owned `<data-dir>/agents.toml` plus `<data-dir>/templates/`, and scaffolds user-owned config docs under `<user-data-dir>/` when missing. It does not touch tmux or Harness CLIs.
+`pdx init` prepares the data dir, initializes Pithos, creates runtime directories, materializes bundle-owned `<data-dir>/agents.toml`, `<data-dir>/templates/`, and `<data-dir>/AGENTS.md`, preserves scaffold-once `<user-data-dir>/AGENTS.md`, and re-seeds installed `<user-data-dir>/PANDORA.md`. It does not touch tmux or Harness CLIs.
 
 - normal init reuses existing state
 - `--clean` removes DB, runs, and logs while preserving bundled config and user config

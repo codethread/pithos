@@ -91,6 +91,7 @@ export interface PithosClientService {
 		readonly kind: "global" | "repo" | "worktree";
 		readonly path?: string;
 		readonly parentRepoPath?: string;
+		readonly description?: string;
 	}) => Effect.Effect<void, PdxError>;
 	readonly runUpsert: (input: {
 		readonly agent: string;
@@ -172,16 +173,24 @@ export class PithosClient extends Context.Tag("pdx/PithosClient")<
 	PithosClientService
 >() {}
 
-export interface LaunchAgentInput {
-	readonly agent: "pandora" | "toil" | "greed" | "war" | "envy";
+interface LaunchAgentInputBase {
 	readonly mode: "afk" | "hitl";
 	readonly runId: string;
 	readonly sessionId: string;
 	readonly scopeId: string;
 	readonly cwd: string;
 	readonly parentRepoPath?: string;
-	readonly selectedCapability?: Capability;
 }
+
+export type LaunchAgentInput =
+	| (LaunchAgentInputBase & {
+			readonly agent: "greed";
+			readonly selectedCapability: "design" | "review";
+	  })
+	| (LaunchAgentInputBase & {
+			readonly agent: "pandora" | "toil" | "war" | "envy";
+			readonly selectedCapability?: never;
+	  });
 
 export type RenderedAgent = SpawnerRenderedAgent;
 

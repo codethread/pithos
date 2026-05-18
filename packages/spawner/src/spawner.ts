@@ -27,21 +27,32 @@ import {
 export const AgentKindSchema = Schema.Literal(...BUILTIN_SPAWNABLE_AGENT_KINDS);
 export const ModeSchema = Schema.Literal("afk", "hitl");
 
-export interface RenderAgentInput {
-	readonly agent: SpawnableAgentKind;
+interface RenderAgentInputBase {
 	readonly mode: "afk" | "hitl";
 	readonly runId: string;
 	readonly sessionId: string;
 	readonly scopeId: string;
 	readonly cwd: string;
 	readonly parentRepoPath?: string;
-	readonly selectedCapability?: Capability;
 }
+
+type GreedClaimCapability = (typeof BUILTIN_AGENT_CLAIMS.greed)[number];
+type SingleClaimAgent = Exclude<SpawnableAgentKind, "greed">;
+
+export type RenderAgentInput =
+	| (RenderAgentInputBase & {
+			readonly agent: "greed";
+			readonly selectedCapability: GreedClaimCapability;
+	  })
+	| (RenderAgentInputBase & {
+			readonly agent: SingleClaimAgent;
+			readonly selectedCapability?: never;
+	  });
 
 const HarnessKindSchema = Schema.Literal("claude", "pi");
 export type HarnessKind = Schema.Schema.Type<typeof HarnessKindSchema>;
 
-export interface RenderedAgent extends RenderAgentInput {
+interface RenderedAgentFields {
 	readonly logicalName: string;
 	readonly harness: {
 		readonly kind: HarnessKind;
@@ -66,6 +77,8 @@ export interface RenderedAgent extends RenderAgentInput {
 		readonly appends: readonly TemplateProvenance[];
 	};
 }
+
+export type RenderedAgent = RenderAgentInput & RenderedAgentFields;
 
 interface TemplateProvenance {
 	readonly reference: string;
@@ -146,10 +159,10 @@ const claimForAgent = (
 	const claims = BUILTIN_AGENT_CLAIMS[agent];
 	if (claims.length === 1) {
 		const [claim] = claims;
-		if (selectedCapability !== undefined && selectedCapability !== claim) {
+		if (selectedCapability !== undefined) {
 			throw new SpawnerError({
 				code: "VALIDATION_ERROR",
-				message: `${agent}: selected capability ${selectedCapability} is not authorized`,
+				message: `${agent}: selectedCapability is only valid for multi-claim render`,
 			});
 		}
 		return claim;

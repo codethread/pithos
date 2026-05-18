@@ -11,8 +11,8 @@ Agent configuration defines how Spawner renders Pandora's Box Agent prompts and 
 
 ### Goals
 
-- Give users an obvious CWD for direct config-editing Agents that includes `AGENTS.md` / `CLAUDE.md` guidance.
-- Keep `AGENTS.md` out of `$PDX_DATA_DIR` root so supervised global Agents do not accidentally auto-read config-editing instructions.
+- Give users an obvious CWD for direct config-editing Agents with a tiny `AGENTS.md` pointer and installed `PANDORA.md` reference.
+- Keep config-editing guidance out of `$PDX_DATA_DIR` root so supervised global Agents do not accidentally auto-read it.
 - Let users keep global config outside the pdx runtime dir through `PDX_USER_DATA_DIR`, commonly for version control.
 - Replace whole-file `agents.json` overrides with mergeable `agents.toml` partials to avoid drift after bundled template upgrades.
 - Support scope-kind-specific defaults for `global`, `repo`, and `worktree` launches through a consistent `scopes/<kind>/` layout.
@@ -32,8 +32,8 @@ Agent configuration defines how Spawner renders Pandora's Box Agent prompts and 
 - **Decision:** Introduce `PDX_USER_DATA_DIR` as the user-owned configuration root.
   - **Rationale:** `$PDX_DATA_DIR` is runtime state; users need an optionally version-controlled config location such as `~/.config/pdx`. Defaulting `PDX_USER_DATA_DIR` to `$PDX_DATA_DIR/config` keeps first-run discovery simple while still allowing full relocation through the environment.
 
-- **Decision:** Do not place `AGENTS.md` or `CLAUDE.md` in `$PDX_DATA_DIR` root.
-  - **Rationale:** Supervised global Agents spawn with CWD at the pdx data dir. Harnesses commonly auto-read `AGENTS.md` / `CLAUDE.md` from CWD, so root-level config-editing instructions would leak into Pandora, Envy, and other global-scope launches.
+- **Decision:** Place only a minimal bundle-owned `AGENTS.md` runtime note in `$PDX_DATA_DIR` root, and keep config-editing guidance in `$PDX_USER_DATA_DIR/PANDORA.md`.
+  - **Rationale:** Supervised global Agents spawn with CWD at the pdx data dir. Harnesses commonly auto-read `AGENTS.md` from CWD, so any root-level file there must stay minimal and safe for runtime inspection rather than config editing.
 
 - **Decision:** Use `agents.toml` everywhere instead of `agents.json`.
   - **Rationale:** JSON whole-file replacement forces users to copy the full bundled manifest and then manually track upstream changes. TOML supports comments and small partial files that express only intentional user deltas.
@@ -75,7 +75,7 @@ $PDX_DATA_DIR/
   runs/
 ```
 
-The data dir root intentionally does not contain `AGENTS.md` or `CLAUDE.md`.
+The data dir root contains only a minimal bundle-owned `AGENTS.md` runtime note and no `CLAUDE.md`.
 
 ### User-owned config
 
@@ -92,9 +92,8 @@ Invalid path relationships fail loudly before scaffolding or launch. This preven
 
 ```text
 $PDX_USER_DATA_DIR/
-  AGENTS.md          # direct config-editing Agent guide
-  CLAUDE.md          # symlink or copy pointing to AGENTS.md conventions
-  README.md          # human quickstart
+  AGENTS.md          # tiny direct-agent pointer scaffolded once
+  PANDORA.md         # installed config reference, re-seeded on init/open
   agents.toml        # optional user-wide partial manifest
   templates/         # optional user-wide prompt/include/append files
   scopes/
@@ -116,9 +115,10 @@ cd "$PDX_USER_DATA_DIR"
 claude   # or pi / another configured Harness
 ```
 
-`AGENTS.md` tells that Agent:
+`AGENTS.md` tells that Agent to read `PANDORA.md` for the real reference. `PANDORA.md` explains:
 
 - canonical bundled config lives at `$PDX_DATA_DIR/agents.toml` and `$PDX_DATA_DIR/templates`
+- the data-dir root `AGENTS.md` is runtime guidance, not a customization surface
 - user config lives in the current `$PDX_USER_DATA_DIR`
 - scope-kind overrides live under `scopes/<global|repo|worktree>`
 - do not edit `$PDX_DATA_DIR` canonical files
@@ -332,22 +332,7 @@ claude
 
 Because user config is partial TOML, the direct Agent can focus on intentional deltas rather than diffing copied full manifests. It can inspect canonical bundled config through `$PDX_DATA_DIR` and edit only `$PDX_USER_DATA_DIR` or project `.pdx` files.
 
-`README.md` in `$PDX_USER_DATA_DIR` should include concise examples:
-
-```toml
-# Add user-wide War rules without copying the bundled manifest.
-[agents.war]
-appends.add = ["war-rules.md"]
-
-# Change the default model for all Pandora launches.
-[agents.pandora.harness]
-model = "claude-sonnet-4.5"
-
-# Apply only to worktree execution agents.
-# File: scopes/worktree/agents.toml
-[agents.war.harness]
-tools.add = ["edit", "write"]
-```
+The scaffolded `AGENTS.md` should include concise examples and direct-editing guidance.
 
 ## 7. Implementation Phases
 
@@ -368,7 +353,7 @@ tools.add = ["edit", "write"]
 
 ### Phase 3: User config scaffolding and lifecycle
 
-- [ ] On `pdx init`, create `$PDX_USER_DATA_DIR` if missing and seed only scaffold docs (`AGENTS.md`, `CLAUDE.md`, `README.md`), not full copied overrides.
+- [ ] On `pdx init`, create `$PDX_USER_DATA_DIR` if missing, scaffold `AGENTS.md` once, and re-seed installed `PANDORA.md`, not full copied overrides.
 - [ ] Validate `PDX_USER_DATA_DIR` path relationships before scaffolding, launch, clean, or nuke.
 - [ ] Extend Pithos/pdx worktree scope creation to record a durable parent repo root for config layering, and fail/migrate existing worktree scopes that lack it before launch.
 - [ ] Preserve `$PDX_USER_DATA_DIR` during `--clean` and `--nuke`, including the default nested path.

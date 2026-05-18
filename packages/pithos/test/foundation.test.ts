@@ -85,7 +85,6 @@ describe("pithos foundation", () => {
 			"greed:triage",
 			"pandora:design",
 			"pandora:escalate",
-			"pandora:execute",
 			"pandora:review",
 			"pandora:triage",
 			"pdx:escalate",
@@ -139,7 +138,7 @@ describe("pithos foundation", () => {
 		initEngine(dbPath).close();
 		const db = new Database(dbPath);
 		expect(db.prepare("SELECT COUNT(*) FROM agent_kinds").pluck().get()).toBe(6);
-		expect(db.prepare("SELECT COUNT(*) FROM agent_enqueues").pluck().get()).toBe(19);
+		expect(db.prepare("SELECT COUNT(*) FROM agent_enqueues").pluck().get()).toBe(18);
 	});
 
 	it("exported built-in contract matches seeded rows", () => {
@@ -622,9 +621,30 @@ describe("pithos foundation", () => {
 				runId: `run_${agent}`,
 			});
 		}
-		const reviewInput = (runId: string, title: string) => ({
+		const repo = engine.scopeUpsert({ kind: "repo", path: "/tmp/pithos-review-repo" }).scope.id;
+		const worktree = engine.scopeUpsert({
+			kind: "worktree",
+			path: "/tmp/pithos-review-worktree",
+			parentRepoPath: "/tmp/pithos-review-repo",
+		}).scope.id;
+		for (const [runId, scope, cwd] of [
+			["run_greed_repo", repo, "/tmp/pithos-review-repo"],
+			["run_greed_worktree", worktree, "/tmp/pithos-review-worktree"],
+		] as const) {
+			engine.runUpsert({
+				agent: "greed",
+				mode: "hitl",
+				scope,
+				cwd,
+				sessionId: `session_${runId}`,
+				harnessKind: "claude",
+				sessionLogPath: `/tmp/session_${runId}.jsonl`,
+				runId,
+			});
+		}
+		const reviewInput = (runId: string, title: string, scope = "global") => ({
 			runId,
-			scope: "global",
+			scope,
 			capability: "review" as const,
 			title,
 			body: "review body",
@@ -638,6 +658,18 @@ describe("pithos foundation", () => {
 		expect(engine.enqueue(reviewInput("run_toil", "Review 2"))).toMatchObject({
 			task: { status: "queued" },
 		});
+		const repoReview = engine.enqueue(reviewInput("run_toil", "Repo review", repo));
+		expect(repoReview).toMatchObject({ task: { status: "queued" } });
+		expect(engine.taskInspect({ taskId: repoReview.task.id }).task).toMatchObject({
+			scope_id: repo,
+			capability: "review",
+		});
+		const worktreeReview = engine.enqueue(reviewInput("run_toil", "Worktree review", worktree));
+		expect(worktreeReview).toMatchObject({ task: { status: "queued" } });
+		expect(engine.taskInspect({ taskId: worktreeReview.task.id }).task).toMatchObject({
+			scope_id: worktree,
+			capability: "review",
+		});
 		expect(() => engine.enqueue(reviewInput("run_greed", "Bad"))).toThrow(/not authorized/);
 		expect(() => engine.enqueue(reviewInput("run_war", "Bad"))).toThrow(/not authorized/);
 		expect(() => engine.enqueue(reviewInput("run_envy", "Bad"))).toThrow(/not authorized/);
@@ -645,6 +677,22 @@ describe("pithos foundation", () => {
 			engine.claim({ runId: "run_greed", scope: "global", capability: "review" }),
 		).toMatchObject({
 			task: { status: "claimed", capability: "review" },
+		});
+		const repoClaim = engine.claim({ runId: "run_greed_repo", scope: repo, capability: "review" });
+		expect(repoClaim).toMatchObject({ task: { status: "claimed", capability: "review" } });
+		expect(engine.taskInspect({ taskId: repoClaim.task.id }).task).toMatchObject({
+			scope_id: repo,
+			capability: "review",
+		});
+		const worktreeClaim = engine.claim({
+			runId: "run_greed_worktree",
+			scope: worktree,
+			capability: "review",
+		});
+		expect(worktreeClaim).toMatchObject({ task: { status: "claimed", capability: "review" } });
+		expect(engine.taskInspect({ taskId: worktreeClaim.task.id }).task).toMatchObject({
+			scope_id: worktree,
+			capability: "review",
 		});
 		expect(() =>
 			engine.claim({ runId: "run_pandora", scope: "global", capability: "review" }),

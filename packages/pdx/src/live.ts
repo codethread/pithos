@@ -191,6 +191,7 @@ const pithosClient = (dbPath: string): PithosClientService => {
 						kind: input.kind,
 						path: input.path,
 						parentRepoPath: input.parentRepoPath,
+						description: input.description,
 					}),
 			),
 		runUpsert: (input) =>
@@ -315,10 +316,13 @@ const copyBundledTemplates = async (sourceDir: string, targetDir: string): Promi
 	}
 };
 
-const ensureUserScaffold = async (dataDir: string, userDataDir: string): Promise<void> => {
+const ensureUserScaffold = async (userDataDir: string): Promise<void> => {
 	await mkdir(userDataDir, { recursive: true });
 	const scaffoldAgents = await readFile(join(bundledTemplatesDir, "AGENTS.md"), "utf8");
-	const scaffoldReadme = `# pdx user config\n\nThis directory is user-owned. Edit config here, not in ${dataDir}.\n\nCanonical bundled defaults:\n- ${join(dataDir, "agents.toml")}\n- ${join(dataDir, "templates")}\n\nCommon files:\n- agents.toml — optional user-wide partial manifest\n- templates/ — optional user-wide prompt assets\n- scopes/global|repo|worktree/ — scope-kind overrides\n\nValidate changes with:\n\n\`\`\`sh\npandora-spawn preview --agent war --mode afk --scope repo:$PWD --run run_preview --session-id 123e4567-e89b-12d3-a456-426614174000 --cwd "$PWD"\n\`\`\`\n`;
+	const bundledPandora = await readFile(
+		join(bundledTemplatesDir, "user-config-PANDORA.md"),
+		"utf8",
+	);
 	const writeIfMissing = async (path: string, content: string): Promise<void> => {
 		try {
 			await stat(path);
@@ -328,13 +332,7 @@ const ensureUserScaffold = async (dataDir: string, userDataDir: string): Promise
 		}
 	};
 	await writeIfMissing(join(userDataDir, "AGENTS.md"), scaffoldAgents);
-	await writeIfMissing(join(userDataDir, "README.md"), scaffoldReadme);
-	try {
-		await stat(join(userDataDir, "CLAUDE.md"));
-	} catch (error) {
-		if (!isNodeErrorCode(error, "ENOENT")) throw error;
-		await symlink("AGENTS.md", join(userDataDir, "CLAUDE.md"));
-	}
+	await writeFile(join(userDataDir, "PANDORA.md"), bundledPandora, "utf8");
 };
 
 // Full re-seed: used by materializeTemplates() on pdx init/open.
@@ -352,12 +350,23 @@ const reseedSpawnerTemplates = async (dataDir: string, userDataDir: string): Pro
 	} catch (error) {
 		if (!isNodeErrorCode(error, "ENOENT")) throw error;
 	}
+	try {
+		await chmod(join(dataDir, "AGENTS.md"), 0o644);
+	} catch (error) {
+		if (!isNodeErrorCode(error, "ENOENT")) throw error;
+	}
 	await mkdir(targetDir, { recursive: true });
 	await copyBundledTemplates(bundledTemplatesDir, targetDir);
 	await writeFile(join(dataDir, "agents.toml"), await readFile(bundledAgentsPath, "utf8"), "utf8");
+	await writeFile(
+		join(dataDir, "AGENTS.md"),
+		await readFile(join(bundledTemplatesDir, "data-dir-AGENTS.md"), "utf8"),
+		"utf8",
+	);
 	await chmod(join(dataDir, "agents.toml"), 0o444);
+	await chmod(join(dataDir, "AGENTS.md"), 0o444);
 	await chmod(targetDir, 0o555);
-	await ensureUserScaffold(dataDir, userDataDir);
+	await ensureUserScaffold(userDataDir);
 };
 
 export const makeSpawnerLive = (config: {

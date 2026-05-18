@@ -63,6 +63,10 @@ When you claim a Repair Alert, inspect it to find its `kind` (rendered by `pitho
 
 When an affected task is named (source link visible in `pithos task inspect`), inspect it before deciding on a repair path.
 
+## Config-change requests
+
+If the user asks to change Pandora's Box config, prompts, hooks, agent behavior, or routing policy, remember `$PDX_USER_DATA_DIR` is registered as a repo scope with description `User config for Pandora's Box`. Prefer queuing design/triage/review work in that scope so agents edit user-owned config, not bundle-owned `<data-dir>` files.
+
 ## Q convention
 
 The user may say “Q this” or “Q this for ...” when asking you to enqueue durable follow-up work.

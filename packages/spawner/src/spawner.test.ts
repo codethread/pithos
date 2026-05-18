@@ -90,7 +90,7 @@ const pithosHelpTree = {
 					name: "claim",
 					path: "pithos task claim",
 					usage:
-						"claim [--run text] --scope text --capability triage | design | execute | review | escalate",
+						"claim [--run text] --scope text --capability triage | design | execute | review | escalate | intake",
 					description: "Claim one claimable task for a run and return its fencing token.",
 					subcommands: [],
 				},
@@ -140,7 +140,7 @@ const pithosHelpTree = {
 					name: "enqueue",
 					path: "pithos task enqueue",
 					usage:
-						"enqueue [--run text] --scope text --capability triage | design | execute | review | escalate --title text [--stdin] [--chain auto | none]",
+						"enqueue [--run text] --scope text --capability triage | design | execute | review | escalate | intake --title text [--stdin] [--chain auto | none]",
 					description: "Create a new queued task.",
 					subcommands: [],
 				},
@@ -482,28 +482,24 @@ describe("bundled agent templates", () => {
 		["war", "afk", true],
 		["envy", "afk", false],
 	] as const)("render %s bundled template", (agent, mode, expectsCwdGuard) => {
-		const rendered = renderAgent(
-			{
-				...base,
-				agent,
-				mode,
-				...(agent === "greed" ? { selectedCapability: "design" as const } : {}),
+		const input: Parameters<typeof renderAgent>[0] =
+			agent === "greed"
+				? { ...base, agent, mode, selectedCapability: "design" }
+				: { ...base, agent, mode };
+		const rendered = renderAgent(input, {
+			readText: (path: string) => readFileSync(path, "utf8"),
+			env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
+			execFile: (file: string, args: readonly string[]) => {
+				const basename = file.split("/").at(-1);
+				if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
+					return { status: 0, stdout: pithosHelpJson, stderr: "" };
+				}
+				if (basename === "pdx" && args.length === 1 && args[0] === "--help-json") {
+					return { status: 0, stdout: pdxHelpJson, stderr: "" };
+				}
+				return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
 			},
-			{
-				readText: (path: string) => readFileSync(path, "utf8"),
-				env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
-				execFile: (file: string, args: readonly string[]) => {
-					const basename = file.split("/").at(-1);
-					if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
-						return { status: 0, stdout: pithosHelpJson, stderr: "" };
-					}
-					if (basename === "pdx" && args.length === 1 && args[0] === "--help-json") {
-						return { status: 0, stdout: pdxHelpJson, stderr: "" };
-					}
-					return { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` };
-				},
-			},
-		);
+		});
 
 		expect(rendered.prompt.includes("cwd/scope guard")).toBe(expectsCwdGuard);
 		expect(rendered.prompt).not.toContain("Repository default-branch guard");
@@ -687,21 +683,45 @@ describe("renderAgent", () => {
 	);
 
 	it("fails loudly when multi-claim Greed render omits selected capability", () => {
+		const input = { ...base, agent: "greed", mode: "hitl" } as unknown as Parameters<
+			typeof renderAgent
+		>[0];
 		expect(() =>
 			renderAgent(
-				{ ...base, agent: "greed", mode: "hitl" },
+				input,
 				fakeRenderServices(agentsFile({ agent: "greed", mode: "hitl", harnessKind: "pi" })),
 			),
 		).toThrow(/selectedCapability is required/);
 	});
 
 	it("fails loudly when Greed selected capability is unauthorized", () => {
+		const input = {
+			...base,
+			agent: "greed",
+			mode: "hitl",
+			selectedCapability: "execute",
+		} as unknown as Parameters<typeof renderAgent>[0];
 		expect(() =>
 			renderAgent(
-				{ ...base, agent: "greed", mode: "hitl", selectedCapability: "execute" },
+				input,
 				fakeRenderServices(agentsFile({ agent: "greed", mode: "hitl", harnessKind: "pi" })),
 			),
 		).toThrow(/selected capability execute is not authorized/);
+	});
+
+	it("fails loudly when single-claim agents receive selected capability", () => {
+		const input = {
+			...base,
+			agent: "war",
+			mode: "afk",
+			selectedCapability: "execute",
+		} as unknown as Parameters<typeof renderAgent>[0];
+		expect(() =>
+			renderAgent(
+				input,
+				fakeRenderServices(agentsFile({ agent: "war", mode: "afk", harnessKind: "pi" })),
+			),
+		).toThrow(/selectedCapability is only valid for multi-claim render/);
 	});
 
 	it.each(["pi", "claude"] as const)(
@@ -888,7 +908,7 @@ describe("renderAgent", () => {
 			"- Use to abandon non-held work, not normal successful completion.",
 		);
 		expect(rendered.prompt).toContain(
-			"```sh\npithos task claim [--run text] --scope text --capability triage | design | execute | review | escalate\n```",
+			"```sh\npithos task claim [--run text] --scope text --capability triage | design | execute | review | escalate | intake\n```",
 		);
 
 		expect(rendered.prompt).toContain(
@@ -906,13 +926,12 @@ describe("renderAgent", () => {
 
 	it("renders scope command reference for routing agents", () => {
 		for (const agent of ["toil", "greed", "envy"] as const) {
+			const input: Parameters<typeof renderAgent>[0] =
+				agent === "greed"
+					? { ...base, agent, mode: "hitl", selectedCapability: "design" }
+					: { ...base, agent, mode: "afk" };
 			const rendered = renderAgent(
-				{
-					...base,
-					agent,
-					mode: agent === "greed" ? "hitl" : "afk",
-					...(agent === "greed" ? { selectedCapability: "design" as const } : {}),
-				},
+				input,
 				fakeRenderServices(
 					agentsFile({
 						agent,

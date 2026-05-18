@@ -757,6 +757,7 @@ DO UPDATE SET
 	session_id = excluded.session_id,
 	harness_kind = excluded.harness_kind,
 	session_log_path = excluded.session_log_path,
+	status = 'live',
 	updated_at = CURRENT_TIMESTAMP
 `;
 

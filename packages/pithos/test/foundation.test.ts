@@ -216,6 +216,23 @@ describe("pithos foundation", () => {
 		expect(upserted.run.created_at).toEqual(expect.any(String));
 		expect(upserted.run.updated_at).toEqual(expect.any(String));
 		expect(engine.runInspect({ runId: "run_war" })).toEqual(upserted);
+		engine.runCleanup({ runId: "run_war", reason: "test cleanup" });
+		const reRegistered = engine.runUpsert({
+			agent: "war",
+			mode: "afk",
+			scope: repo.scope.id,
+			cwd: "/tmp/pithos-repo",
+			sessionId: "session_war_restart",
+			harnessKind: "claude",
+			sessionLogPath: "/tmp/session_war_restart.jsonl",
+			runId: "run_war",
+		});
+		expect(reRegistered.run).toMatchObject({
+			id: "run_war",
+			status: "live",
+			session_id: "session_war_restart",
+			session_log_path: "/tmp/session_war_restart.jsonl",
+		});
 		expect(engine.scopeList({ all: false })).toEqual({
 			ok: true,
 			scopes: [

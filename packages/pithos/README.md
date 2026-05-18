@@ -97,9 +97,12 @@ Important details:
 - Context commands (`task inspect`, `graph inspect`, `briefing`) render readable text by default and expose `--json` for structured output. `graph inspect` readable output renders the same unpruned graph selection returned by `--json`.
 - Payload-bearing task mutations read redirected stdin only when `--stdin` is present and fail on empty/missing stdin.
 
-### `src/engine.ts` — durable state transitions
+### `src/engine.ts` and `src/engine/*` — durable state transitions
 
-Owns the Pithos domain API used by both the CLI and `pdx`:
+`src/engine.ts` owns the Pithos domain API used by both the CLI and `pdx`, while focused engine submodules hold stable shared types and pure text renderers:
+
+- `src/engine/types.ts` — public Engine input/output contracts.
+- `src/engine/render.ts` — pure task/graph/briefing text rendering.
 
 - scope upsert/list/archive, including repo/worktree directory admission checks
 - Run upsert/inspect/Cleanup/Interrupt/timeout/launch-abort

@@ -1,12 +1,6 @@
 import { Effect, Either, ParseResult, Schema } from "effect";
 import { resolve } from "node:path";
-import {
-	finalDependencyIds,
-	resolveChainPolicy,
-	type ChainPolicy,
-	type ChainPolicyDecision,
-} from "./chain-policy.js";
-import type { Config } from "./config.js";
+import { finalDependencyIds, resolveChainPolicy } from "./chain-policy.js";
 import type { Db } from "./db.js";
 import {
 	migrate,
@@ -14,8 +8,6 @@ import {
 	sql,
 	type Capability,
 	type HarnessKind,
-	type Mode,
-	type ScopeKind,
 	type SourceKind,
 	type TaskStatus,
 } from "./db.js";
@@ -31,562 +23,62 @@ import {
 	type RunRow,
 	type ScopeRow,
 } from "./rows.js";
-import type { Services } from "./services.js";
-
-export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
-
-export interface EngineContext {
-	readonly config: Config;
-	readonly services: Services;
-}
-
-export interface Engine {
-	readonly init: (input: { readonly fresh: boolean }) => { readonly ok: true };
-	readonly scopeUpsert: (input: {
-		readonly kind: ScopeKind;
-		readonly path: string | undefined;
-		readonly parentRepoPath?: string | undefined;
-		readonly description?: string | undefined;
-	}) => {
-		readonly ok: true;
-		readonly scope: ScopeIdentityOutput;
-	};
-	readonly scopeList: (input: { readonly all: boolean }) => {
-		readonly ok: true;
-		readonly scopes: readonly ScopeOutput[];
-	};
-	readonly scopeArchive: (input: { readonly scopeId: string }) => {
-		readonly ok: true;
-		readonly action: "archived" | "deleted";
-		readonly scope: ScopeOutput;
-	};
-	readonly runUpsert: (input: {
-		readonly agent: string;
-		readonly mode: Mode;
-		readonly scope: string;
-		readonly cwd: string;
-		readonly harnessKind: HarnessKind;
-		readonly sessionLogPath: string;
-		readonly sessionId: string;
-		readonly runId: string | undefined;
-	}) => { readonly ok: true; readonly run: RunOutput };
-	readonly runInspect: (input: { readonly runId: string }) => {
-		readonly ok: true;
-		readonly run: RunOutput;
-	};
-	readonly activeRunForTask: (input: { readonly taskId: string }) => {
-		readonly ok: true;
-		readonly run: RunOutput | null;
-	};
-	readonly runCleanup: (input: { readonly runId: string; readonly reason: string }) => {
-		readonly ok: true;
-		readonly run: RunOutput;
-	};
-	readonly runInterrupt: (input: {
-		readonly runId: string | undefined;
-		readonly taskId: string | undefined;
-		readonly reason: string;
-		readonly expectedRunId?: string;
-	}) => {
-		readonly ok: true;
-		readonly run: RunOutput;
-		readonly interrupted_task: { readonly id: string; readonly scope_id: string } | null;
-	};
-	readonly runTimeout: (input: { readonly runId: string; readonly reason: string }) => {
-		readonly ok: true;
-		readonly run: RunOutput;
-	};
-	readonly runLaunchAbort: (input: { readonly runId: string; readonly reason: string }) => {
-		readonly ok: true;
-		readonly run: RunOutput;
-	};
-	readonly eventsTail: (input: { readonly limit: number | undefined }) => {
-		readonly ok: true;
-		readonly events: readonly EventOutput[];
-	};
-	readonly pruneEvents: (input?: {
-		readonly heartbeatOlderThanDays?: number;
-		readonly otherOlderThanDays?: number;
-	}) => {
-		readonly ok: true;
-		readonly deleted_heartbeat: number;
-		readonly deleted_other: number;
-	};
-	readonly enqueue: (input: {
-		readonly scope: string;
-		readonly capability: Capability;
-		readonly title: string;
-		readonly body: string | undefined;
-		readonly bodyFile: string | undefined;
-		readonly runId: string | undefined;
-		readonly dependsOn: readonly string[];
-		readonly chain: ChainPolicy;
-	}) => EnqueueOutput;
-	readonly claim: (input: {
-		readonly runId: string | undefined;
-		readonly scope: string;
-		readonly capability: Capability;
-	}) => {
-		readonly ok: true;
-		readonly task: {
-			readonly id: string;
-			readonly status: "claimed";
-			readonly token: number;
-			readonly capability: Capability;
-		};
-	};
-	readonly heartbeat: (input: {
-		readonly runId: string | undefined;
-		readonly taskId: string | undefined;
-		readonly token: number | undefined;
-	}) => { readonly ok: true; readonly status: string };
-	readonly complete: (input: {
-		readonly taskId: string;
-		readonly runId: string | undefined;
-		readonly token: number;
-		readonly resultJson: string;
-	}) => { readonly ok: true; readonly task: { readonly id: string; readonly status: "done" } };
-	readonly failTask: (input: {
-		readonly taskId: string;
-		readonly runId: string | undefined;
-		readonly token: number;
-		readonly reason: string;
-	}) => { readonly ok: true; readonly task: { readonly id: string; readonly status: "failed" } };
-	readonly artifactAdd: (input: {
-		readonly taskId: string;
-		readonly runId: string | undefined;
-		readonly kind: string;
-		readonly title: string;
-		readonly body: string;
-	}) => { readonly ok: true; readonly artifact: { readonly id: string } };
-	readonly taskInspect: (input: { readonly taskId: string }) => TaskInspectOutput;
-	readonly cancel: (input: {
-		readonly taskId: string;
-		readonly runId: string | undefined;
-		readonly reason: string;
-	}) => { readonly ok: true; readonly task: { readonly id: string; readonly status: "cancelled" } };
-	readonly graphInspect: (input: {
-		readonly taskId: string | undefined;
-		readonly scope: string | undefined;
-		readonly all: boolean;
-		readonly status?: readonly TaskStatus[];
-		readonly search?: readonly string[];
-		readonly sinceCutoff?: GraphSinceCutoff | undefined;
-	}) => GraphInspectOutput;
-	readonly briefing: (input: { readonly agent: string | undefined }) => BriefingOutput;
-	readonly supersede: (input: {
-		readonly taskId: string;
-		readonly runId: string | undefined;
-		readonly reason: string;
-		readonly title: string | undefined;
-		readonly body: string | undefined;
-		readonly bodyFile: string | undefined;
-		readonly scope: string | undefined;
-		readonly capability: Capability | undefined;
-	}) => SupersedeOutput;
-	readonly escalateLaunchPrecondition: (input: {
-		readonly runId: string | undefined;
-		readonly expectedTaskId: string;
-		readonly expectedScopeId: string;
-		readonly expectedCapability: Capability;
-		readonly canonicalPath: string;
-		readonly agentKind: string;
-		readonly reason: string;
-		readonly escalationTitle: string;
-		readonly escalationBody: string;
-	}) => LaunchPreconditionEscalationOutput;
-	readonly createRepairAlert: (input: {
-		readonly runId: string | undefined;
-		readonly affectedTaskId?: string;
-		readonly kind: RepairAlertKind;
-		readonly escalationTitle: string;
-		readonly escalationBody: string;
-	}) => RepairAlertOutput;
-	readonly claimableRepairAlertKinds: () => {
-		readonly ok: true;
-		readonly kinds: readonly RepairAlertKind[];
-	};
-}
-
-export type Json =
-	| null
-	| boolean
-	| number
-	| string
-	| readonly Json[]
-	| { readonly [key: string]: Json };
-
-export interface TaskSummaryOutput {
-	readonly id: string;
-	readonly scope_id: string;
-	readonly scope_kind: ScopeKind;
-	readonly canonical_path: string | null;
-	readonly parent_repo_path: string | null;
-	readonly scope_description: string | null;
-	readonly capability: Capability;
-	readonly status: TaskStatus;
-	readonly title: string;
-	readonly created_at: string;
-	readonly completed_at: string | null;
-}
-
-export interface TaskDetailOutput extends TaskSummaryOutput {
-	readonly body: string;
-	readonly fencing_token: number;
-	readonly attempts: number;
-	readonly max_attempts: number;
-}
-
-export interface TaskInspectTaskOutput extends TaskDetailOutput {
-	readonly claimable: boolean;
-	readonly unresolved_dependency_ids: readonly string[];
-}
-
-export interface LineageEntryOutput {
-	readonly depth: number;
-	readonly via_task_ids: readonly string[];
-	readonly task: TaskInspectTaskOutput;
-	readonly supersedes: string | null;
-	readonly superseded_by: string | null;
-	readonly artifacts: readonly ArtifactOutput[];
-}
-
-export interface TaskSourceSummaryOutput extends TaskSummaryOutput {
-	readonly source_kind: SourceKind;
-}
-
-export interface TaskInspectOutput {
-	readonly ok: true;
-	readonly task: TaskInspectTaskOutput;
-	readonly dependencies: readonly TaskDetailOutput[];
-	readonly dependents: readonly TaskDetailOutput[];
-	readonly source: TaskSourceSummaryOutput | null;
-	readonly lineage: readonly LineageEntryOutput[];
-	readonly supersedes: string | null;
-	readonly superseded_by: string | null;
-	readonly artifacts: readonly ArtifactOutput[];
-	readonly repair_alert_kind: RepairAlertKind | null;
-}
-
-const effectiveTaskStatus = (task: {
-	readonly status: TaskStatus;
-	readonly unresolved_dependency_ids?: readonly string[];
-}): string =>
-	task.status === "queued" && (task.unresolved_dependency_ids ?? []).length > 0
-		? "blocked"
-		: task.status;
-
-const taskTitleLine = (task: {
-	readonly id: string;
-	readonly capability: Capability;
-	readonly status: TaskStatus;
-	readonly title: string;
-	readonly unresolved_dependency_ids?: readonly string[];
-}): string => `${task.id} [${task.capability}] [${effectiveTaskStatus(task)}] ${task.title}`;
-
-const ansi = {
-	reset: "\u001b[0m",
-	bold: "\u001b[1m",
-	dim: "\u001b[2m",
-	red: "\u001b[31m",
-	green: "\u001b[32m",
-	yellow: "\u001b[33m",
-	blue: "\u001b[34m",
-	cyan: "\u001b[36m",
-};
-
-const color = (enabled: boolean, code: string, text: string): string =>
-	enabled ? `${code}${text}${ansi.reset}` : text;
-
-const taskStatusColor = (status: TaskStatus): string => {
-	switch (status) {
-		case "queued":
-			return ansi.yellow;
-		case "claimed":
-		case "running":
-			return ansi.blue;
-		case "done":
-			return ansi.green;
-		case "failed":
-			return ansi.red;
-		case "dead_letter":
-			return `${ansi.bold}${ansi.red}`;
-		case "cancelled":
-			return ansi.dim;
-	}
-};
-
-const capabilityColor = (): string => `${ansi.dim}${ansi.cyan}`;
-
-const taskTitleLineColored = (
-	task: {
-		readonly id: string;
-		readonly capability: Capability;
-		readonly status: TaskStatus;
-		readonly title: string;
-		readonly unresolved_dependency_ids?: readonly string[];
-	},
-	enabled: boolean,
-): string => {
-	if (!enabled) return taskTitleLine(task);
-	const status = effectiveTaskStatus(task);
-	return `${color(enabled, taskStatusColor(task.status), task.id)} ${color(enabled, capabilityColor(), `[${task.capability}]`)} [${status}] ${task.title}`;
-};
-
-const fencedMarkdown = (body: string): string => {
-	const longestBacktickRun = Math.max(
-		0,
-		...[...body.matchAll(/`+/g)].map((match) => match[0]?.length ?? 0),
-	);
-	const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
-	return `${fence}md\n${body}\n${fence}`;
-};
-
-const renderArtifactMarkdown = (artifact: ArtifactOutput): string =>
-	`Artifact ${artifact.id} [${artifact.kind}] ${artifact.title}:\n\n${fencedMarkdown(artifact.body)}`;
-
-const renderExpandedTaskMarkdown = (
-	task: TaskInspectTaskOutput,
-	artifacts: readonly ArtifactOutput[],
-): string => {
-	const parts = [`### ${taskTitleLine(task)}`, `Body:\n\n${fencedMarkdown(task.body)}`];
-	parts.push(...artifacts.map(renderArtifactMarkdown));
-	return parts.join("\n\n");
-};
-
-const renderTaskBullet = (
-	task: TaskDetailOutput,
-	unresolvedDependencyIds: readonly string[] = [],
-): string => `- ${taskTitleLine({ ...task, unresolved_dependency_ids: unresolvedDependencyIds })}`;
-
-const sourceKindLabel = (kind: SourceKind): string =>
-	kind === "chain_source" ? "continuation provenance" : "repair provenance";
-
-const renderSourceBullet = (source: TaskSourceSummaryOutput | null): string =>
-	source === null ? "- none" : `- ${sourceKindLabel(source.source_kind)}: ${taskTitleLine(source)}`;
-
-export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string => {
-	const lineageTasks = new Map(inspect.lineage.map((entry) => [entry.task.id, entry.task]));
-	const recentHistory = [...inspect.lineage]
-		.sort(
-			(left, right) =>
-				left.depth - right.depth ||
-				left.task.created_at.localeCompare(right.task.created_at) ||
-				left.task.id.localeCompare(right.task.id),
-		)
-		.slice(0, 2)
-		.sort(
-			(left, right) =>
-				right.depth - left.depth ||
-				left.task.created_at.localeCompare(right.task.created_at) ||
-				left.task.id.localeCompare(right.task.id),
-		)
-		.map((entry) => renderExpandedTaskMarkdown(entry.task, entry.artifacts));
-	const currentParts = [
-		renderExpandedTaskMarkdown(inspect.task, inspect.artifacts),
-		"Depends on:",
-		inspect.dependencies.length === 0
-			? "- none"
-			: inspect.dependencies
-					.map((task) =>
-						renderTaskBullet(task, lineageTasks.get(task.id)?.unresolved_dependency_ids),
-					)
-					.join("\n"),
-		"Unlocks:",
-		inspect.dependents.length === 0
-			? "- none"
-			: inspect.dependents
-					.map((task) =>
-						renderTaskBullet(task, inspect.task.status === "done" ? [] : [inspect.task.id]),
-					)
-					.join("\n"),
-	];
-	if (inspect.source !== null) {
-		currentParts.push("Source link:", renderSourceBullet(inspect.source));
-	}
-	if (inspect.repair_alert_kind !== null) {
-		currentParts.push(`Repair Alert kind: ${inspect.repair_alert_kind}`);
-	}
-	const sections = [`# ${taskTitleLine(inspect.task)}`];
-	if (inspect.superseded_by !== null) {
-		sections.push(`> ⚠️ This task has been superseded by ${inspect.superseded_by}`);
-	}
-	if (inspect.supersedes !== null) {
-		sections.push(`> This task supersedes ${inspect.supersedes}`);
-	}
-	sections.push(
-		"## Recent history",
-		recentHistory.length === 0 ? "No upstream history." : recentHistory.join("\n\n"),
-		"## Current task",
-		currentParts.join("\n\n"),
-	);
-	return sections.join("\n\n") + "\n";
-};
-
-export interface ArtifactOutput {
-	readonly id: string;
-	readonly kind: string;
-	readonly title: string;
-	readonly body: string;
-	readonly created_at: string;
-}
-
-export type GraphSelectorOutput =
-	| { readonly kind: "task"; readonly value: string }
-	| { readonly kind: "scope"; readonly value: string }
-	| { readonly kind: "all" };
-
-export interface GraphNodeOutput extends TaskSummaryOutput {
-	readonly claimable: boolean;
-	readonly unresolved_dependency_ids: readonly string[];
-	readonly supersedes_task_id: string | null;
-	readonly superseded_by_task_id: string | null;
-	readonly source_task_id: string | null;
-	readonly source_kind: SourceKind | null;
-}
-
-export type GraphEdgeOutput =
-	| {
-			readonly kind: "depends_on";
-			readonly from_task_id: string;
-			readonly to_task_id: string;
-			readonly satisfied: boolean;
-	  }
-	| {
-			readonly kind: "source";
-			readonly from_task_id: string;
-			readonly to_task_id: string;
-			readonly source_kind: SourceKind;
-	  }
-	| {
-			readonly kind: "supersedes";
-			readonly from_task_id: string;
-			readonly to_task_id: string;
-	  };
-
-export interface GraphInspectOutput {
-	readonly ok: true;
-	readonly graph: {
-		readonly selector: GraphSelectorOutput;
-		readonly nodes: readonly GraphNodeOutput[];
-		readonly edges: readonly GraphEdgeOutput[];
-	};
-}
-
-export interface BlockerOutput {
-	readonly id: string;
-	readonly scope_id: string;
-	readonly status: TaskStatus;
-	readonly scope_description: string | null;
-}
-
-export interface BlockedTaskOutput extends TaskSummaryOutput {
-	readonly unresolved_dependency_ids: readonly string[];
-	readonly blockers: readonly BlockerOutput[];
-}
-
-export interface BriefingOutput {
-	readonly ok: true;
-	readonly ready: readonly TaskSummaryOutput[];
-	readonly blocked: readonly BlockedTaskOutput[];
-	readonly recentlyCompleted: readonly TaskSummaryOutput[];
-}
-
-export interface ChainOutput {
-	readonly policy: ChainPolicy;
-	readonly applied: ChainPolicyDecision["applied"];
-	readonly held_task_id: string | null;
-	readonly source_task_id: string | null;
-	readonly source_kind: SourceKind | null;
-	readonly implicit_dependency_ids: readonly string[];
-	readonly final_dependency_ids: readonly string[];
-}
-
-export interface EnqueueOutput {
-	readonly ok: true;
-	readonly task: { readonly id: string; readonly status: "queued" };
-	readonly chain: ChainOutput;
-}
-
-export interface SupersedeOutput {
-	readonly ok: true;
-	readonly task: {
-		readonly id: string;
-		readonly status: "queued";
-		readonly scope_id: string;
-		readonly capability: Capability;
-	};
-	readonly supersession: {
-		readonly old_task_id: string;
-		readonly new_task_id: string;
-		readonly retargeted_dependent_task_ids: readonly string[];
-	};
-}
-
-export interface LaunchPreconditionEscalationOutput {
-	readonly ok: true;
-	readonly task: { readonly id: string; readonly status: "cancelled" };
-	readonly escalation: {
-		readonly id: string;
-		readonly status: "queued";
-		readonly scope_id: "global";
-		readonly capability: "escalate";
-		readonly source_task_id: string;
-		readonly source_kind: "repair_source";
-	};
-}
-
-export interface RepairAlertOutput {
-	readonly ok: true;
-	readonly escalation: {
-		readonly id: string;
-		readonly status: "queued";
-		readonly scope_id: "global";
-		readonly capability: "escalate";
-		readonly source_task_id: string | null;
-		readonly source_kind: "repair_source" | null;
-		readonly kind: RepairAlertKind;
-	};
-}
-
-export interface ScopeIdentityOutput {
-	readonly id: string;
-	readonly kind: ScopeKind;
-	readonly canonical_path: string | null;
-	readonly parent_repo_path: string | null;
-	readonly archived_at: string | null;
-	readonly description: string | null;
-}
-
-export interface ScopeOutput extends ScopeIdentityOutput {
-	readonly task_count: number;
-	readonly run_count: number;
-}
-
-export interface RunOutput {
-	readonly id: string;
-	readonly agent: string;
-	readonly mode: Mode;
-	readonly scope_id: string;
-	readonly status: string;
-	readonly task_id: string | null;
-	readonly has_claimed_task: boolean;
-	readonly session_id: string;
-	readonly harness_kind: HarnessKind;
-	readonly session_log_path: string;
-	readonly created_at: string;
-	readonly updated_at: string;
-}
-
-export interface EventOutput {
-	readonly id: string;
-	readonly type: string;
-	readonly task_id: string | null;
-	readonly run_id: string | null;
-	readonly actor_run_id: string | null;
-	readonly payload: Json;
-	readonly created_at: string;
-}
+export {
+	renderBriefingText,
+	renderGraphInspectText,
+	renderTaskInspectMarkdown,
+} from "./engine/render.js";
+export { PDX_SYSTEM_RUN_ID } from "./engine/types.js";
+import { PDX_SYSTEM_RUN_ID } from "./engine/types.js";
+import type {
+	ArtifactOutput,
+	ChainOutput,
+	Engine,
+	EngineContext,
+	GraphInspectOutput,
+	GraphSelectorOutput,
+	GraphSinceCutoff,
+	Json,
+	LaunchPreconditionEscalationOutput,
+	LineageEntryOutput,
+	RepairAlertOutput,
+	RunOutput,
+	ScopeIdentityOutput,
+	ScopeOutput,
+	TaskDetailOutput,
+	TaskInspectTaskOutput,
+	TaskSourceSummaryOutput,
+	TaskSummaryOutput,
+} from "./engine/types.js";
+export type {
+	ArtifactOutput,
+	BlockerOutput,
+	BlockedTaskOutput,
+	BriefingOutput,
+	ChainOutput,
+	Engine,
+	EngineContext,
+	EnqueueOutput,
+	EventOutput,
+	GraphEdgeOutput,
+	GraphInspectOutput,
+	GraphNodeOutput,
+	GraphSelectorOutput,
+	GraphSinceCutoff,
+	Json,
+	LaunchPreconditionEscalationOutput,
+	LineageEntryOutput,
+	RepairAlertOutput,
+	RunOutput,
+	ScopeIdentityOutput,
+	ScopeOutput,
+	SupersedeOutput,
+	TaskDetailOutput,
+	TaskInspectOutput,
+	TaskInspectTaskOutput,
+	TaskSourceSummaryOutput,
+	TaskSummaryOutput,
+} from "./engine/types.js";
 
 const HEARTBEAT_EVENT_TYPES = ["run.heartbeat", "task.heartbeat"] as const;
 
@@ -1236,101 +728,6 @@ const assertAcyclic = (db: Db): void => {
 	for (const id of outgoing.keys()) visit(id);
 };
 
-export const renderGraphInspectText = (
-	{ graph }: GraphInspectOutput,
-	options: { readonly color?: boolean } = {},
-): string => {
-	const colorEnabled = options.color ?? false;
-	const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-	const childrenByParent = new Map<string, string[]>();
-	const childIds = new Set<string>();
-	for (const edge of graph.edges) {
-		if (edge.kind !== "depends_on") continue;
-		if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
-		childrenByParent.set(edge.to_task_id, [
-			...(childrenByParent.get(edge.to_task_id) ?? []),
-			edge.from_task_id,
-		]);
-		childIds.add(edge.from_task_id);
-	}
-	// supersedes edge: from=successor (new), to=superseded (old)
-	const successorBySuperseded = new Map<string, string>();
-	const successorIds = new Set<string>();
-	for (const edge of graph.edges) {
-		if (edge.kind !== "supersedes") continue;
-		if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
-		successorBySuperseded.set(edge.to_task_id, edge.from_task_id);
-		successorIds.add(edge.from_task_id);
-	}
-	for (const [parentId, childIds] of childrenByParent.entries()) {
-		childrenByParent.set(
-			parentId,
-			[...childIds].sort((left, right) => {
-				const leftNode = byId.get(left);
-				const rightNode = byId.get(right);
-				if (leftNode === undefined || rightNode === undefined) return left.localeCompare(right);
-				return leftNode.title.localeCompare(rightNode.title) || left.localeCompare(right);
-			}),
-		);
-	}
-	const lines: string[] = [];
-	const written = new Set<string>();
-	const writeNode = (id: string, depth: number, supersessionChild = false): void => {
-		const node = byId.get(id);
-		if (node === undefined) return;
-		const prefix = supersessionChild ? "~> " : "- ";
-		if (written.has(id)) {
-			lines.push(`${"  ".repeat(depth)}${prefix}↑ ${id} already shown`);
-			return;
-		}
-		lines.push(`${"  ".repeat(depth)}${prefix}${taskTitleLineColored(node, colorEnabled)}`);
-		written.add(id);
-		for (const childId of childrenByParent.get(id) ?? []) writeNode(childId, depth + 1);
-		const successorId = successorBySuperseded.get(id);
-		if (successorId !== undefined) writeNode(successorId, depth + 1, true);
-	};
-	for (const node of graph.nodes) {
-		if (!childIds.has(node.id) && !successorIds.has(node.id)) writeNode(node.id, 0);
-	}
-	for (const node of graph.nodes) {
-		if (!written.has(node.id)) writeNode(node.id, 0);
-	}
-	return `${lines.join("\n")}\n`;
-};
-
-const renderBriefingTaskBullet = (task: TaskSummaryOutput): string => {
-	const descNote = task.scope_description ? ` (${task.scope_description})` : "";
-	return `- ${taskTitleLine(task)}${descNote}`;
-};
-
-export const renderBriefingText = (briefing: BriefingOutput): string => {
-	const lines = ["# Briefing", "", "## Ready"];
-	lines.push(
-		...(briefing.ready.length === 0 ? ["- none"] : briefing.ready.map(renderBriefingTaskBullet)),
-	);
-	lines.push("", "## Blocked");
-	if (briefing.blocked.length === 0) {
-		lines.push("- none");
-	} else {
-		for (const task of briefing.blocked) {
-			lines.push(renderBriefingTaskBullet(task));
-			for (const blocker of task.blockers) {
-				const descNote = blocker.scope_description ? ` (${blocker.scope_description})` : "";
-				lines.push(
-					`  - blocked by ${blocker.id} [${blocker.status}] scope=${blocker.scope_id}${descNote}`,
-				);
-			}
-		}
-	}
-	lines.push("", "## Recently Completed");
-	lines.push(
-		...(briefing.recentlyCompleted.length === 0
-			? ["- none"]
-			: briefing.recentlyCompleted.map(renderBriefingTaskBullet)),
-	);
-	return `${lines.join("\n")}\n`;
-};
-
 const insertRepairAlert = (db: Db, alertTaskId: string, kind: RepairAlertKind): void => {
 	db.prepare(sql`INSERT INTO repair_alerts(task_id, kind) VALUES (?, ?)`).run(alertTaskId, kind);
 };
@@ -1457,10 +854,6 @@ const searchFilterSql = (search: readonly string[]): string =>
 
 const searchFilterParams = (search: readonly string[]): readonly string[] =>
 	search.flatMap((term) => [term, term]);
-
-interface GraphSinceCutoff {
-	readonly dbTimestamp: string;
-}
 
 const sinceFilterSql = (since: GraphSinceCutoff | undefined): string =>
 	since === undefined ? "" : " AND (created_at >= ? OR updated_at >= ? OR completed_at >= ?)";

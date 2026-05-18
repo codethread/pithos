@@ -101,12 +101,50 @@ add = ["war-local.md"]
 
 ## Hooks
 
-Input hooks are configured in `agents.toml`:
+Input hooks let an external watcher feed signals to Envy. Configure them in a
+config layer that applies to global scope, usually `<user-data-dir>/agents.toml`
+or `<user-data-dir>/scopes/global/agents.toml`:
 
 ```toml
 [hooks.input]
 command = ["/path/to/watcher", "--flag"]
 ```
+
+`command` is an argv array. It is not run through a shell, so include the
+executable and each argument as separate strings. To disable a lower-layer hook
+without replacing it:
+
+```toml
+[hooks.input]
+enabled = false
+```
+
+Do not set `enabled = false` together with `command`.
+
+The input hook runs as a long-lived producer after Pandora is live. pdx closes
+hook stdin, reads hook stdout as newline-delimited JSON, and writes hook stderr
+to `<data-dir>/runs/hook.stderr.log`.
+
+Each stdout line must be one JSON object:
+
+```json
+{ "title": "New bug report", "body": "Full signal text for Envy to classify." }
+```
+
+Required fields:
+
+- `title` — non-empty string used as the intake Task title
+- `body` — non-empty string used as the intake Task body
+
+For each valid line, pdx creates a global `intake` Task. Envy claims that Task,
+classifies the signal, and enqueues one downstream Task: `triage`, `design`, or
+`escalate`. Put workflow-specific classification rules in Envy template
+overrides/appends.
+
+Invalid JSON or invalid fields are logged and skipped; the hook keeps running.
+If the hook exits, pdx restarts it with backoff. Repeated crashes create an
+`input_hook_stuck` Repair Alert for Pandora and stop restarts until pdx is
+restarted.
 
 Hooks belong in global config layers only, not repo/worktree project layers.
 

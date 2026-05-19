@@ -50,14 +50,14 @@ Refactor approach:
   - read/query shape, e.g. row parsing plus reusable read-model queries
   - graph/query assembly, e.g. selector filtering plus closure construction
   - domain side effects, e.g. alert creation plus provenance/event writes
-  - lifecycle families, e.g. claim/heartbeat/complete/fail/cancel transitions sharing fencing-token invariants
+  - lifecycle families, e.g. acquire/renew/complete/fail/cancel transitions sharing ownership, token, or status invariants
 - Treat helper-only extraction as suspicious. Moving helper functions can be useful only when the helper set has a nameable concept and stable consumers. Otherwise it is busy work.
 - Do not create artificial wrappers, one-function files, compatibility shims, or abstraction layers just to reduce line count.
-- Do not create a generic `common`, `utils`, or `support` module as the first move. These usually become the new junk drawer. Use a narrow name only when the concept is clear (`read-model`, `claim-loop`, `repair-alerts`, `admission`, etc.).
+- Do not create a generic `common`, `utils`, or `support` module as the first move. These usually become the new junk drawer. Use a narrow name only when the concept is clear (`read-model`, `graph-inspection`, `admission`, `lifecycle`, `alerts`, etc.).
 - Keep public package boundaries stable. Consumers should still import from documented package roots unless the task explicitly changes the API.
 - Keep dependency direction simple. Avoid circular imports and sibling `src/*` imports from other packages.
 - Prefer callee-owned narrow dependency interfaces over importing the original large module. Passing a few cross-cutting functions can be acceptable when it avoids cycles and makes the new module's needs explicit.
-- Preserve transaction boundaries. If moving transactional code, move the whole transaction body together or keep helper calls inside the caller's existing transaction. Document any `InTxn` helper contract.
+- Preserve transaction boundaries. If moving transactional code, move the whole transaction body together or keep helper calls inside the caller's existing transaction. Document any helper that must run inside a caller-owned transaction.
 - Update README/docs when module layout or public boundaries change.
 - After extraction, scan specs and docs for stale references to the old file as the sole implementation location. Update them to mention the new module set or package boundary where appropriate.
 
@@ -74,12 +74,12 @@ Ask:
 - Did we move trigger policy away from the transition that detects it? If yes, reconsider. Trigger decisions often belong with lifecycle transitions; shared side-effect creation can live in a domain module.
 - Did we leave duplicated tiny validation helpers? A small duplicate may be better than a one-function module; avoid "cleanup" that only creates indirection.
 
-Lessons from this repo:
+Examples of good vs weak boundaries:
 
-- Good: `task-read-model` owns DB row parsing and reusable task/scope read queries.
-- Good: `graph-inspect` owns graph filters, `--since` parsing, and closure assembly.
-- Good: `repair-alerts` owns Repair Alert task creation, repair provenance, launch-precondition repair, and claimable alert queries; lifecycle transitions still own when alerts fire.
-- Good: `claim-loop` owns claim, heartbeat, completion, failure, cancellation, artifact attachment, and the fencing-token/held-task invariants shared by those transitions.
+- Good: a read-model module owns row/schema parsing plus reusable query functions for one domain view.
+- Good: an inspection/query module owns filter parsing, selection, traversal, and output assembly for one inspection surface.
+- Good: a domain side-effect module owns durable record creation, provenance links, and event/log writes; lifecycle transitions still own when that side effect is triggered.
+- Good: a lifecycle module owns related state transitions that share ownership, token, status, retry, or locking invariants.
 - Busy work: extracting random helpers out of the oversized file without a domain name; creating a generic `common.ts`; moving one function just because it is long; splitting operation methods into wrappers while the original file still contains the real logic.
 
 Tests during refactor:

@@ -65,8 +65,34 @@ describe("engine render helpers", () => {
 			},
 		};
 
-		expect(renderGraphInspectText(graph)).toBe(
-			"- task_parent [execute] [queued] Parent\n  - task_child [execute] [queued] Child\n",
+		expect(renderGraphInspectText(graph, { homeDir: "/work" })).toBe(
+			"- task_parent [execute] [queued] (~) Parent\n  - task_child [execute] [queued] (~) Child\n",
+		);
+	});
+
+	it("omits graph scope parentheses for global tasks", () => {
+		const graph: GraphInspectOutput = {
+			ok: true,
+			graph: {
+				selector: { kind: "all" },
+				nodes: [
+					{
+						...graphNode,
+						id: "task_global",
+						title: "Global",
+						scope_id: "global",
+						scope_kind: "global",
+						canonical_path: null,
+						parent_repo_path: null,
+						scope_description: null,
+					},
+				],
+				edges: [],
+			},
+		};
+
+		expect(renderGraphInspectText(graph, { homeDir: "/work" })).toBe(
+			"- task_global [execute] [queued] Global\n",
 		);
 	});
 

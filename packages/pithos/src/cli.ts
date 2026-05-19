@@ -422,7 +422,8 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 			input.command === "task.complete"
 				? yield* readOptionalResultMetadata(ctx, input.stdin)
 				: undefined;
-		const engine = makeEngine({ config: resolveConfig(ctx.config), services: ctx.services });
+		const config = resolveConfig(ctx.config);
+		const engine = makeEngine({ config, services: ctx.services });
 		const result = yield* fromEngine(() => {
 			switch (input.command) {
 				case "init":
@@ -481,7 +482,9 @@ const runCommand = (ctx: CliContext, input: CommandInput) =>
 						status: graphStatuses!,
 						sinceCutoff: graphSinceCutoff,
 					});
-					return input.json ? graphOutput : renderGraphInspectText(graphOutput, { color: tty });
+					return input.json
+						? graphOutput
+						: renderGraphInspectText(graphOutput, { color: tty, homeDir: config.homeDir });
 				}
 				case "briefing": {
 					const briefingOutput = engine.briefing({ agent: input.agent });

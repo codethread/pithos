@@ -681,11 +681,11 @@ CREATE TABLE repair_alerts (
 
 		expect(graphText).toBe(
 			[
-				`- ${triage} [triage] [queued] triage root`,
-				`  - ${design} [design] [blocked] design middle`,
-				`    - ${executeA} [execute] [blocked] execute fork A`,
-				`      - ${followUp} [execute] [blocked] execute follow-up`,
-				`    - ${executeB} [execute] [blocked] execute fork B`,
+				`- ${triage} [triage] [queued] (/tmp/pithos-repo) triage root`,
+				`  - ${design} [design] [blocked] (/tmp/pithos-repo) design middle`,
+				`    - ${executeA} [execute] [blocked] (/tmp/pithos-repo) execute fork A`,
+				`      - ${followUp} [execute] [blocked] (/tmp/pithos-repo) execute follow-up`,
+				`    - ${executeB} [execute] [blocked] (/tmp/pithos-repo) execute fork B`,
 				"",
 			].join("\n"),
 		);
@@ -1134,10 +1134,10 @@ CREATE TABLE repair_alerts (
 
 		expect(graphText).toBe(
 			[
-				`- ${root} [triage] [queued] root task`,
-				`  - ${branchAlpha} [execute] [blocked] alpha branch`,
-				`    - ${shared} [execute] [blocked] shared leaf`,
-				`  - ${branchBeta} [execute] [blocked] beta branch`,
+				`- ${root} [triage] [queued] (/tmp/pithos-repo) root task`,
+				`  - ${branchAlpha} [execute] [blocked] (/tmp/pithos-repo) alpha branch`,
+				`    - ${shared} [execute] [blocked] (/tmp/pithos-repo) shared leaf`,
+				`  - ${branchBeta} [execute] [blocked] (/tmp/pithos-repo) beta branch`,
 				`    - ↑ ${shared} already shown`,
 				"",
 			].join("\n"),
@@ -1196,9 +1196,9 @@ CREATE TABLE repair_alerts (
 		// successor appears under original via ~> AND as a direct dependency child of parent.
 		expect(graphText).toBe(
 			[
-				`- ${parent} [execute] [done] alpha parent`,
-				`  - ${original} [execute] [failed] alpha original`,
-				`    ~> ${successor} [execute] [queued] beta successor`,
+				`- ${parent} [execute] [done] (/tmp/pithos-repo) alpha parent`,
+				`  - ${original} [execute] [failed] (/tmp/pithos-repo) alpha original`,
+				`    ~> ${successor} [execute] [queued] (/tmp/pithos-repo) beta successor`,
 				`  - ↑ ${successor} already shown`,
 				"",
 			].join("\n"),

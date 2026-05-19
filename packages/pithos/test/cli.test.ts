@@ -922,12 +922,12 @@ describe("pithos cli", () => {
 
 		const graphText = await runCli(["graph", "inspect", "--scope", "repo:/tmp/pithos-cli"], dbPath);
 		expect(normalizeGeneratedIds(graphText.stdout[0] ?? "")).toMatchInlineSnapshot(`
-			"- task_cli_N [triage] [queued] Triage readable inspect API
-			  - task_cli_N [design] [blocked] Design output mode contract
-			    - task_cli_N [execute] [blocked] Execute A task inspect renderer
-			      - task_cli_N [execute] [blocked] Follow-up A docs for inspect
-			    - task_cli_N [execute] [blocked] Execute B graph briefing help
-			      - task_cli_N [execute] [blocked] Follow-up B prompt verification
+			"- task_cli_N [triage] [queued] (/tmp/pithos-cli) Triage readable inspect API
+			  - task_cli_N [design] [blocked] (/tmp/pithos-cli) Design output mode contract
+			    - task_cli_N [execute] [blocked] (/tmp/pithos-cli) Execute A task inspect renderer
+			      - task_cli_N [execute] [blocked] (/tmp/pithos-cli) Follow-up A docs for inspect
+			    - task_cli_N [execute] [blocked] (/tmp/pithos-cli) Execute B graph briefing help
+			      - task_cli_N [execute] [blocked] (/tmp/pithos-cli) Follow-up B prompt verification
 			"
 		`);
 	});

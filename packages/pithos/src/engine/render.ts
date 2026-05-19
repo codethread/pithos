@@ -26,6 +26,31 @@ const taskTitleLine = (task: {
 	readonly unresolved_dependency_ids?: readonly string[];
 }): string => `${task.id} [${task.capability}] [${effectiveTaskStatus(task)}] ${task.title}`;
 
+const displayScopePath = (canonicalPath: string, homeDir: string | undefined): string => {
+	if (homeDir === undefined) return canonicalPath;
+	const normalizedHome = homeDir.replace(/\/+$/, "");
+	if (canonicalPath === normalizedHome) return "~";
+	return canonicalPath.startsWith(`${normalizedHome}/`)
+		? `~/${canonicalPath.slice(normalizedHome.length + 1)}`
+		: canonicalPath;
+};
+
+const graphTaskTitleLine = (
+	task: {
+		readonly id: string;
+		readonly capability: Capability;
+		readonly status: TaskStatus;
+		readonly title: string;
+		readonly canonical_path: string | null;
+		readonly unresolved_dependency_ids?: readonly string[];
+	},
+	homeDir: string | undefined,
+): string => {
+	const scopeNote =
+		task.canonical_path === null ? "" : ` (${displayScopePath(task.canonical_path, homeDir)})`;
+	return `${task.id} [${task.capability}] [${effectiveTaskStatus(task)}]${scopeNote} ${task.title}`;
+};
+
 const ansi = {
 	reset: "\u001b[0m",
 	bold: "\u001b[1m",
@@ -60,19 +85,23 @@ const taskStatusColor = (status: TaskStatus): string => {
 
 const capabilityColor = (): string => `${ansi.dim}${ansi.cyan}`;
 
-const taskTitleLineColored = (
+const graphTaskTitleLineColored = (
 	task: {
 		readonly id: string;
 		readonly capability: Capability;
 		readonly status: TaskStatus;
 		readonly title: string;
+		readonly canonical_path: string | null;
 		readonly unresolved_dependency_ids?: readonly string[];
 	},
 	enabled: boolean,
+	homeDir: string | undefined,
 ): string => {
-	if (!enabled) return taskTitleLine(task);
+	if (!enabled) return graphTaskTitleLine(task, homeDir);
 	const status = effectiveTaskStatus(task);
-	return `${color(enabled, taskStatusColor(task.status), task.id)} ${color(enabled, capabilityColor(), `[${task.capability}]`)} [${status}] ${task.title}`;
+	const scopeNote =
+		task.canonical_path === null ? "" : ` (${displayScopePath(task.canonical_path, homeDir)})`;
+	return `${color(enabled, taskStatusColor(task.status), task.id)} ${color(enabled, capabilityColor(), `[${task.capability}]`)} [${status}]${scopeNote} ${task.title}`;
 };
 
 const fencedMarkdown = (body: string): string => {
@@ -167,9 +196,10 @@ export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string =>
 
 export const renderGraphInspectText = (
 	{ graph }: GraphInspectOutput,
-	options: { readonly color?: boolean } = {},
+	options: { readonly color?: boolean; readonly homeDir?: string | undefined } = {},
 ): string => {
 	const colorEnabled = options.color ?? false;
+	const homeDir = options.homeDir;
 	const byId = new Map(graph.nodes.map((node) => [node.id, node]));
 	const childrenByParent = new Map<string, string[]>();
 	const childIds = new Set<string>();
@@ -211,7 +241,9 @@ export const renderGraphInspectText = (
 			lines.push(`${"  ".repeat(depth)}${prefix}↑ ${id} already shown`);
 			return;
 		}
-		lines.push(`${"  ".repeat(depth)}${prefix}${taskTitleLineColored(node, colorEnabled)}`);
+		lines.push(
+			`${"  ".repeat(depth)}${prefix}${graphTaskTitleLineColored(node, colorEnabled, homeDir)}`,
+		);
 		written.add(id);
 		for (const childId of childrenByParent.get(id) ?? []) writeNode(childId, depth + 1);
 		const successorId = successorBySuperseded.get(id);

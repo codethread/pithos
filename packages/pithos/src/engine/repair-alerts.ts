@@ -40,6 +40,11 @@ const ensureSystemRunRow = (db: Db): void => {
 	).run();
 };
 
+/**
+ * Creates the Repair Alert task inside the caller's existing transition transaction.
+ * Lifecycle transitions own the trigger decision; this helper owns the shared
+ * alert task, repair_alerts row, repair_source provenance, and event write.
+ */
 export const createRepairAlertInTxn = (
 	ctx: EngineContext,
 	db: Db,

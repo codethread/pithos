@@ -105,6 +105,7 @@ Important details:
 - `src/engine/render.ts` — pure task/graph/briefing text rendering.
 - `src/engine/db-helpers.ts` — shared Engine DB open/migrate/close and ID-collision handling.
 - `src/engine/event-log.ts` — durable event insert, tail, and retention pruning logic.
+- `src/engine/claim-loop.ts` — Claim-loop transitions for claim, heartbeat, completion, failure, cancellation, and artifact attachment.
 - `src/engine/task-read-model.ts` — DB row parsing and reusable Task/Scope read-model queries used by transitions and inspections.
 - `src/engine/graph-inspect.ts` — graph selector filtering, `--since` cutoff parsing, and dependency/source/supersession closure assembly.
 - `src/engine/repair-alerts.ts` — Repair Alert task creation, `repair_source` provenance, launch-precondition repair, and claimable Repair Alert kind queries.
@@ -113,8 +114,7 @@ Important details:
 
 - scope upsert/list/archive, including repo/worktree directory admission checks
 - Run upsert/inspect/Cleanup/Interrupt/timeout/launch-abort
-- task enqueue/claim/heartbeat/complete/fail/cancel/supersede, including active-scope and repo/worktree directory admission checks
-- artifact add
+- task enqueue/supersede, including active-scope and repo/worktree directory admission checks
 - graph inspect
 - briefing
 - event tail

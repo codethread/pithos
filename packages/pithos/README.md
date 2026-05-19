@@ -107,13 +107,13 @@ Important details:
 - `src/engine/event-log.ts` — durable event insert, tail, and retention pruning logic.
 - `src/engine/task-read-model.ts` — DB row parsing and reusable Task/Scope read-model queries used by transitions and inspections.
 - `src/engine/graph-inspect.ts` — graph selector filtering, `--since` cutoff parsing, and dependency/source/supersession closure assembly.
+- `src/engine/repair-alerts.ts` — Repair Alert task creation, `repair_source` provenance, launch-precondition repair, and claimable Repair Alert kind queries.
 
 `src/engine.ts` still implements the state-transition methods for:
 
 - scope upsert/list/archive, including repo/worktree directory admission checks
 - Run upsert/inspect/Cleanup/Interrupt/timeout/launch-abort
 - task enqueue/claim/heartbeat/complete/fail/cancel/supersede, including active-scope and repo/worktree directory admission checks
-- library-only pdx Repair Alert creation with `repair_source` provenance
 - artifact add
 - graph inspect
 - briefing

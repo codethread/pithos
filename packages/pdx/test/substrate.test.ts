@@ -1575,7 +1575,7 @@ describe("pdx substrate", () => {
 		const processKills: string[] = [];
 		const process = Process.of({
 			execFile: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
-			isAlive: (pid) => Effect.succeed(!processKills.includes(`${pid}:SIGTERM`)),
+			isAlive: (pid) => Effect.succeed(!processKills.includes(`${pid}:SIGKILL`)),
 			kill: (pid, signal) => Effect.sync(() => processKills.push(`${pid}:${signal}`)),
 		});
 		const tmux = Tmux.of({
@@ -1620,7 +1620,7 @@ describe("pdx substrate", () => {
 		await run(handle.shutdown);
 		await run(handle.close);
 		expect(response).toEqual({ ok: true, data: { stopped: true } });
-		expect(processKills).toContain("456:SIGTERM");
+		expect(processKills).toEqual(["456:SIGTERM", "456:SIGKILL"]);
 		expect(pithosCalls).toContain("runCleanup:run_afk_close:pdx_close");
 		expect(removes).toContain(`${config.runsDir}/run_afk_close.pid`);
 		expect(pithosCalls.at(-1)).toEqual(`runCleanup:${PDX_SYSTEM_RUN_ID}:pdx_close`);

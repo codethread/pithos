@@ -18,6 +18,7 @@ import {
 	Tmux,
 	type HookExecutorService,
 	type NudgeReason,
+	type ProcessService,
 	type RegistryEntry,
 	type TmuxService,
 } from "./services.js";
@@ -544,6 +545,34 @@ const confirmAfkGone = (pid: number) =>
 
 export const isAfkAlive = (pid: number) =>
 	Process.pipe(Effect.flatMap((processService) => processService.isAlive(pid)));
+
+const terminateAfkProcess = (processService: ProcessService, pid: number) =>
+	Effect.gen(function* () {
+		if (!(yield* processService.isAlive(pid))) return;
+		yield* processService
+			.kill(pid, "SIGTERM")
+			.pipe(
+				Effect.catchAll((error) =>
+					isMissingProcessError(error) ? Effect.void : Effect.fail(error),
+				),
+			);
+		if (!(yield* processService.isAlive(pid))) return;
+		yield* processService
+			.kill(pid, "SIGKILL")
+			.pipe(
+				Effect.catchAll((error) =>
+					isMissingProcessError(error) ? Effect.void : Effect.fail(error),
+				),
+			);
+		if (yield* processService.isAlive(pid)) {
+			yield* Effect.fail(
+				new PdxError({
+					code: "PROCESS_ERROR",
+					message: `${pid} still alive after kill`,
+				}),
+			);
+		}
+	});
 
 const killEntryResource = (entry: RegistryEntry, signal: "SIGTERM" | "SIGKILL") =>
 	Effect.gen(function* () {
@@ -1898,22 +1927,7 @@ export const runDaemon = (config: PdxConfig, maxAfk: number, intervalSeconds: nu
 						);
 					yield* confirmTmuxGone(tmux, entry.tmuxTarget);
 				} else if (entry.pid !== undefined) {
-					yield* processService
-						.kill(entry.pid, "SIGTERM")
-						.pipe(
-							Effect.catchAll((error) =>
-								isMissingProcessError(error) ? Effect.void : Effect.fail(error),
-							),
-						);
-					const alive = yield* processService.isAlive(entry.pid);
-					if (alive) {
-						yield* Effect.fail(
-							new PdxError({
-								code: "PROCESS_ERROR",
-								message: `${entry.pid} still alive after kill`,
-							}),
-						);
-					}
+					yield* terminateAfkProcess(processService, entry.pid);
 				}
 				yield* pithos.runCleanup({ runId: entry.runId, reason: "pdx_close" });
 				if (entry.mode === "afk") {

@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,7 @@ export interface RenderServices {
 	readonly readText: (path: string) => string;
 	readonly env: (key: string) => string | undefined;
 	readonly execFile: (file: string, args: readonly string[]) => CommandResult;
+	readonly realPath: (path: string) => string;
 }
 
 export interface LaunchServices extends RenderServices {
@@ -60,6 +61,7 @@ export const makeFakeSpawnerServices = (input: FakeSpawnerServicesInput): Launch
 	spawnProcess: () => (input.spawnPid === undefined ? {} : { pid: input.spawnPid }),
 	writeTempText: (prefix, content) => `${prefix}-${content.length}.tmp`,
 	execFile: () => input.commandResult ?? { status: 0, stdout: "1", stderr: "" },
+	realPath: (path) => path,
 });
 
 const formatSpawnSyncError = (error: unknown): string =>
@@ -92,4 +94,5 @@ export const LiveSpawnerServices: LaunchServices = {
 				result.stderr ?? (result.error === undefined ? "" : formatSpawnSyncError(result.error)),
 		};
 	},
+	realPath: (path) => realpathSync(path),
 };

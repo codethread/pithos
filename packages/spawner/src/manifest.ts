@@ -546,12 +546,14 @@ const buildResolvedConfig = (
 			if (partial.harness?.system_prompt_mode !== undefined) {
 				current.harness.system_prompt_mode = partial.harness.system_prompt_mode;
 			}
-			current.harness.tools = mergeUniqueList(
-				current.harness.tools ?? [],
-				partial.harness?.tools,
-				`agents.${agent}.harness.tools`,
-				layer.agentsPath,
-			);
+			if (partial.harness?.tools !== undefined) {
+				current.harness.tools = mergeUniqueList(
+					current.harness.tools ?? [],
+					partial.harness.tools,
+					`agents.${agent}.harness.tools`,
+					layer.agentsPath,
+				);
+			}
 			current.harness.argv = mergeArgvList(current.harness.argv, partial.harness?.argv);
 		}
 		const hookInput = file.hooks?.input;

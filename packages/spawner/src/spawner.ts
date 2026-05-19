@@ -500,7 +500,8 @@ const logicalName = (input: RenderAgentInput): string =>
 		? "pdx--pandora"
 		: `pdx--${input.agent}__${scopeSlug(input)}--${input.sessionId.slice(0, 8)}`;
 
-const claudeProjectSlug = (cwd: string): string => cwd.replace(/[/:\\]/g, "-");
+const claudeProjectSlug = (cwd: string, services: RenderServices): string =>
+	services.realPath(cwd).replace(/[^A-Za-z0-9-]/g, "-");
 
 const piSessionBucket = (cwd: string): string =>
 	`--${cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-")}--`;
@@ -508,9 +509,10 @@ const piSessionBucket = (cwd: string): string =>
 const sessionLogPathFor = (
 	input: { readonly cwd: string; readonly sessionId: string },
 	harnessKind: HarnessKind,
+	services: RenderServices,
 ): string =>
 	harnessKind === "claude"
-		? `${homedir()}/.claude/projects/${claudeProjectSlug(input.cwd)}/${input.sessionId}.jsonl`
+		? `${homedir()}/.claude/projects/${claudeProjectSlug(input.cwd, services)}/${input.sessionId}.jsonl`
 		: `${homedir()}/.pi/agent/sessions/${piSessionBucket(input.cwd)}/${input.sessionId}.jsonl`;
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`;
@@ -564,7 +566,16 @@ const harnessArgv = (
 	const promptFlag =
 		manifest.harness.system_prompt_mode === "append" ? "--append-system-prompt" : "--system-prompt";
 	const toolsArgs =
-		manifest.harness.tools === undefined ? [] : ["--tools", manifest.harness.tools.join(",")];
+		manifest.harness.kind === "claude"
+			? [
+					"--tools",
+					manifest.harness.tools === undefined || manifest.harness.tools.length === 0
+						? "default"
+						: manifest.harness.tools.join(","),
+				]
+			: manifest.harness.tools === undefined || manifest.harness.tools.length === 0
+				? []
+				: ["--tools", manifest.harness.tools.join(",")];
 	if (manifest.harness.kind === "claude") {
 		const base = [
 			"claude",
@@ -663,7 +674,7 @@ export const renderAgent = (
 		...(config.pdxDataDir === undefined ? {} : { PDX_DATA_DIR: config.pdxDataDir }),
 		...(config.pdxUserDataDir === undefined ? {} : { PDX_USER_DATA_DIR: config.pdxUserDataDir }),
 	};
-	const sessionLogPath = sessionLogPathFor(input, manifest.harness.kind);
+	const sessionLogPath = sessionLogPathFor(input, manifest.harness.kind, services);
 	return {
 		...input,
 		logicalName: logicalName(input),
@@ -952,5 +963,11 @@ export const renderSessionTranscript = (
 		manifest.harnessKind === "claude"
 			? parseClaudeTranscript(manifest.sessionLogPath, raw)
 			: parsePiTranscript(manifest.sessionLogPath, raw);
+	if (messages.length === 0) {
+		throw new SpawnerError({
+			code: "HARNESS_ERROR",
+			message: `${manifest.sessionLogPath}: no ${manifest.harnessKind} transcript messages found`,
+		});
+	}
 	return `${formatTranscript(messages, manifest.limit ?? 20)}\n`;
 };

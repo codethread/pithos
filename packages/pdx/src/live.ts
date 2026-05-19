@@ -414,6 +414,7 @@ export const makeSpawnerLive = (config: {
 			return liveSpawnerServices.env(key);
 		},
 		execFile: liveSpawnerServices.execFile,
+		realPath: liveSpawnerServices.realPath,
 		writeTempText: liveSpawnerServices.writeTempText,
 	};
 	return Spawner.of({

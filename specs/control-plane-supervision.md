@@ -188,7 +188,7 @@ Spawner owns:
 - manifest and template validation
 - command-card rendering into prompts
 - Harness argv/env construction
-- expected Harness session log paths
+- expected Harness session log paths; Claude paths use the realpath-normalized launch CWD to match Claude Code's project bucket naming
 - AFK process launch and HITL tmux launch
 - Harness session transcript parsing for `pdx run transcript`
 
@@ -219,7 +219,7 @@ The public `pdx` surface is the operator/Pandora control surface:
 
 All commands resolve data dir as `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/.pdx`.
 
-`pdx daemon logs` reads structured Supervisor log JSONL even after the daemon stops. These are Supervisor logs, not Harness transcripts. `pdx run transcript` reads the Pithos Run transcript metadata and delegates Harness-log parsing to Spawner. System Runs fail loudly for transcript rendering and point to Supervisor logs.
+`pdx daemon logs` reads structured Supervisor log JSONL even after the daemon stops. These are Supervisor logs, not Harness transcripts. `pdx run transcript` reads the Pithos Run transcript metadata and delegates Harness-log parsing to Spawner. System Runs fail loudly for transcript rendering and point to Supervisor logs. Harness logs with no parseable user/assistant messages also fail loudly instead of rendering empty output.
 
 ## 11. Code Locations and Tests
 

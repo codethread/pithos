@@ -28,7 +28,9 @@ const base = {
 
 const piBucket = (cwd: string): string => `--${cwd.replace(/^\/+/, "").replace(/[/:\\]/g, "-")}--`;
 const claudeSessionPath = (cwd: string, sessionId: string): string =>
-	`${homedir()}/.claude/projects/${cwd.replace(/[/:\\]/g, "-")}/${sessionId}.jsonl`;
+	`${homedir()}/.claude/projects/${cwd.replace(/[^A-Za-z0-9-]/g, "-")}/${sessionId}.jsonl`;
+const claudeRealSessionPath = (cwd: string, sessionId: string, realCwd: string): string =>
+	`${homedir()}/.claude/projects/${realCwd.replace(/[^A-Za-z0-9-]/g, "-")}/${sessionId}.jsonl`;
 const piSessionPath = (cwd: string, sessionId: string): string =>
 	`${homedir()}/.pi/agent/sessions/${piBucket(cwd)}/${sessionId}.jsonl`;
 
@@ -421,6 +423,7 @@ const fakeRenderServices = (
 			return "{{claim_command}}\n{{command_cards}}";
 		},
 		env: (key: string) => (key === "PDX_DATA_DIR" ? "/tmp/pdx-data" : undefined),
+		realPath: (path: string) => path,
 		execFile: (file: string, args: readonly string[]) => {
 			const basename = file.split("/").at(-1);
 			if (basename === "pithos" && args.length === 1 && args[0] === "--help-json") {
@@ -491,6 +494,7 @@ describe("bundled agent templates", () => {
 				: { ...base, agent, mode };
 		const rendered = renderAgent(input, {
 			readText: (path: string) => readFileSync(path, "utf8"),
+			realPath: (path: string) => path,
 			env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
 			execFile: (file: string, args: readonly string[]) => {
 				const basename = file.split("/").at(-1);
@@ -513,6 +517,7 @@ describe("bundled agent templates", () => {
 			{ ...base, agent: "greed", mode: "hitl", selectedCapability: "review" },
 			{
 				readText: (path: string) => readFileSync(path, "utf8"),
+				realPath: (path: string) => path,
 				env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
 				execFile: (file: string, args: readonly string[]) => {
 					const basename = file.split("/").at(-1);
@@ -532,6 +537,7 @@ describe("bundled agent templates", () => {
 	it("teaches Pandora and Toil requested review routing without automatic gates", () => {
 		const services = {
 			readText: (path: string) => readFileSync(path, "utf8"),
+			realPath: (path: string) => path,
 			env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
 			execFile: (file: string, args: readonly string[]) => {
 				const basename = file.split("/").at(-1);
@@ -561,6 +567,7 @@ describe("bundled agent templates", () => {
 			{ ...base, agent: "pandora", mode: "hitl" },
 			{
 				readText: (path: string) => readFileSync(path, "utf8"),
+				realPath: (path: string) => path,
 				env: (key: string) => (key === "PITHOS_DB" ? "/tmp/pithos.sqlite" : undefined),
 				execFile: (file: string, args: readonly string[]) => {
 					const basename = file.split("/").at(-1);
@@ -674,6 +681,29 @@ describe("renderAgent", () => {
 		expect(rendered.harness.env).not.toHaveProperty("PATH");
 	});
 
+	it("matches Claude project slugging for realpath-normalized worktree paths", () => {
+		const cwd = "/tmp/pdx-probe/questions__fix--candidate-zip.audit";
+		const realCwd = "/private/tmp/pdx-probe/questions__fix--candidate-zip.audit";
+		const rendered = renderAgent(
+			{ ...base, cwd, agent: "war", mode: "afk" },
+			{
+				...fakeRenderServices(
+					agentsFile({
+						agent: "war",
+						mode: "afk",
+						harnessKind: "claude",
+						tools: ["bash", "read"],
+					}),
+				),
+				realPath: (path: string) => (path === cwd ? realCwd : path),
+			},
+		);
+
+		expect(rendered.sessionLogPath).toBe(claudeRealSessionPath(cwd, base.sessionId, realCwd));
+		expect(rendered.sessionLogPath).toContain("-private-tmp-pdx-probe");
+		expect(rendered.sessionLogPath).toContain("questions--fix--candidate-zip-audit");
+	});
+
 	it.each(["design", "review"] as const)(
 		"renders Greed claim command for selected %s work",
 		(selectedCapability) => {
@@ -765,6 +795,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -805,6 +836,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -843,6 +875,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -1155,6 +1188,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -1203,6 +1237,7 @@ describe("renderAgent", () => {
 							harnessKind: "pi",
 						}),
 					).readText,
+					realPath: (path: string) => path,
 					env: () => undefined,
 					execFile: noopExec,
 				},
@@ -1298,6 +1333,60 @@ describe("renderAgent", () => {
 		expect(rendered.harness.argv).toContain("''");
 	});
 
+	it("renders --tools default for Claude when no tools are configured", () => {
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			fakeRenderServices(agentsFile({ agent: "war", mode: "afk", harnessKind: "claude" })),
+		);
+		expect(rendered.harness.argv).toContain("--tools");
+		expect(rendered.harness.argv).toContain("default");
+		expect(rendered.harness.argv).not.toContain("");
+	});
+
+	it("keeps bundled undefined tools when a higher layer only switches War to Claude", () => {
+		const dataDir = "/tmp/pdx-war-claude-default-tools";
+		const userDir = `${dataDir}/config`;
+		const rendered = renderAgent(
+			{ ...base, agent: "war", mode: "afk" },
+			{
+				readText: (path: string) => {
+					if (path === `${dataDir}/agents.toml`) {
+						return agentsFile({ agent: "war", mode: "afk", harnessKind: "pi" });
+					}
+					if (path === `${userDir}/agents.toml`) {
+						return `[agents.war.harness]
+kind = "claude"
+model = "sonnet"
+system_prompt_mode = "append"
+`;
+					}
+					if (path === `${dataDir}/templates/_common.md`) return "COMMON";
+					if (path === `${dataDir}/templates/war.md`) {
+						return `{{_common.md}} {{model}} {{tools_csv}} {{claims}} {{enqueues}} {{claim_command}}
+{{command_cards}}`;
+					}
+					throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+						code: "ENOENT",
+					});
+				},
+				realPath: (path: string) => path,
+				env: (key: string) => {
+					if (key === "PDX_DATA_DIR") return dataDir;
+					if (key === "PDX_USER_DATA_DIR") return userDir;
+					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
+					return undefined;
+				},
+				execFile: (file: string, args: readonly string[]) =>
+					file.split("/").at(-1) === "pithos" && args[0] === "--help-json"
+						? { status: 0, stdout: pithosHelpJson, stderr: "" }
+						: { status: 1, stdout: "", stderr: `unexpected execFile call: ${file}` },
+			},
+		);
+		expect(rendered.harness.argv).toContain("--tools");
+		expect(rendered.harness.argv).toContain("default");
+		expect(rendered.harness.argv).not.toContain("");
+	});
+
 	it("manifest without argv field renders byte-identically to manifest with argv absent", () => {
 		const withoutArgvField = renderAgent(
 			{ ...base, agent: "war", mode: "afk" },
@@ -1340,6 +1429,7 @@ describe("renderAgent", () => {
 					code: "ENOENT",
 				});
 			},
+			realPath: (path: string) => path,
 			env: (key: string) => {
 				if (key === "PDX_DATA_DIR") return dataDir;
 				if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -1366,6 +1456,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PDX_USER_DATA_DIR") return userDir;
@@ -1399,6 +1490,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PDX_USER_DATA_DIR") return userDir;
@@ -1433,6 +1525,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PDX_USER_DATA_DIR") return userDir;
@@ -1472,6 +1565,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -1505,6 +1599,7 @@ describe("renderAgent", () => {
 							code: "ENOENT",
 						});
 					},
+					realPath: (path: string) => path,
 					env: (key: string) => {
 						if (key === "PDX_DATA_DIR") return dataDir;
 						if (key === "PDX_USER_DATA_DIR") return userDir;
@@ -1554,6 +1649,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PDX_USER_DATA_DIR") return userDir;
@@ -1628,6 +1724,7 @@ describe("renderAgent", () => {
 							code: "ENOENT",
 						});
 					},
+					realPath: (path: string) => path,
 					env: (key: string) => {
 						if (key === "PDX_DATA_DIR") return dataDir;
 						if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -1669,6 +1766,7 @@ describe("renderAgent", () => {
 							code: "ENOENT",
 						});
 					},
+					realPath: (path: string) => path,
 					env: (key: string) => {
 						if (key === "PDX_DATA_DIR") return dataDir;
 						if (key === "PITHOS_DB") return `${dataDir}/pithos.sqlite`;
@@ -1712,6 +1810,7 @@ describe("renderAgent", () => {
 						code: "ENOENT",
 					});
 				},
+				realPath: (path: string) => path,
 				env: (key: string) => {
 					if (key === "PDX_DATA_DIR") return dataDir;
 					if (key === "PDX_USER_DATA_DIR") return userDir;
@@ -1769,6 +1868,7 @@ describe("renderAgent", () => {
 							code: "ENOENT",
 						});
 					},
+					realPath: (path: string) => path,
 					env: (key: string) =>
 						key === "PDX_DATA_DIR"
 							? "/tmp/pdx-missing-template"
@@ -1949,6 +2049,7 @@ describe("renderSessionTranscript", () => {
 		);
 		const services = {
 			readText: () => `${entries.join("\n")}\n`,
+			realPath: (path: string) => path,
 			env: () => undefined,
 			execFile: noopExec,
 		};
@@ -1965,12 +2066,83 @@ describe("renderSessionTranscript", () => {
 		expect(output).toContain("[2026-05-10 12:00:20] USER: Hello 20");
 	});
 
+	it("parses current Claude Code print logs with queue and attachment records", () => {
+		const output = renderSessionTranscript(
+			{ harnessKind: "claude", sessionLogPath: "session.jsonl" },
+			{
+				readText: () =>
+					[
+						JSON.stringify({
+							type: "queue-operation",
+							operation: "enqueue",
+							timestamp: "2026-05-19T07:33:12.292Z",
+							sessionId: base.sessionId,
+							content: "Reply exactly: probe-one",
+						}),
+						JSON.stringify({
+							type: "attachment",
+							timestamp: "2026-05-19T07:33:12.323Z",
+							attachment: { type: "skill_listing", content: "skills" },
+						}),
+						JSON.stringify({
+							type: "user",
+							timestamp: "2026-05-19T07:33:12.323Z",
+							message: { role: "user", content: "Reply exactly: probe-one" },
+							cwd: "/private/tmp/probe-worktree",
+							sessionId: base.sessionId,
+							gitBranch: "probe-claude-simple",
+						}),
+						JSON.stringify({
+							type: "assistant",
+							timestamp: "2026-05-19T07:33:14.977Z",
+							message: {
+								role: "assistant",
+								content: [{ type: "text", text: "probe-one" }],
+							},
+							cwd: "/private/tmp/probe-worktree",
+							sessionId: base.sessionId,
+							gitBranch: "probe-claude-simple",
+						}),
+						JSON.stringify({
+							type: "last-prompt",
+							lastPrompt: "Reply exactly: probe-one",
+							sessionId: base.sessionId,
+						}),
+					].join("\n"),
+				realPath: (path: string) => path,
+				env: () => undefined,
+				execFile: noopExec,
+			},
+		);
+
+		expect(output).toContain("[2026-05-19 07:33:12] USER: Reply exactly: probe-one");
+		expect(output).toContain("[2026-05-19 07:33:14] ASSISTANT: probe-one");
+		expect(output).not.toContain("queue-operation");
+		expect(output).not.toContain("skill_listing");
+	});
+
+	it("fails loudly instead of returning an empty transcript", () => {
+		expect(() =>
+			renderSessionTranscript(
+				{ harnessKind: "claude", sessionLogPath: "session.jsonl" },
+				{
+					readText: () =>
+						`${JSON.stringify({ type: "queue-operation", operation: "enqueue", timestamp: "2026-05-19T07:33:12.292Z", sessionId: base.sessionId })}\n`,
+					realPath: (path: string) => path,
+					env: () => undefined,
+					execFile: noopExec,
+				},
+			),
+		).toThrow("session.jsonl: no claude transcript messages found");
+	});
+
 	it("renders Pi assistant thinking blocks", () => {
 		const output = renderSessionTranscript(
 			{ harnessKind: "pi", sessionLogPath: "session.jsonl" },
 			{
 				readText: () =>
 					`${JSON.stringify({ type: "message", timestamp: "2026-05-10T12:00:00Z", message: { role: "assistant", content: [{ type: "thinking", thinking: "Inspecting design brief" }] } })}\n`,
+				realPath: (path: string) => path,
 				env: () => undefined,
 				execFile: noopExec,
 			},
@@ -1999,6 +2171,7 @@ describe("renderSessionTranscript", () => {
 							],
 						},
 					})}\n`,
+				realPath: (path: string) => path,
 				env: () => undefined,
 				execFile: noopExec,
 			},
@@ -2023,6 +2196,7 @@ describe("renderSessionTranscript", () => {
 							],
 						},
 					})}\n`,
+				realPath: (path: string) => path,
 				env: () => undefined,
 				execFile: noopExec,
 			},
@@ -2036,6 +2210,7 @@ describe("renderSessionTranscript", () => {
 				{ harnessKind: "pi", sessionLogPath: "missing.jsonl" },
 				{
 					readText: () => "not-json\n",
+					realPath: (path: string) => path,
 					env: () => undefined,
 					execFile: noopExec,
 				},
@@ -2050,6 +2225,7 @@ describe("renderSessionTranscript", () => {
 				{
 					readText: () =>
 						`${JSON.stringify({ type: "other", message: "ignored" })}\n${JSON.stringify({ type: "message", timestamp: "2026-05-10T12:00:00Z", message: { role: "user" } })}\n`,
+					realPath: (path: string) => path,
 					env: () => undefined,
 					execFile: noopExec,
 				},

@@ -646,6 +646,23 @@ describe("pdx substrate", () => {
 		expect(calls).toEqual([{ file: "tmux", args: ["attach", "-t", PANDORA_TARGET] }]);
 	});
 
+	it("switches the current tmux client without foreground attach", async () => {
+		const calls: { file: string; args: readonly string[] }[] = [];
+		const process = Process.of({
+			execFile: (file, args) =>
+				Effect.sync(() => {
+					calls.push({ file, args });
+					return { exitCode: 0, stdout: "", stderr: "" };
+				}),
+			foreground: () => Effect.die("unexpected attach"),
+			isAlive: () => Effect.succeed(true),
+			kill: () => Effect.void,
+		});
+		const tmux = await run(makeTmux.pipe(Effect.provideService(Process, process)));
+		await run(tmux.switchClient(PANDORA_TARGET));
+		expect(calls).toEqual([{ file: "tmux", args: ["switch-client", "-t", PANDORA_TARGET] }]);
+	});
+
 	it("writes supervisor logs with required fields", async () => {
 		const writes: string[] = [];
 		const fs = FileSystem.of({

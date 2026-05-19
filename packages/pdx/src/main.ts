@@ -49,6 +49,7 @@ interface RuntimeInput {
 	readonly envDataDir: string | undefined;
 	readonly envUserDataDir: string | undefined;
 	readonly envHome: string | undefined;
+	readonly envTmux: string | undefined;
 	readonly daemonEntrypoint: string | undefined;
 }
 
@@ -135,6 +136,7 @@ const captureRuntimeInput = Effect.sync<RuntimeInput>(() => ({
 	envDataDir: process.env.PDX_DATA_DIR,
 	envUserDataDir: process.env.PDX_USER_DATA_DIR,
 	envHome: process.env.HOME,
+	envTmux: process.env.TMUX,
 	daemonEntrypoint: process.argv[1],
 }));
 
@@ -194,7 +196,11 @@ const runCommand = (runtime: RuntimeInput, input: CommandInput) =>
 					clean: input.clean,
 					nuke: input.nuke,
 				}).pipe(Effect.provide(provided));
-				yield* tmux.attachSession(PANDORA_TARGET);
+				if (runtime.envTmux === undefined) {
+					yield* tmux.attachSession(PANDORA_TARGET);
+				} else {
+					yield* tmux.switchClient(PANDORA_TARGET);
+				}
 				return;
 			case "close":
 				return yield* closePdx(config).pipe(Effect.provide(provided));

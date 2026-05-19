@@ -227,7 +227,7 @@ interface CommandHelpCard {
 	readonly subcommands: readonly CommandHelpCard[];
 }
 
-const COMMAND_ANNOTATIONS: Readonly<Record<string, readonly string[]>> = {
+const PITHOS_COMMAND_ANNOTATIONS: Readonly<Record<string, readonly string[]>> = {
 	"pithos task claim": [
 		"Use the rendered claim command above instead of reconstructing it by hand.",
 	],
@@ -266,6 +266,26 @@ const COMMAND_ANNOTATIONS: Readonly<Record<string, readonly string[]>> = {
 	],
 };
 
+const PDX_COMMAND_ANNOTATIONS: Readonly<Record<string, readonly string[]>> = {
+	"pdx daemon status": [
+		"Use for liveness questions or when graph/transcript evidence conflicts; it is not the normal sitrep source of truth.",
+	],
+	"pdx daemon logs": [
+		"Supervisor logs are for launch, kill, reconcile, and daemon debugging; they are not agent transcripts.",
+	],
+	"pdx run transcript": [
+		"Normal cross-harness inspection surface for AFK and HITL runs.",
+		"A quiet transcript does not prove the run exited; the agent may be inside a long-running tool call.",
+	],
+	"pdx run show": [
+		"Navigation only: jumps to an interactive session when one exists.",
+		"AFK runs are headless and intentionally have no session to show.",
+	],
+	"pdx task show": [
+		"Navigation only: jumps to the interactive holder run for a task when one exists.",
+	],
+};
+
 const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {
 	war: ["pithos task"],
 	toil: ["pithos scope", "pithos task"],
@@ -274,7 +294,13 @@ const PITHOS_TOP_LEVEL_PATHS: Record<SpawnableAgentKind, readonly string[]> = {
 	envy: ["pithos scope", "pithos task"],
 };
 
-const PANDORA_PDX_COMMAND_PATHS = ["pdx run transcript", "pdx run show", "pdx task show"] as const;
+const PANDORA_PDX_COMMAND_PATHS = [
+	"pdx daemon status",
+	"pdx daemon logs",
+	"pdx run transcript",
+	"pdx run show",
+	"pdx task show",
+] as const;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
@@ -412,9 +438,12 @@ const fullUsage = (card: CommandHelpCard): string => {
 	return `${card.path} ${card.usage}`;
 };
 
-const validateCommandAnnotations = (tree: CommandHelpCard): void => {
+const validateCommandAnnotations = (
+	tree: CommandHelpCard,
+	annotations: Readonly<Record<string, readonly string[]>>,
+): void => {
 	const commandPaths = flattenHelpTree(tree);
-	for (const path of Object.keys(COMMAND_ANNOTATIONS)) {
+	for (const path of Object.keys(annotations)) {
 		if (!commandPaths.has(path)) {
 			throw new SpawnerError({
 				code: "TEMPLATE_ERROR",
@@ -425,7 +454,7 @@ const validateCommandAnnotations = (tree: CommandHelpCard): void => {
 };
 
 const annotationLines = (path: string): readonly string[] => {
-	const notes = COMMAND_ANNOTATIONS[path];
+	const notes = PITHOS_COMMAND_ANNOTATIONS[path] ?? PDX_COMMAND_ANNOTATIONS[path];
 	if (notes === undefined) return [];
 	return ["", "Notes:", "", ...notes.map((note) => `- ${note}`)];
 };
@@ -452,7 +481,7 @@ const renderCommandHelpMarkdown = (title: string, tree: CommandHelpCard): string
 
 const renderCommandCards = (agent: SpawnableAgentKind, services: RenderServices): string => {
 	const rawPithosHelp = pithosHelpTree(services);
-	validateCommandAnnotations(rawPithosHelp);
+	validateCommandAnnotations(rawPithosHelp, PITHOS_COMMAND_ANNOTATIONS);
 	const pithosHelp = filteredHelpTree(rawPithosHelp, PITHOS_TOP_LEVEL_PATHS[agent], "pithos help");
 	const sections = [
 		[
@@ -463,7 +492,9 @@ const renderCommandCards = (agent: SpawnableAgentKind, services: RenderServices)
 		].join("\n"),
 	];
 	if (agent === "pandora") {
-		const pdxHelp = filteredHelpTree(pdxHelpTree(services), PANDORA_PDX_COMMAND_PATHS, "pdx help");
+		const rawPdxHelp = pdxHelpTree(services);
+		const pdxHelp = filteredHelpTree(rawPdxHelp, PANDORA_PDX_COMMAND_PATHS, "pdx help");
+		validateCommandAnnotations(rawPdxHelp, PDX_COMMAND_ANNOTATIONS);
 		sections.push(renderCommandHelpMarkdown("pdx inspection", pdxHelp));
 	}
 	return `${sections.join("\n\n")}\n`;
@@ -910,19 +941,46 @@ const parseClaudeTranscript = (path: string, raw: string): readonly TranscriptMe
 		return [{ ts: fmtTs(entry.timestamp, path, line), role: entry.type.toUpperCase(), text }];
 	});
 
+const PI_TOOL_TIMELINE_ENTRY_TYPE = "timeline-timestamps-tool-call";
+
+const textFromPiToolTimeline = (entry: JsonRecord, path: string, line: number): string => {
+	const data = isRecord(entry.data) ? entry.data : entry;
+	const toolName = requiredString(data.toolName, path, line, "data.toolName").trim();
+	if (toolName.length === 0)
+		throw harnessError(path, line, "required data.toolName must be non-empty");
+	const preview = typeof data.preview === "string" ? data.preview.trim() : "";
+	return preview.length > 0
+		? `[tool in flight: ${toolName} — ${preview}]`
+		: `[tool in flight: ${toolName}]`;
+};
+
 const parsePiTranscript = (path: string, raw: string): readonly TranscriptMessage[] =>
 	parseJsonl(path, raw).flatMap((entry, index) => {
 		const line = index + 1;
-		if (entry.type !== "message") return [];
-		const message = requiredRecord(entry.message, path, line, "message");
-		const role = requiredString(message.role, path, line, "message.role");
-		if (role !== "user" && role !== "assistant") return [];
-		const text =
-			role === "user"
-				? textFromPiUserContent(message.content, path, line)
-				: textFromPiAssistantContent(message.content, path, line);
-		if (text.length === 0) return [];
-		return [{ ts: fmtTs(entry.timestamp, path, line), role: role.toUpperCase(), text }];
+		if (entry.type === "message") {
+			const message = requiredRecord(entry.message, path, line, "message");
+			const role = requiredString(message.role, path, line, "message.role");
+			if (role !== "user" && role !== "assistant") return [];
+			const text =
+				role === "user"
+					? textFromPiUserContent(message.content, path, line)
+					: textFromPiAssistantContent(message.content, path, line);
+			if (text.length === 0) return [];
+			return [{ ts: fmtTs(entry.timestamp, path, line), role: role.toUpperCase(), text }];
+		}
+		if (
+			entry.type === PI_TOOL_TIMELINE_ENTRY_TYPE ||
+			(entry.type === "custom" && entry.customType === PI_TOOL_TIMELINE_ENTRY_TYPE)
+		) {
+			return [
+				{
+					ts: fmtTs(entry.timestamp, path, line),
+					role: "ASSISTANT",
+					text: textFromPiToolTimeline(entry, path, line),
+				},
+			];
+		}
+		return [];
 	});
 
 const formatTranscript = (messages: readonly TranscriptMessage[], limit: number): string =>

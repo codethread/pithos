@@ -1007,10 +1007,14 @@ describe("renderAgent", () => {
 		expect(rendered.prompt).toContain("#### `pithos graph inspect`");
 		expect(rendered.prompt).toContain("dependencies, source links, and supersessions");
 		expect(rendered.prompt).toContain("#### `pithos events tail`");
-		expect(rendered.prompt).not.toContain("pdx daemon status");
-		expect(rendered.prompt).not.toContain("pdx daemon logs");
+		expect(rendered.prompt).toContain("#### `pdx daemon status`");
+		expect(rendered.prompt).toContain("liveness questions");
+		expect(rendered.prompt).toContain("#### `pdx daemon logs`");
+		expect(rendered.prompt).toContain("Supervisor logs are for launch, kill, reconcile");
 		expect(rendered.prompt).toContain("#### `pdx run transcript`");
+		expect(rendered.prompt).toContain("Normal cross-harness inspection surface");
 		expect(rendered.prompt).toContain("#### `pdx run show`");
+		expect(rendered.prompt).toContain("AFK runs are headless");
 		expect(rendered.prompt).toContain("#### `pdx task show`");
 
 		expect(rendered.prompt).not.toContain("### Pithos help JSON");
@@ -2202,6 +2206,27 @@ describe("renderSessionTranscript", () => {
 			},
 		);
 		expect(output).toContain("[2026-05-10 12:00:00] ASSISTANT: [tools: bash]");
+	});
+
+	it("renders Pi timeline tool-call previews for in-flight tools", () => {
+		const output = renderSessionTranscript(
+			{ harnessKind: "pi", sessionLogPath: "session.jsonl" },
+			{
+				readText: () =>
+					`${JSON.stringify({
+						type: "custom",
+						customType: "timeline-timestamps-tool-call",
+						timestamp: "2026-05-10T12:00:00Z",
+						data: { toolName: "bash", preview: "while true; do pithos graph inspect --all; done" },
+					})}\n`,
+				realPath: (path: string) => path,
+				env: () => undefined,
+				execFile: noopExec,
+			},
+		);
+		expect(output).toContain(
+			"[2026-05-10 12:00:00] ASSISTANT: [tool in flight: bash — while true; do pithos graph inspect --all; done]",
+		);
 	});
 
 	it("fails loudly on missing or corrupt logs", () => {

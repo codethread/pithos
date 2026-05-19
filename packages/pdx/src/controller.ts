@@ -463,7 +463,7 @@ export const runShowPdx = (config: PdxConfig, input: { readonly runId: string })
 			return yield* Effect.fail(
 				new PdxError({
 					code: "VALIDATION_ERROR",
-					message: `Run ${input.runId} is ${entry.mode}; no tmux session to show.`,
+					message: `Run ${input.runId} is ${entry.mode}; no interactive session to show. AFK/headless runs intentionally have no interactive session. Use 'pdx run transcript ${input.runId}' for harness output or 'pdx daemon status' for liveness.`,
 				}),
 			);
 		}

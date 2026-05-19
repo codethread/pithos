@@ -219,7 +219,7 @@ The public `pdx` surface is the operator/Pandora control surface:
 
 All commands resolve data dir as `--data-dir`, then `PDX_DATA_DIR`, then `$HOME/.pdx`.
 
-`pdx daemon logs` reads structured Supervisor log JSONL even after the daemon stops. These are Supervisor logs, not Harness transcripts. `pdx run transcript` reads the Pithos Run transcript metadata and delegates Harness-log parsing to Spawner. System Runs fail loudly for transcript rendering and point to Supervisor logs. Harness logs with no parseable user/assistant messages also fail loudly instead of rendering empty output.
+`pdx daemon logs` reads structured Supervisor log JSONL even after the daemon stops. These are Supervisor logs, not Harness transcripts. `pdx run transcript` reads the Pithos Run transcript metadata and delegates Harness-log parsing to Spawner for both AFK and HITL runs; Pi timeline tool-call entries are rendered as in-flight tool summaries when present. System Runs fail loudly for transcript rendering and point to Supervisor logs. Harness logs with no parseable user/assistant messages also fail loudly instead of rendering empty output. `pdx run show` and `pdx task show` are interactive-session navigation commands; AFK/headless runs intentionally have no session to show and the operator should use transcript or daemon status instead.
 
 ## 11. Code Locations and Tests
 

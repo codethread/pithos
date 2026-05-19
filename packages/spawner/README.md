@@ -26,7 +26,7 @@ Spawner owns:
 - expected Harness session log paths
 - AFK mode process launch mechanics
 - HITL mode tmux launch mechanics
-- Claude/Pi transcript parsing for `pdx run transcript`; malformed or message-less logs fail loudly instead of rendering empty output
+- Claude/Pi transcript parsing for `pdx run transcript`; malformed or message-less logs fail loudly instead of rendering empty output, and Pi timeline tool-call entries render as in-flight tool summaries
 
 Spawner does not own:
 
@@ -72,13 +72,13 @@ Exported from `@pdx/spawner`:
 - `renderAgent(input)` — pure render/validation. No launch.
 - `launchRenderedAgent(rendered)` — launch an already-rendered plan.
 - `launchAgent(input)` — convenience render-then-launch wrapper. `pdx` should prefer the two-step flow.
-- `renderSessionTranscript(input)` — parse a stored Claude/Pi Harness session log.
+- `renderSessionTranscript(input)` — parse a stored Claude/Pi Harness session log, including Pi timeline tool-call previews when present.
 - `loadHooks()` — read the optional pdx hook config from the same layered `agents.toml` manifest resolution used by rendering.
 - `LiveSpawnerServices` — live filesystem/process/env implementation.
 - `makeFakeSpawnerServices(input)` — deterministic service implementation for tests.
 - `bundledTemplatesDir` — repo-root bundled default template directory used when `PDX_DATA_DIR` is unset and by `pdx` when seeding a fresh data dir.
 
-`RenderedAgent` is the important API object: it contains `logicalName`, `harness.kind`, `harness.argv`, `harness.env`, `sessionLogPath`, and `prompt`. `prompt` includes a generated Markdown command reference for the `{{command_cards}}` template variable. Spawner sources syntax from structured CLI metadata (`pithos --help-json` and, for Pandora, selected `pdx --help-json` inspection commands), applies role filters, validates configured command paths, validates built-in command annotations against the generated help tree, then renders concise Markdown. Human `pithos --help` / `pdx --help` and the agent command reference are separate surfaces that share structured CLI metadata; Spawner does not copy terminal help text into prompts. Malformed help JSON, configured command paths missing from help, or annotation paths missing from help fail render loudly. `LaunchResult` intentionally contains runtime metadata only: pid for AFK mode or tmux target/pane pid for HITL mode.
+`RenderedAgent` is the important API object: it contains `logicalName`, `harness.kind`, `harness.argv`, `harness.env`, `sessionLogPath`, and `prompt`. `prompt` includes a generated Markdown command reference for the `{{command_cards}}` template variable. Spawner sources syntax from structured CLI metadata (`pithos --help-json` and, for Pandora, selected `pdx --help-json` inspection/debug commands), applies role filters, validates configured command paths, validates built-in command annotations against the generated help tree, then renders concise Markdown. Pandora receives `pdx daemon status` / `logs` as debug-only cards alongside run transcript/show navigation. Human `pithos --help` / `pdx --help` and the agent command reference are separate surfaces that share structured CLI metadata; Spawner does not copy terminal help text into prompts. Malformed help JSON, configured command paths missing from help, or annotation paths missing from help fail render loudly. `LaunchResult` intentionally contains runtime metadata only: pid for AFK mode or tmux target/pane pid for HITL mode.
 
 ## Manifest/template config
 

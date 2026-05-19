@@ -2102,6 +2102,46 @@ describe("pdx substrate", () => {
 		expect(switches).toEqual(["pdx--greed"]);
 	});
 
+	it("run show reports AFK runs as intentionally headless", async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "pdx-show-afk-run-"));
+		const config = await parseConfig(dataDir);
+		const server = await run(
+			listenIpc(config.socketPath, () =>
+				Effect.succeed({
+					ok: true,
+					data: {
+						daemon: "running",
+						max_afk: 4,
+						registry_entries: [
+							{
+								runId: "run_afk",
+								agent: "toil",
+								scopeId: "scope_repo",
+								mode: "afk",
+								state: "live",
+								logicalName: "pdx--toil",
+								pid: 123,
+							},
+						],
+					},
+				}),
+			),
+		);
+		try {
+			await expect(
+				run(
+					runShowPdx(config, { runId: "run_afk" }).pipe(
+						Effect.provideService(Tmux, alwaysLiveTmux),
+					),
+				),
+			).rejects.toThrow(
+				"Run run_afk is afk; no interactive session to show. AFK/headless runs intentionally have no interactive session. Use 'pdx run transcript run_afk' for harness output or 'pdx daemon status' for liveness.",
+			);
+		} finally {
+			await run(server.close);
+		}
+	});
+
 	it("task show returns confirmation for the holder run target", async () => {
 		const dataDir = await mkdtemp(join(tmpdir(), "pdx-show-task-live-"));
 		const config = await parseConfig(dataDir);

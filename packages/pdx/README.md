@@ -117,7 +117,7 @@ Owns pdx behavior:
 - `reconcileTick` performs Cleanup/settlement first, runs event-pruning maintenance on daemon startup and then hourly, maintains Pandora, sends Nudges for new Escalation tasks, validates launch preconditions, and spawns at most one ready non-Pandora Agent run per tick. After settling, it also forks the input-hook supervisor when `hooks.input` is configured in layered `agents.toml` and no hook child is running.
 - When a ready repo/worktree task's cwd is missing before run creation, pdx uses Pithos' atomic launch-precondition transition to cancel the still-queued task, create a source-linked global Repair Alert (kind=`launch_precondition`) for Pandora, and avoid creating a Run. If the cwd disappears after run creation but before launch succeeds, pdx first calls Pithos' launch-abort transition so the no-claim Run becomes `cancelled` with reason `launch_precondition_failed`, then applies the same atomic task transition.
 - `handleKillRequest` performs Interrupt in Pithos before killing the live resource and enqueues a Repair Alert (kind=`interrupt`) when a Held task was interrupted.
-- `statusPdx`, `logsShowPdx`, `runTranscriptPdx`, `runShowPdx`, and `taskShowPdx` implement operator/Pandora inspection helpers.
+- `statusPdx`, `logsShowPdx`, `runTranscriptPdx`, `runShowPdx`, and `taskShowPdx` implement operator/Pandora inspection helpers. Transcript is the cross-harness inspection surface; show commands are interactive-session navigation and report AFK runs as intentionally headless.
 
 The Registry is intentionally in-memory. Startup does not adopt old sessions; it kills deterministic `pdx--*` leftovers and cleans active built-in Runs through Pithos.
 
@@ -171,7 +171,7 @@ For a data dir `<data-dir>` (`~/.pdx` by default):
 <user-data-dir>/templates/*.md    # optional user-wide prompt assets
 ```
 
-HITL mode runtime state lives in tmux targets. Harness session transcripts live at harness-native session log paths returned by Spawner and stored on Pithos Runs.
+HITL mode runtime state lives in tmux targets. AFK mode runtime state lives in pid/stdout/stderr files plus the daemon Registry while live. Harness session transcripts live at harness-native session log paths returned by Spawner and stored on Pithos Runs.
 
 ## Development
 

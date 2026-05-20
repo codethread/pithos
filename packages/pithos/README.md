@@ -30,7 +30,7 @@ Pithos is the durable source of truth for:
 - Tasks and Claims
 - Runs and Held tasks
 - Fencing tokens and Attempts
-- Dependencies, Source links, and Supersessions
+- typed Task edges (`after`, `about`, `repair`, `gate`) and Supersessions
 - Artifacts and Events
 - Task graph invariants and text/JSON inspection views
 
@@ -58,7 +58,7 @@ Exported from `@pdx/pithos`:
 - CLI helpers: `makePithosCommand`, `runPithosCli`, `renderPithosHelpJson`.
 - Engine boundary: `makeEngine`, `Engine`, graph `--since` cutoff parsing, render helpers for briefing/graph/task inspect text, and library-only event pruning used by `pdx` maintenance.
 - Schema/DB helpers: `migrate`, `openDb`, row schemas, decoded row helpers.
-- Chain helpers: chain-policy resolution and graph dependency utilities.
+- Chain helpers: chain-policy resolution and typed-edge graph utilities.
 - Config/services/errors: `loadConfig`, `liveServices`, `PithosError`.
 
 Exported from `@pdx/pithos/builtins`:
@@ -106,9 +106,9 @@ Important details:
 - `src/engine/db-helpers.ts` — shared Engine DB open/migrate/close and ID-collision handling.
 - `src/engine/event-log.ts` — durable event insert, tail, and retention pruning logic.
 - `src/engine/claim-loop.ts` — Claim-loop transitions for claim, heartbeat, completion, failure, cancellation, and artifact attachment.
-- `src/engine/task-read-model.ts` — DB row parsing and reusable Task/Scope read-model queries used by transitions and inspections.
-- `src/engine/graph-inspect.ts` — graph selector filtering, `--since` cutoff parsing, and dependency/source/supersession closure assembly.
-- `src/engine/repair-alerts.ts` — Repair Alert task creation, `repair_source` provenance, launch-precondition repair, and claimable Repair Alert kind queries.
+- `src/engine/task-read-model.ts` — DB row parsing and reusable Task/Scope/typed-edge read-model queries used by transitions and inspections.
+- `src/engine/graph-inspect.ts` — graph selector filtering, `--since` cutoff parsing, and typed-edge/Supersession closure assembly.
+- `src/engine/repair-alerts.ts` — Repair Alert task creation, `repair` edge provenance, launch-precondition repair, and claimable Repair Alert kind queries.
 
 `src/engine.ts` still implements the state-transition methods for:
 
@@ -133,8 +133,9 @@ Key tables:
 - `agent_kinds`, `capabilities`, `agent_claims`, `agent_enqueues`
 - `runs` (includes durable `has_claimed_task` so Run timeout/launch-abort invariants do not depend on retained event history)
 - `tasks`
-- `task_dependencies`
-- `task_sources`
+- `task_edges` for `after`, `gate`, `about`, and `repair` relationships
+- `task_gate_releases` and `task_gate_release_members` for per-Claim gate release audit snapshots
+- `task_gate_late_growth_markers` for allowed late branch growth after released gates
 - `task_supersessions`
 - `artifacts`
 - `events` (indexed for age-based pruning by `created_at` and `(type, created_at)`)
@@ -147,14 +148,14 @@ Defines the pre-v1 built-in contract for Agent kinds and Capabilities. Spawner v
 
 ### `src/chain-policy.ts` — Task chain rules
 
-Pure helpers for Dependency, Source link, and Supersession behavior:
+Pure helpers for typed-edge chain and Supersession behavior:
 
-- `--chain auto|none|held|source` resolution
-- implicit Dependency selection
-- Source link preservation for Escalation task handoff
-- dependency dedupe
-- acyclicity checks
-- graph closure and unresolved dependency helpers
+- `--chain auto|none|held` resolution
+- implicit `after` edge selection
+- `about`/`repair` continuation policy for Escalation task handoff
+- `after` edge dedupe
+- branch-membership acyclicity checks
+- graph closure and unresolved `after`/`gate` blocker helpers
 
 Use this file for chain semantics before editing Engine enqueue/supersede logic.
 
@@ -191,8 +192,9 @@ Pithos owns durable invariants, not live resource observation. Important rules t
 - Repo/worktree Scope paths are validated as directories at scope upsert and task enqueue/supersede time. The filesystem can change later, so pdx still owns launch-time runtime-path checks.
 - Claim authorization is enforced by seeded `agent_claims`.
 - Enqueue authorization is enforced by seeded `agent_enqueues`.
-- Dependencies are satisfied only by upstream Tasks in `done`.
-- Source links are non-blocking provenance; `chain_source` supports normal continuation, while `repair_source` points at broken work for supersession/replan.
+- `after` edges are satisfied only by upstream Tasks in `done`.
+- `about` and `repair` edges are non-blocking provenance; `about` supports normal escalation context, while `repair` points at broken work for supersession/replan.
+- After a `gate` releases for a Claim attempt, adding `after`/`about`/`repair` growth under that released branch or superseding a released/current branch member fails while any impacted downstream task is non-terminal; terminal-only impact is allowed and recorded in `task_gate_late_growth_markers`.
 - Supersessions preserve history while replacing work with a fresh Task.
 - Fencing tokens invalidate stale task writes.
 - Cleanup is for confirmed natural Run death; Interrupt is for deliberate Kill of a live Run; Cancel is for non-held Task abandonment.

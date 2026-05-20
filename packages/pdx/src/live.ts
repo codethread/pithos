@@ -268,7 +268,7 @@ const pithosClient = (dbPath: string): PithosClientService => {
 						body: input.body,
 						bodyFile: undefined,
 						runId: input.runId,
-						dependsOn: input.dependsOn ?? [],
+						after: input.dependsOn ?? [],
 						chain: "auto",
 					}),
 			),

@@ -98,6 +98,24 @@ describe("pithos foundation", () => {
 		]);
 		expect(
 			db
+				.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='task_edges'")
+				.pluck()
+				.get(),
+		).toBe("task_edges");
+		expect(
+			db
+				.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='task_dependencies'")
+				.pluck()
+				.get(),
+		).toBeUndefined();
+		expect(
+			db
+				.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='task_sources'")
+				.pluck()
+				.get(),
+		).toBeUndefined();
+		expect(
+			db
 				.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_runs_task_id'")
 				.pluck()
 				.get(),
@@ -328,7 +346,7 @@ describe("pithos foundation", () => {
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		expect(() => engine.scopeArchive({ scopeId: repo.scope.id })).toThrow(/non-terminal task/);
@@ -374,7 +392,7 @@ describe("pithos foundation", () => {
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.cancel({ taskId, runId: "run_toil", reason: "done with history" });
@@ -407,7 +425,7 @@ describe("pithos foundation", () => {
 				body: "body",
 				bodyFile: undefined,
 				runId: "run_toil",
-				dependsOn: [],
+				after: [],
 				chain: "auto",
 			}),
 		).toThrow(/scope is archived/);
@@ -666,7 +684,7 @@ describe("pithos foundation", () => {
 			title,
 			body: "review body",
 			bodyFile: undefined,
-			dependsOn: [],
+			after: [],
 			chain: "none" as const,
 		});
 		expect(engine.enqueue(reviewInput("run_pandora", "Review"))).toMatchObject({

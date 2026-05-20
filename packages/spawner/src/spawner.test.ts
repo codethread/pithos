@@ -145,7 +145,7 @@ const pithosHelpTree = {
 					name: "enqueue",
 					path: "pithos task enqueue",
 					usage:
-						"enqueue [--run text] --scope text --capability triage | design | execute | review | escalate | intake --title text [--stdin] [--chain auto | none]",
+						"enqueue [--run text] --scope text --capability triage | design | execute | review | escalate | intake --title text [--stdin] [--chain auto | none | held] [--after text] [--about text] [--gate-on text] [--repair text]",
 					description: "Create a new queued task.",
 					subcommands: [],
 				},
@@ -172,7 +172,7 @@ const pithosHelpTree = {
 			name: "graph",
 			path: "pithos graph",
 			usage: "graph <command>",
-			description: "Inspect Pithos task dependency, source-link, and supersession graphs.",
+			description: "Inspect Pithos typed-edge and supersession graphs.",
 			subcommands: [
 				{
 					tool: "pithos",
@@ -181,7 +181,7 @@ const pithosHelpTree = {
 					usage:
 						"inspect [--task text] [--scope text] [--all] [--status text] [--search text] [--since text] [--json]",
 					description:
-						"Render a readable task graph with dependencies, source links, and supersessions; pass --json for structured metadata.",
+						"Render a readable task graph with typed edges, gates, and supersessions; pass --json for structured metadata.",
 					subcommands: [],
 				},
 			],
@@ -585,19 +585,19 @@ describe("bundled agent templates", () => {
 			"1. `pithos briefing --agent pandora` for claimable/blocked work, user-facing next actions",
 		);
 		expect(rendered.prompt).toContain(
-			"2. `pithos graph inspect --all` for task inventory, dependency shape",
+			"2. `pithos graph inspect --all` for task inventory, edge/gate shape",
 		);
 		const briefingSection = commandSection(rendered.prompt, "pithos briefing");
 		expect(briefingSection).toContain("agenda-style ready/blocked summaries");
 		const graphSection = commandSection(rendered.prompt, "pithos graph inspect");
-		expect(graphSection).toContain("inventory, dependency shape, provenance, audit questions");
+		expect(graphSection).toContain("inventory, edge/gate shape, provenance, audit questions");
 		expect(graphSection).toContain("`--task`, `--scope`, and `--all` are mutually exclusive");
 		expect(graphSection).toContain("`--status` to OR literal task statuses");
 		expect(graphSection).toContain("`--search` to AND terms over task title/body only");
 		expect(graphSection).toContain("`--since` accepts `today`, `<n>h`, `<n>d`, `YYYY-MM-DD`");
 		expect(graphSection).toContain("Filters narrow seed selection before graph closure");
 		expect(graphSection).toContain("Readable output is the normal agent surface");
-		expect(graphSection).toContain("reverse `repair_source` closure");
+		expect(graphSection).toContain("global `about`/`repair`/checkpoint context");
 	});
 
 	it("document the stdin payload contract", () => {
@@ -617,8 +617,8 @@ describe("bundled agent templates", () => {
 		expect(templateText).not.toContain("--result-file");
 		expect(templateText).toContain("For any Pithos command using `--stdin`");
 		expect(templateText).toContain("<<'EOF'");
-		expect(templateText).toContain("Resolving the held escalation's source: omit `--chain`");
-		expect(templateText).toContain("pass `--chain none --depends-on task_X`");
+		expect(templateText).toContain("Resolving a held `about` or `gate` escalation: omit `--chain`");
+		expect(templateText).toContain("pass `--chain none --after task_X`");
 		expect(templateText).toContain("`task inspect` renders a Markdown handoff by default");
 		expect(templateText).toContain("Use the fencing token returned by claim");
 		expect(templateText).toContain(
@@ -928,6 +928,12 @@ describe("renderAgent", () => {
 		expect(rendered.prompt).toContain("- Default completion sends no stdin");
 		expect(rendered.prompt).toContain("- Include a concise reason plus relevant evidence");
 		expect(rendered.prompt).toContain("- Omit `--chain` for ordinary follow-up");
+		const enqueueSection = commandSection(rendered.prompt, "pithos task enqueue");
+		expect(enqueueSection).toContain("--chain auto | none | held");
+		expect(enqueueSection).toContain("--after text");
+		expect(enqueueSection).toContain("--about text");
+		expect(enqueueSection).toContain("--gate-on text");
+		expect(enqueueSection).toContain("--repair text");
 		const inspectSection = commandSection(rendered.prompt, "pithos task inspect");
 		expect(inspectSection).toContain("- Readable Markdown is the normal task context.");
 		expect(inspectSection).toContain(
@@ -1005,7 +1011,7 @@ describe("renderAgent", () => {
 		expect(rendered.prompt).toContain("#### `pithos scope list`");
 		expect(rendered.prompt).toContain("#### `pithos briefing`");
 		expect(rendered.prompt).toContain("#### `pithos graph inspect`");
-		expect(rendered.prompt).toContain("dependencies, source links, and supersessions");
+		expect(rendered.prompt).toContain("typed edges, gates, and supersessions");
 		expect(rendered.prompt).toContain("#### `pithos events tail`");
 		expect(rendered.prompt).toContain("#### `pdx daemon status`");
 		expect(rendered.prompt).toContain("liveness questions");

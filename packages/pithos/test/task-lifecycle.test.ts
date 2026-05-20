@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
 	PithosError,
 	makeEngine,
+	taskGateLateGrowthMarkers,
 	renderGraphInspectText,
 	type Capability,
 	type ChainPolicy,
@@ -100,7 +101,8 @@ const enqueueTask = (
 		readonly capability?: Capability;
 		readonly scope?: string;
 		readonly runId?: string;
-		readonly dependsOn?: readonly string[];
+		readonly after?: readonly string[];
+		readonly gate?: readonly string[];
 		readonly chain?: ChainPolicy;
 	},
 ) =>
@@ -111,7 +113,8 @@ const enqueueTask = (
 		body: "body",
 		bodyFile: undefined,
 		runId: input.runId ?? "run_toil",
-		dependsOn: input.dependsOn ?? [],
+		after: input.after ?? [],
+		gate: input.gate ?? [],
 		chain: input.chain ?? "auto",
 	});
 
@@ -176,7 +179,7 @@ describe("task lifecycle", () => {
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		});
 		const claimed = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
@@ -222,7 +225,7 @@ describe("task lifecycle", () => {
 					body: "body",
 					bodyFile: undefined,
 					runId: "run_pdx",
-					dependsOn: [],
+					after: [],
 					chain: "auto",
 				}),
 			).toThrow(PithosError);
@@ -235,7 +238,7 @@ describe("task lifecycle", () => {
 				body: "body",
 				bodyFile: undefined,
 				runId: "run_toil",
-				dependsOn: [],
+				after: [],
 				chain: "auto",
 			}),
 		).toThrow(PithosError);
@@ -256,7 +259,7 @@ describe("task lifecycle", () => {
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		});
 		expect(engine.claim({ runId: "run_war", scope: repo, capability: "execute" }).task.id).toEqual(
@@ -290,7 +293,7 @@ describe("task lifecycle", () => {
 			body: "mr ready for review",
 			bodyFile: undefined,
 			runId: "run_pdx_system",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		});
 		// envy can claim intake
@@ -310,7 +313,7 @@ describe("task lifecycle", () => {
 				body: "body",
 				bodyFile: undefined,
 				runId: "run_toil",
-				dependsOn: [],
+				after: [],
 				chain: "none",
 			}),
 		).toThrow(PithosError);
@@ -331,7 +334,7 @@ describe("task lifecycle", () => {
 				body: "body",
 				bodyFile: undefined,
 				runId: "run_pdx_system",
-				dependsOn: [],
+				after: [],
 				chain: "none",
 			}),
 		).toThrow(PithosError);
@@ -347,7 +350,7 @@ describe("task lifecycle", () => {
 			body: "hook has crashed 5 times",
 			bodyFile: undefined,
 			runId: "run_pdx_system",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 		// Insert new input-hook alert kinds — should not throw
@@ -364,7 +367,7 @@ describe("task lifecycle", () => {
 			body: "hook config failed to load",
 			bodyFile: undefined,
 			runId: "run_pdx_system",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 		expect(() =>
@@ -380,7 +383,7 @@ describe("task lifecycle", () => {
 			body: "run was interrupted",
 			bodyFile: undefined,
 			runId: "run_pdx_system",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 		expect(() =>
@@ -436,7 +439,7 @@ CREATE TABLE runs (
 			body: "run was interrupted",
 			bodyFile: undefined,
 			runId: "run_pdx_system",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 
@@ -472,7 +475,7 @@ CREATE TABLE repair_alerts (
 			body: "hook config failed to load",
 			bodyFile: undefined,
 			runId: "run_pdx_system",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 
@@ -497,7 +500,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		const db = new Database(dbPath);
@@ -514,7 +517,7 @@ CREATE TABLE repair_alerts (
 				body: "body",
 				bodyFile: undefined,
 				runId: "run_toil",
-				dependsOn: [],
+				after: [],
 				chain: "auto",
 			}),
 		).toThrow(/scope is archived/);
@@ -548,7 +551,7 @@ CREATE TABLE repair_alerts (
 				body: "body",
 				bodyFile: undefined,
 				runId: "run_toil",
-				dependsOn: [],
+				after: [],
 				chain: "auto",
 			}),
 		).toThrow(
@@ -598,7 +601,7 @@ CREATE TABLE repair_alerts (
 				body: "body",
 				bodyFile: undefined,
 				runId: "other",
-				dependsOn: [],
+				after: [],
 				chain: "auto",
 			}),
 		).toThrow(PithosError);
@@ -609,7 +612,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: undefined,
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		});
 		expect(() =>
@@ -620,7 +623,7 @@ CREATE TABLE repair_alerts (
 				body: "body",
 				bodyFile: undefined,
 				runId: undefined,
-				dependsOn: [blocker.task.id, blocker.task.id],
+				after: [blocker.task.id, blocker.task.id],
 				chain: "auto",
 			}),
 		).toThrow(PithosError);
@@ -631,7 +634,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: undefined,
-			dependsOn: [blocker.task.id],
+			after: [blocker.task.id],
 			chain: "auto",
 		});
 		expect(() => engine.claim({ runId: "run_war", scope: repo, capability: "execute" })).toThrow(
@@ -650,25 +653,25 @@ CREATE TABLE repair_alerts (
 			title: "design middle",
 			capability: "design",
 			scope: repo,
-			dependsOn: [triage],
+			after: [triage],
 		}).task.id;
 		const executeA = enqueueTask(engine, {
 			title: "execute fork A",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [design],
+			after: [design],
 		}).task.id;
 		const executeB = enqueueTask(engine, {
 			title: "execute fork B",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [design],
+			after: [design],
 		}).task.id;
 		const followUp = enqueueTask(engine, {
 			title: "execute follow-up",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [executeA],
+			after: [executeA],
 		}).task.id;
 
 		const graphText = renderGraphInspectText(
@@ -710,7 +713,7 @@ CREATE TABLE repair_alerts (
 			title: "claimed seed",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [blocker],
+			after: [blocker],
 			chain: "none",
 		}).task.id;
 		const runningSeed = enqueueTask(engine, {
@@ -742,7 +745,7 @@ CREATE TABLE repair_alerts (
 		expect(nodeIds).toEqual([blocker, claimedSeed, runningSeed].sort());
 		expect(nodeIds).not.toContain(queuedNonMatch);
 		expect(graph.graph.edges).toContainEqual({
-			kind: "depends_on",
+			kind: "after",
 			from_task_id: claimedSeed,
 			to_task_id: blocker,
 			satisfied: true,
@@ -758,7 +761,7 @@ CREATE TABLE repair_alerts (
 			body: "does not mention the matching words",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 		const authTokenSeed = engine.enqueue({
@@ -768,7 +771,7 @@ CREATE TABLE repair_alerts (
 			body: "rotate the token safely",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [blocker],
+			after: [blocker],
 			chain: "none",
 		}).task.id;
 		const authOnly = engine.enqueue({
@@ -778,7 +781,7 @@ CREATE TABLE repair_alerts (
 			body: "describe login setup",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 		const artifactOnly = engine.enqueue({
@@ -788,7 +791,7 @@ CREATE TABLE repair_alerts (
 			body: "plain task body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 		engine.artifactAdd({
@@ -810,7 +813,7 @@ CREATE TABLE repair_alerts (
 		);
 		expect(authGraph.graph.nodes.map((node) => node.id)).not.toContain(artifactOnly);
 		expect(authGraph.graph.edges).toContainEqual({
-			kind: "depends_on",
+			kind: "after",
 			from_task_id: authTokenSeed,
 			to_task_id: blocker,
 			satisfied: false,
@@ -900,7 +903,7 @@ CREATE TABLE repair_alerts (
 			title: "today seed",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [oldBlocker],
+			after: [oldBlocker],
 			chain: "none",
 		}).task.id;
 		const relativeSeed = enqueueTask(engine, {
@@ -1057,7 +1060,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "none",
 		}).task.id;
 		engine.cancel({ taskId: cancelled, runId: "run_toil", reason: "not needed" });
@@ -1110,21 +1113,21 @@ CREATE TABLE repair_alerts (
 			title: "alpha branch",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [root],
+			after: [root],
 			chain: "none",
 		}).task.id;
 		const branchBeta = enqueueTask(engine, {
 			title: "beta branch",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [root],
+			after: [root],
 			chain: "none",
 		}).task.id;
 		const shared = enqueueTask(engine, {
 			title: "shared leaf",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [branchAlpha, branchBeta],
+			after: [branchAlpha, branchBeta],
 			chain: "none",
 		}).task.id;
 
@@ -1145,7 +1148,7 @@ CREATE TABLE repair_alerts (
 	});
 
 	it("deduplicates successor nodes in readable graph view when they appear in both supersession and dependency positions", () => {
-		const { engine, repo } = setup();
+		const { dbPath, engine, repo } = setup();
 		// parent is a shared upstream; original and its successor both inherit this dependency
 		const parent = enqueueTask(engine, {
 			title: "alpha parent",
@@ -1157,7 +1160,7 @@ CREATE TABLE repair_alerts (
 			title: "alpha original",
 			capability: "execute",
 			scope: repo,
-			dependsOn: [parent],
+			after: [parent],
 			chain: "none",
 		}).task.id;
 		// complete parent so original becomes claimable
@@ -1187,6 +1190,10 @@ CREATE TABLE repair_alerts (
 			scope: repo,
 			capability: "execute",
 		}).task.id;
+		const repairAlert = new Database(dbPath)
+			.prepare("SELECT task_id FROM repair_alerts WHERE kind='task_failed'")
+			.pluck()
+			.get() as string;
 
 		const graphText = renderGraphInspectText(
 			engine.graphInspect({ taskId: undefined, scope: repo, all: false }),
@@ -1198,6 +1205,7 @@ CREATE TABLE repair_alerts (
 			[
 				`- ${parent} [execute] [done] (/tmp/pithos-repo) alpha parent`,
 				`  - ${original} [execute] [failed] (/tmp/pithos-repo) alpha original`,
+				`    - repair ${repairAlert} [escalate] [queued] Investigate failed task ${original}`,
 				`    ~> ${successor} [execute] [queued] (/tmp/pithos-repo) beta successor`,
 				`  - ↑ ${successor} already shown`,
 				"",
@@ -1259,7 +1267,7 @@ CREATE TABLE repair_alerts (
 		const fanIn = enqueueTask(engine, {
 			title: "fan in",
 			capability: "design",
-			dependsOn: [manual],
+			after: [manual],
 		});
 		expect(fanIn.chain.final_dependency_ids).toEqual([manual, held]);
 		expect(
@@ -1269,7 +1277,7 @@ CREATE TABLE repair_alerts (
 				.sort(),
 		).toEqual([held, manual].sort());
 		expect(() =>
-			enqueueTask(engine, { title: "duplicate", capability: "design", dependsOn: [held] }),
+			enqueueTask(engine, { title: "duplicate", capability: "design", after: [held] }),
 		).toThrow(/duplicate dependency task id/);
 	});
 
@@ -1312,7 +1320,6 @@ CREATE TABLE repair_alerts (
 			id: source,
 			scope_id: "global",
 			status: "claimed",
-			source_kind: "chain_source",
 		});
 		expect(inspect.dependencies).toEqual([]);
 		expect(inspect.lineage).toEqual([]);
@@ -1327,27 +1334,21 @@ CREATE TABLE repair_alerts (
 			all: false,
 		}) as ReturnType<Engine["graphInspect"]> & {
 			graph: {
-				nodes: readonly { id: string; source_task_id: string | null; source_kind: string | null }[];
+				nodes: readonly { id: string }[];
 				edges: readonly {
 					kind: string;
 					from_task_id: string;
 					to_task_id: string;
-					source_kind?: string;
 				}[];
 			};
 		};
 		expect(graph.graph.nodes.map((node) => node.id).sort()).toEqual(
 			[escalation.task.id, source].sort(),
 		);
-		expect(graph.graph.nodes.find((node) => node.id === escalation.task.id)).toMatchObject({
-			source_task_id: source,
-			source_kind: "chain_source",
-		});
 		expect(graph.graph.edges).toContainEqual({
-			kind: "source",
+			kind: "about",
 			from_task_id: escalation.task.id,
 			to_task_id: source,
-			source_kind: "chain_source",
 		});
 
 		const eventPayload = JSON.parse(
@@ -1355,9 +1356,8 @@ CREATE TABLE repair_alerts (
 				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
 				.pluck()
 				.get(escalation.task.id) as string,
-		) as unknown as { chain: { source_task_id: string | null; source_kind: string | null } };
-		expect(eventPayload.chain.source_task_id).toBe(source);
-		expect(eventPayload.chain.source_kind).toBe("chain_source");
+		) as unknown as { edges: { about: readonly string[] } };
+		expect(eventPayload.edges.about).toEqual([source]);
 	});
 
 	it("renders a terminal task that is the source of an active escalation", () => {
@@ -1385,7 +1385,7 @@ CREATE TABLE repair_alerts (
 		expect(nodeIds).toContain(escalation);
 	});
 
-	it("routes Pandora follow-up from held escalation to its source task", () => {
+	it("routes Pandora follow-up from held about escalation after the escalation task", () => {
 		const { dbPath, engine } = setup();
 		const { source, escalation } = claimSourcedEscalationWithPandora(engine);
 
@@ -1396,20 +1396,20 @@ CREATE TABLE repair_alerts (
 		});
 
 		expect(followUp.chain).toMatchObject({
-			applied: "depends_on_source",
+			applied: "depends_on_held_escalation",
 			held_task_id: escalation,
 			source_task_id: source,
-			implicit_dependency_ids: [source],
-			final_dependency_ids: [source],
+			implicit_dependency_ids: [escalation],
+			final_dependency_ids: [escalation],
 		});
 		const inspect = engine.taskInspect({ taskId: followUp.task.id });
-		expect(inspect.dependencies.map((task) => task.id)).toEqual([source]);
-		expect(inspect.task.unresolved_dependency_ids).toEqual([source]);
+		expect(inspect.dependencies.map((task) => task.id)).toEqual([escalation]);
+		expect(inspect.task.unresolved_dependency_ids).toEqual([escalation]);
 		expect(taskCreatedChain(dbPath, followUp.task.id)).toMatchObject({
-			applied: "depends_on_source",
+			applied: "depends_on_held_escalation",
 			source_task_id: source,
-			implicit_dependency_ids: [source],
-			final_dependency_ids: [source],
+			implicit_dependency_ids: [escalation],
+			final_dependency_ids: [escalation],
 		});
 	});
 
@@ -1417,7 +1417,7 @@ CREATE TABLE repair_alerts (
 		const { dbPath, engine } = setup();
 		claimSourcedEscalationWithPandora(engine);
 		const db = new Database(dbPath);
-		db.prepare("UPDATE task_sources SET kind='repair_source'").run();
+		db.prepare("UPDATE task_edges SET kind='repair'").run();
 		db.close();
 
 		expect(() =>
@@ -1426,17 +1426,7 @@ CREATE TABLE repair_alerts (
 				capability: "design",
 				runId: "run_pandora",
 			}),
-		).toThrow(/--chain auto cannot continue from repair_source; supersede or replan/);
-		expect(() =>
-			enqueueTask(engine, {
-				title: "bad explicit continuation",
-				capability: "triage",
-				runId: "run_pandora",
-				chain: "source",
-			}),
-		).toThrow(
-			/--chain source requires a chain_source; repair_source must be superseded or replanned/,
-		);
+		).toThrow(/--chain auto cannot continue from repair edge; supersede, replan, or cancel/);
 	});
 
 	it("makes held escalation without source a visible auto-chain no-op", () => {
@@ -1472,37 +1462,6 @@ CREATE TABLE repair_alerts (
 		});
 	});
 
-	it("supports explicit source chaining from a held sourced escalation", () => {
-		const { dbPath, engine } = setup();
-		const { source, escalation } = claimSourcedEscalationWithPandora(engine);
-
-		const followUp = enqueueTask(engine, {
-			title: "explicit source follow-up",
-			capability: "triage",
-			runId: "run_pandora",
-			chain: "source",
-		});
-
-		expect(followUp.chain).toMatchObject({
-			policy: "source",
-			applied: "depends_on_source",
-			held_task_id: escalation,
-			source_task_id: source,
-			implicit_dependency_ids: [source],
-			final_dependency_ids: [source],
-		});
-		expect(
-			engine.taskInspect({ taskId: followUp.task.id }).dependencies.map((task) => task.id),
-		).toEqual([source]);
-		expect(taskCreatedChain(dbPath, followUp.task.id)).toMatchObject({
-			policy: "source",
-			applied: "depends_on_source",
-			source_task_id: source,
-			implicit_dependency_ids: [source],
-			final_dependency_ids: [source],
-		});
-	});
-
 	it("keeps escalation from held escalation visibly flat", () => {
 		const { dbPath, engine } = setup();
 		const { escalation } = claimSourcedEscalationWithPandora(engine);
@@ -1533,38 +1492,6 @@ CREATE TABLE repair_alerts (
 		});
 	});
 
-	it("fails loudly for invalid explicit source chaining", () => {
-		const { engine } = setup();
-		upsertPandoraRun(engine);
-		expect(() =>
-			enqueueTask(engine, { title: "no held source", capability: "design", chain: "source" }),
-		).toThrow(/--chain source requires a held task/);
-
-		const escalation = enqueueTask(engine, {
-			title: "flat escalation",
-			capability: "escalate",
-			chain: "none",
-		}).task.id;
-		engine.claim({ runId: "run_pandora", scope: "global", capability: "escalate" });
-		expect(() =>
-			enqueueTask(engine, {
-				title: "no source",
-				capability: "design",
-				runId: "run_pandora",
-				chain: "source",
-			}),
-		).toThrow(/--chain source requires the held task to have a source link/);
-		expect(() =>
-			enqueueTask(engine, {
-				title: "bad escalation",
-				capability: "escalate",
-				runId: "run_pandora",
-				chain: "source",
-			}),
-		).toThrow(/--chain source cannot be used when enqueueing escalation tasks/);
-		expect(engine.taskInspect({ taskId: escalation }).task.status).toBe("claimed");
-	});
-
 	it("keeps chain none manual-only while Pandora holds a sourced escalation", () => {
 		const { dbPath, engine } = setup();
 		const { escalation } = claimSourcedEscalationWithPandora(engine);
@@ -1579,7 +1506,7 @@ CREATE TABLE repair_alerts (
 			title: "manual-only follow-up",
 			capability: "design",
 			runId: "run_pandora",
-			dependsOn: [manual],
+			after: [manual],
 			chain: "none",
 		});
 
@@ -1615,7 +1542,7 @@ CREATE TABLE repair_alerts (
 
 		expect(() =>
 			enqueueTask(engine, { title: "needs attention", capability: "escalate", runId: "run_toil" }),
-		).toThrow(`source task ${source} was superseded by ${replacement}`);
+		).toThrow(`about task ${source} was superseded by ${replacement}`);
 	});
 
 	it("heartbeat and stale token updates fail without partial mutation", () => {
@@ -1627,7 +1554,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
@@ -1655,7 +1582,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
@@ -1729,7 +1656,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		expect(() => engine.runInterrupt({ runId: undefined, taskId: task, reason: "stop" })).toThrow(
@@ -1808,7 +1735,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
@@ -1861,7 +1788,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war2", scope: repo, capability: "execute" });
@@ -1885,7 +1812,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		expect(engine.cancel({ taskId: queued, runId: "run_toil", reason: "not needed" })).toEqual({
@@ -1903,7 +1830,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
@@ -1921,7 +1848,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 
@@ -1945,13 +1872,13 @@ CREATE TABLE repair_alerts (
 				scope_id: "global",
 				capability: "escalate",
 				source_task_id: original,
-				source_kind: "repair_source",
+				source_kind: "repair",
 			},
 		});
 		expect(engine.taskInspect({ taskId: original }).task.status).toBe("cancelled");
 		expect(engine.taskInspect({ taskId: result.escalation.id })).toMatchObject({
 			task: { id: result.escalation.id, status: "queued", scope_id: "global" },
-			source: { id: original, source_kind: "repair_source" },
+			source: { id: original, source_kind: "repair" },
 			dependencies: [],
 		});
 
@@ -1959,18 +1886,18 @@ CREATE TABLE repair_alerts (
 		expect(
 			db
 				.prepare(
-					"SELECT kind FROM task_sources WHERE task_id=? AND source_task_id=? AND source_run_id=?",
+					"SELECT kind FROM task_edges WHERE task_id=? AND target_task_id=? AND created_by_run_id=?",
 				)
 				.pluck()
 				.get(result.escalation.id, original, "run_pdx"),
-		).toBe("repair_source");
+		).toBe("repair");
 		const created = JSON.parse(
 			db
 				.prepare("SELECT payload_json FROM events WHERE type='task.created' AND task_id=?")
 				.pluck()
 				.get(result.escalation.id) as string,
 		) as { source_kind: string; source_task_id: string };
-		expect(created).toMatchObject({ source_task_id: original, source_kind: "repair_source" });
+		expect(created).toMatchObject({ edges: { repair: [original] } });
 		db.close();
 	});
 
@@ -1983,7 +1910,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
@@ -2004,13 +1931,13 @@ CREATE TABLE repair_alerts (
 				scope_id: "global",
 				capability: "escalate",
 				source_task_id: affected,
-				source_kind: "repair_source",
+				source_kind: "repair",
 				kind: "interrupt",
 			},
 		});
 		expect(engine.taskInspect({ taskId: result.escalation.id })).toMatchObject({
 			task: { id: result.escalation.id, status: "queued", scope_id: "global" },
-			source: { id: affected, status: "failed", source_kind: "repair_source" },
+			source: { id: affected, status: "failed", source_kind: "repair" },
 			dependencies: [],
 			repair_alert_kind: "interrupt",
 		});
@@ -2020,21 +1947,20 @@ CREATE TABLE repair_alerts (
 			all: false,
 		});
 		expect(graph.graph.edges).toContainEqual({
-			kind: "source",
+			kind: "repair",
 			from_task_id: result.escalation.id,
 			to_task_id: affected,
-			source_kind: "repair_source",
 		});
 
 		const db = new Database(dbPath);
 		expect(
 			db
 				.prepare(
-					"SELECT kind FROM task_sources WHERE task_id=? AND source_task_id=? AND source_run_id=?",
+					"SELECT kind FROM task_edges WHERE task_id=? AND target_task_id=? AND created_by_run_id=?",
 				)
 				.pluck()
 				.get(result.escalation.id, affected, "run_pdx"),
-		).toBe("repair_source");
+		).toBe("repair");
 		expect(
 			db
 				.prepare("SELECT kind FROM repair_alerts WHERE task_id=?")
@@ -2047,7 +1973,7 @@ CREATE TABLE repair_alerts (
 				.pluck()
 				.get(result.escalation.id) as string,
 		) as { source_kind: string; source_task_id: string };
-		expect(created).toMatchObject({ source_task_id: affected, source_kind: "repair_source" });
+		expect(created).toMatchObject({ edges: { repair: [affected] } });
 		db.close();
 	});
 
@@ -2067,7 +1993,7 @@ CREATE TABLE repair_alerts (
 		expect(db.prepare("SELECT COUNT(*) FROM tasks WHERE capability='escalate'").pluck().get()).toBe(
 			0,
 		);
-		expect(db.prepare("SELECT COUNT(*) FROM task_sources").pluck().get()).toBe(0);
+		expect(db.prepare("SELECT COUNT(*) FROM task_edges").pluck().get()).toBe(0);
 		db.close();
 	});
 
@@ -2080,7 +2006,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 
@@ -2098,7 +2024,7 @@ CREATE TABLE repair_alerts (
 		expect(db.prepare("SELECT COUNT(*) FROM tasks WHERE capability='escalate'").pluck().get()).toBe(
 			0,
 		);
-		expect(db.prepare("SELECT COUNT(*) FROM task_sources").pluck().get()).toBe(0);
+		expect(db.prepare("SELECT COUNT(*) FROM task_edges").pluck().get()).toBe(0);
 		db.close();
 	});
 
@@ -2114,7 +2040,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war", scope: repo, capability: "execute" });
@@ -2144,7 +2070,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war_dl", scope: repo, capability: "execute" });
@@ -2176,7 +2102,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		engine.claim({ runId: "run_war_rc", scope: repo, capability: "execute" });
@@ -2196,7 +2122,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		expect(
@@ -2230,7 +2156,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		const db = new Database(dbPath);
@@ -2265,7 +2191,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		const db = new Database(dbPath);
@@ -2301,7 +2227,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 
@@ -2324,7 +2250,7 @@ CREATE TABLE repair_alerts (
 		expect(db.prepare("SELECT COUNT(*) FROM tasks WHERE capability='escalate'").pluck().get()).toBe(
 			0,
 		);
-		expect(db.prepare("SELECT COUNT(*) FROM task_sources").pluck().get()).toBe(0);
+		expect(db.prepare("SELECT COUNT(*) FROM task_edges").pluck().get()).toBe(0);
 		db.close();
 	});
 
@@ -2337,7 +2263,7 @@ CREATE TABLE repair_alerts (
 			body: "triage body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		const oldDesign = engine.enqueue({
@@ -2347,7 +2273,7 @@ CREATE TABLE repair_alerts (
 			body: "old design body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [triage],
+			after: [triage],
 			chain: "auto",
 		}).task.id;
 		const branchDesign = engine.enqueue({
@@ -2357,7 +2283,7 @@ CREATE TABLE repair_alerts (
 			body: "branch design body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [triage],
+			after: [triage],
 			chain: "auto",
 		}).task.id;
 		const replacement = engine.supersede({
@@ -2384,7 +2310,7 @@ CREATE TABLE repair_alerts (
 			body: "execute body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [replacement.task.id, branchDesign],
+			after: [replacement.task.id, branchDesign],
 			chain: "auto",
 		}).task.id;
 		const sibling = engine.enqueue({
@@ -2394,7 +2320,7 @@ CREATE TABLE repair_alerts (
 			body: "parallel body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [replacement.task.id],
+			after: [replacement.task.id],
 			chain: "auto",
 		}).task.id;
 		const db = new Database(dbPath);
@@ -2477,7 +2403,7 @@ CREATE TABLE repair_alerts (
 	});
 
 	it("inspects outputs and repairs a broken queued chain with supersede", () => {
-		const { engine, repo } = setup();
+		const { dbPath, engine, repo } = setup();
 		const blocker = engine.enqueue({
 			scope: repo,
 			capability: "execute",
@@ -2485,7 +2411,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		}).task.id;
 		const downstream = engine.enqueue({
@@ -2495,7 +2421,7 @@ CREATE TABLE repair_alerts (
 			body: "body",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [blocker],
+			after: [blocker],
 			chain: "auto",
 		}).task.id;
 		expect(engine.taskInspect({ taskId: downstream })).toMatchObject({
@@ -2513,6 +2439,13 @@ CREATE TABLE repair_alerts (
 			],
 			blocked: [expect.objectContaining({ id: downstream, unresolved_dependency_ids: [blocker] })],
 		});
+		const repairAlert = engine.createRepairAlert({
+			runId: "run_pdx_system",
+			affectedTaskId: blocker,
+			kind: "interrupt",
+			escalationTitle: "repair blocker",
+			escalationBody: "body",
+		}).escalation.id;
 		const replacement = engine.supersede({
 			taskId: blocker,
 			runId: "run_toil",
@@ -2526,6 +2459,20 @@ CREATE TABLE repair_alerts (
 		expect(engine.taskInspect({ taskId: downstream })).toMatchObject({
 			dependencies: [expect.objectContaining({ id: replacement.task.id })],
 		});
+		const db = new Database(dbPath);
+		expect(
+			db
+				.prepare("SELECT target_task_id FROM task_edges WHERE task_id=? AND kind='repair'")
+				.pluck()
+				.get(repairAlert),
+		).toBe(blocker);
+		expect(
+			db
+				.prepare("SELECT target_task_id FROM task_edges WHERE task_id=? AND kind='after'")
+				.pluck()
+				.get(downstream),
+		).toBe(replacement.task.id);
+		db.close();
 		const graph = engine.graphInspect({
 			taskId: downstream,
 			scope: undefined,
@@ -2560,10 +2507,532 @@ CREATE TABLE repair_alerts (
 			to_task_id: blocker,
 		});
 		expect(graph.graph.edges).toContainEqual({
-			kind: "depends_on",
+			kind: "after",
 			from_task_id: downstream,
 			to_task_id: replacement.task.id,
 			satisfied: false,
+		});
+	});
+	describe("gate claimability", () => {
+		it("waits for dynamic branch closure, records release snapshots, and rechecks each attempt", () => {
+			const { engine, dbPath } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const branch = enqueueTask(engine, { title: "branch", after: [anchor] }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+
+			expect(engine.taskInspect({ taskId: gated }).task.gates[0]).toMatchObject({
+				target_task_id: anchor,
+				state: "open",
+			});
+			expect(() =>
+				engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }),
+			).not.toThrow();
+			const anchorClaim = engine.taskInspect({ taskId: anchor }).task;
+			engine.complete({
+				taskId: anchor,
+				runId: "run_toil",
+				token: anchorClaim.fencing_token,
+				resultJson: "{}",
+			});
+			expect(() =>
+				engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }),
+			).not.toThrow();
+			const branchClaim = engine.taskInspect({ taskId: branch }).task;
+			engine.complete({
+				taskId: branch,
+				runId: "run_toil",
+				token: branchClaim.fencing_token,
+				resultJson: "{}",
+			});
+
+			const claimed = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			expect(claimed.task.id).toBe(gated);
+
+			const db = new Database(dbPath);
+			try {
+				const releases = db
+					.prepare(
+						"SELECT task_id, target_task_id, attempt, fencing_token, released_by_run_id FROM task_gate_releases",
+					)
+					.all();
+				expect(releases).toEqual([
+					expect.objectContaining({
+						task_id: gated,
+						target_task_id: anchor,
+						attempt: 1,
+						fencing_token: claimed.task.token,
+						released_by_run_id: "run_toil",
+					}),
+				]);
+				const members = db
+					.prepare(
+						"SELECT member_task_id, canonical_task_id, status_at_release FROM task_gate_release_members ORDER BY member_task_id",
+					)
+					.all();
+				expect(members).toEqual([
+					{
+						member_task_id: [anchor, branch].sort()[0],
+						canonical_task_id: [anchor, branch].sort()[0],
+						status_at_release: "done",
+					},
+					{
+						member_task_id: [anchor, branch].sort()[1],
+						canonical_task_id: [anchor, branch].sort()[1],
+						status_at_release: "done",
+					},
+				]);
+				const releaseEvent = db
+					.prepare("SELECT payload_json FROM events WHERE type='task.gate_released'")
+					.get() as { payload_json: string };
+				const releasePayload = JSON.parse(releaseEvent.payload_json) as unknown as {
+					readonly target_task_id: string;
+					readonly attempt: number;
+					readonly fencing_token: number;
+					readonly release_run_id: string;
+					readonly release_member_task_ids: readonly string[];
+				};
+				expect(releasePayload.target_task_id).toBe(anchor);
+				expect(releasePayload.attempt).toBe(1);
+				expect(releasePayload.fencing_token).toBe(claimed.task.token);
+				expect(releasePayload.release_run_id).toBe("run_toil");
+				expect(releasePayload.release_member_task_ids).toEqual(
+					expect.arrayContaining([anchor, branch]),
+				);
+			} finally {
+				db.close();
+			}
+
+			engine.runCleanup({ runId: "run_toil", reason: "retry" });
+			engine.runUpsert({
+				agent: "toil",
+				mode: "afk",
+				scope: "global",
+				cwd: "/tmp",
+				sessionId: "s_toil_retry",
+				harnessKind: "claude",
+				sessionLogPath: "/tmp/s_toil_retry.jsonl",
+				runId: "run_toil_retry",
+			});
+			const second = engine.claim({
+				runId: "run_toil_retry",
+				scope: "global",
+				capability: "triage",
+			});
+			expect(second.task.id).toBe(gated);
+			const db2 = new Database(dbPath);
+			try {
+				expect(
+					db2.prepare("SELECT attempt FROM task_gate_releases ORDER BY attempt").all(),
+				).toEqual([{ attempt: 1 }, { attempt: 2 }]);
+			} finally {
+				db2.close();
+			}
+		});
+
+		it("retargets queued gate dependents and preserves outgoing gates on supersession", () => {
+			const { engine, dbPath } = setup();
+			const target = enqueueTask(engine, { title: "target" }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [target] }).task.id;
+			const replacement = engine.supersede({
+				taskId: target,
+				runId: "run_toil",
+				reason: "replace target",
+				title: undefined,
+				body: undefined,
+				bodyFile: undefined,
+				scope: undefined,
+				capability: undefined,
+			}).task.id;
+			expect(engine.taskInspect({ taskId: gated }).task.gates[0]).toMatchObject({
+				target_task_id: replacement,
+				state: "open",
+			});
+			const gateOwnerReplacement = engine.supersede({
+				taskId: gated,
+				runId: "run_toil",
+				reason: "replace gated task",
+				title: undefined,
+				body: undefined,
+				bodyFile: undefined,
+				scope: undefined,
+				capability: undefined,
+			}).task.id;
+			expect(engine.taskInspect({ taskId: gateOwnerReplacement }).task.gates[0]).toMatchObject({
+				target_task_id: replacement,
+				state: "open",
+			});
+			const claim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			expect(claim.task.id).toBe(replacement);
+			engine.complete({
+				taskId: replacement,
+				runId: "run_toil",
+				token: claim.task.token,
+				resultJson: "{}",
+			});
+			const gatedClaim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			expect(gatedClaim.task.id).toBe(gateOwnerReplacement);
+			const db = new Database(dbPath);
+			try {
+				expect(
+					db
+						.prepare(
+							"SELECT member_task_id, canonical_task_id FROM task_gate_release_members WHERE task_id=?",
+						)
+						.all(gateOwnerReplacement),
+				).toEqual([
+					expect.objectContaining({ member_task_id: replacement, canonical_task_id: replacement }),
+				]);
+			} finally {
+				db.close();
+			}
+		});
+
+		it("surfaces about and repair branch members in gate closure", () => {
+			const { engine } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const about = engine.enqueue({
+				scope: "global",
+				capability: "escalate",
+				title: "about",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_toil",
+				after: [],
+				gate: [],
+				about: anchor,
+				chain: "none",
+			}).task.id;
+			const repair = engine.createRepairAlert({
+				runId: "run_pdx_system",
+				affectedTaskId: anchor,
+				kind: "task_failed",
+				escalationTitle: "repair",
+				escalationBody: "body",
+			}).escalation.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+			expect(
+				engine
+					.taskInspect({ taskId: gated })
+					.task.gates[0]?.members.map((member) => member.task_id),
+			).toEqual([anchor, about, repair].sort());
+		});
+
+		it("renders typed gate edges and scoped global attachments in graph inspection", () => {
+			const { engine, repo } = setup();
+			const branch = enqueueTask(engine, {
+				title: "repo branch",
+				capability: "execute",
+				scope: repo,
+				runId: "run_toil",
+				chain: "none",
+			}).task.id;
+			const about = engine.enqueue({
+				scope: "global",
+				capability: "escalate",
+				title: "global attention",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_toil",
+				after: [],
+				gate: [],
+				about: branch,
+				chain: "none",
+			}).task.id;
+			const checkpoint = engine.enqueue({
+				scope: "global",
+				capability: "escalate",
+				title: "global checkpoint",
+				body: "body",
+				bodyFile: undefined,
+				runId: "run_toil",
+				after: [],
+				gate: [branch],
+				chain: "none",
+			}).task.id;
+			const graph = engine.graphInspect({ taskId: undefined, scope: repo, all: false }).graph;
+
+			expect(graph.nodes.map((node) => node.id).sort()).toEqual([about, branch, checkpoint].sort());
+			expect(graph.edges).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ kind: "about", from_task_id: about, to_task_id: branch }),
+					expect.objectContaining({
+						kind: "gate",
+						from_task_id: checkpoint,
+						to_task_id: branch,
+						state: "open",
+					}),
+				]),
+			);
+			expect(renderGraphInspectText({ ok: true, graph })).toContain("- gate [open]");
+		});
+
+		it("rejects late branch-member edges under released gates with active downstream work and rolls back", () => {
+			const { engine, dbPath } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+			const anchorClaim = engine.claim({
+				runId: "run_toil",
+				scope: "global",
+				capability: "triage",
+			});
+			engine.complete({
+				taskId: anchor,
+				runId: "run_toil",
+				token: anchorClaim.task.token,
+				resultJson: "{}",
+			});
+			expect(
+				engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }).task.id,
+			).toBe(gated);
+
+			expect(() => enqueueTask(engine, { title: "late branch", after: [anchor] })).toThrow(
+				/late branch growth under released gate/,
+			);
+
+			const db = new Database(dbPath);
+			try {
+				expect(
+					db
+						.prepare("SELECT COUNT(*) FROM task_edges WHERE target_task_id=? AND kind='after'")
+						.pluck()
+						.get(anchor),
+				).toBe(0);
+				expect(db.prepare("SELECT COUNT(*) FROM task_gate_late_growth_markers").pluck().get()).toBe(
+					0,
+				);
+				expect(
+					db
+						.prepare("SELECT COUNT(*) FROM events WHERE task_id NOT IN (?, ?)")
+						.pluck()
+						.get(anchor, gated),
+				).toBe(0);
+			} finally {
+				db.close();
+			}
+		});
+
+		it("rejects repair-alert branch growth under released gates and rolls back", () => {
+			const { engine, dbPath } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+			const anchorClaim = engine.claim({
+				runId: "run_toil",
+				scope: "global",
+				capability: "triage",
+			});
+			engine.complete({
+				taskId: anchor,
+				runId: "run_toil",
+				token: anchorClaim.task.token,
+				resultJson: "{}",
+			});
+			expect(
+				engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }).task.id,
+			).toBe(gated);
+
+			expect(() =>
+				engine.createRepairAlert({
+					runId: "run_pdx_system",
+					affectedTaskId: anchor,
+					kind: "task_failed",
+					escalationTitle: "repair anchor",
+					escalationBody: "body",
+				}),
+			).toThrow(/late branch growth under released gate/);
+
+			const db = new Database(dbPath);
+			try {
+				expect(
+					db.prepare("SELECT COUNT(*) FROM task_edges WHERE kind='repair'").pluck().get(),
+				).toBe(0);
+				expect(db.prepare("SELECT COUNT(*) FROM repair_alerts").pluck().get()).toBe(0);
+				expect(db.prepare("SELECT COUNT(*) FROM task_gate_late_growth_markers").pluck().get()).toBe(
+					0,
+				);
+				expect(
+					db
+						.prepare(
+							"SELECT COUNT(*) FROM events WHERE type='task.created' AND task_id NOT IN (?, ?)",
+						)
+						.pluck()
+						.get(anchor, gated),
+				).toBe(0);
+			} finally {
+				db.close();
+			}
+		});
+
+		it("rejects late branch growth through transitive released downstream gates", () => {
+			const { engine } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+			let claim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			engine.complete({
+				taskId: anchor,
+				runId: "run_toil",
+				token: claim.task.token,
+				resultJson: "{}",
+			});
+			claim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			expect(claim.task.id).toBe(gated);
+			engine.complete({
+				taskId: gated,
+				runId: "run_toil",
+				token: claim.task.token,
+				resultJson: "{}",
+			});
+			const transitiveGated = enqueueTask(engine, { title: "transitive gated", gate: [gated] }).task
+				.id;
+			expect(
+				engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }).task.id,
+			).toBe(transitiveGated);
+
+			expect(() => enqueueTask(engine, { title: "late branch", after: [anchor] })).toThrow(
+				/late branch growth under released gate/,
+			);
+		});
+
+		it("allows late branch growth after downstream impact is terminal and records markers", () => {
+			const { engine, dbPath } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+			let claim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			engine.complete({
+				taskId: anchor,
+				runId: "run_toil",
+				token: claim.task.token,
+				resultJson: "{}",
+			});
+			claim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			expect(claim.task.id).toBe(gated);
+			engine.complete({
+				taskId: gated,
+				runId: "run_toil",
+				token: claim.task.token,
+				resultJson: "{}",
+			});
+
+			const late = enqueueTask(engine, { title: "late branch", after: [anchor] }).task.id;
+
+			const db = new Database(dbPath);
+			try {
+				expect(
+					db
+						.prepare(
+							"SELECT task_id FROM task_edges WHERE task_id=? AND target_task_id=? AND kind='after'",
+						)
+						.pluck()
+						.get(late, anchor),
+				).toBe(late);
+				const markers = taskGateLateGrowthMarkers(db);
+				expect(markers).toEqual([
+					expect.objectContaining({
+						gate_task_id: gated,
+						gate_target_task_id: anchor,
+						gate_attempt: 1,
+						mutation_kind: "edge_inserted",
+						edge_task_id: late,
+						edge_target_task_id: anchor,
+						edge_kind: "after",
+						superseded_task_id: null,
+						replacement_task_id: null,
+						created_by_run_id: "run_toil",
+					}),
+				]);
+				expect(markers[0]?.created_at).toEqual(expect.any(String) as string);
+			} finally {
+				db.close();
+			}
+		});
+
+		it("rejects supersession of released-gate members while downstream impact is active", () => {
+			const { engine, dbPath } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+			let claim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			engine.complete({
+				taskId: anchor,
+				runId: "run_toil",
+				token: claim.task.token,
+				resultJson: "{}",
+			});
+			claim = engine.claim({ runId: "run_toil", scope: "global", capability: "triage" });
+			engine.complete({
+				taskId: gated,
+				runId: "run_toil",
+				token: claim.task.token,
+				resultJson: "{}",
+			});
+			const late = enqueueTask(engine, { title: "late branch", after: [anchor] }).task.id;
+			const activeDownstream = enqueueTask(engine, { title: "active downstream", after: [gated] })
+				.task.id;
+			engine.cancel({ taskId: late, runId: "run_toil", reason: "defer late branch" });
+			expect(
+				engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }).task.id,
+			).toBe(activeDownstream);
+
+			expect(() =>
+				engine.supersede({
+					taskId: late,
+					runId: "run_toil",
+					reason: "replace late branch",
+					title: undefined,
+					body: undefined,
+					bodyFile: undefined,
+					scope: undefined,
+					capability: undefined,
+				}),
+			).toThrow(/late branch growth under released gate/);
+
+			const db = new Database(dbPath);
+			try {
+				expect(
+					db
+						.prepare("SELECT COUNT(*) FROM task_supersessions WHERE old_task_id=?")
+						.pluck()
+						.get(late),
+				).toBe(0);
+			} finally {
+				db.close();
+			}
+		});
+
+		it("surfaces broken gates and rejects invalid gate cycles", () => {
+			const { engine } = setup();
+			const anchor = enqueueTask(engine, { title: "anchor" }).task.id;
+			const branch = enqueueTask(engine, { title: "branch", after: [anchor] }).task.id;
+			const gated = enqueueTask(engine, { title: "gated", gate: [anchor] }).task.id;
+			const anchorClaim = engine.claim({
+				runId: "run_toil",
+				scope: "global",
+				capability: "triage",
+			});
+			engine.complete({
+				taskId: anchor,
+				runId: "run_toil",
+				token: anchorClaim.task.token,
+				resultJson: "{}",
+			});
+			const branchClaim = engine.claim({
+				runId: "run_toil",
+				scope: "global",
+				capability: "triage",
+			});
+			engine.failTask({
+				taskId: branch,
+				runId: "run_toil",
+				token: branchClaim.task.token,
+				reason: "bad",
+			});
+			expect(engine.taskInspect({ taskId: gated }).task.gates[0]?.state).toBe("broken");
+			expect(() =>
+				engine.claim({ runId: "run_toil", scope: "global", capability: "triage" }),
+			).toThrow(/no claimable work/);
+
+			const a = enqueueTask(engine, { title: "a" }).task.id;
+			expect(() => enqueueTask(engine, { title: "cycle", after: [a], gate: [a] })).toThrow(
+				/gate owner is already in target branch closure/,
+			);
 		});
 	});
 });

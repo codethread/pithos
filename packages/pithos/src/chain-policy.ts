@@ -1,7 +1,7 @@
 import { PithosError } from "./errors.js";
 
 export type ChainCapability = "triage" | "design" | "execute" | "review" | "escalate" | "intake";
-export type ChainPolicy = "auto" | "none" | "held" | "source";
+export type ChainPolicy = "auto" | "none" | "held";
 export type SourceKind = "chain_source" | "repair_source";
 
 export interface ChainTask {
@@ -39,6 +39,7 @@ export type ChainAppliedReason =
 	| "depends_on_held"
 	| "source_from_held"
 	| "depends_on_source"
+	| "depends_on_held_escalation"
 	| "flat_held_escalation_without_source"
 	| "flat_escalation_from_escalation";
 
@@ -122,25 +123,6 @@ export const resolveChainPolicy = (input: {
 		};
 	}
 
-	if (input.policy === "source") {
-		if (isEscalation(input.newTaskCapability)) {
-			throw chainValidationError("--chain source cannot be used when enqueueing escalation tasks");
-		}
-		if (input.heldSource === null) {
-			throw chainValidationError("--chain source requires the held task to have a source link");
-		}
-		if (input.heldSource.kind !== "chain_source") {
-			throw chainValidationError(
-				"--chain source requires a chain_source; repair_source must be superseded or replanned",
-			);
-		}
-		return {
-			...base,
-			applied: "depends_on_source",
-			implicitDependencyIds: [input.heldSource.taskId],
-		};
-	}
-
 	if (!isEscalation(input.heldTask.capability) && !isEscalation(input.newTaskCapability)) {
 		return {
 			...base,
@@ -165,13 +147,13 @@ export const resolveChainPolicy = (input: {
 		}
 		if (input.heldSource.kind !== "chain_source") {
 			throw chainValidationError(
-				"--chain auto cannot continue from repair_source; supersede or replan the source task instead",
+				"--chain auto cannot continue from repair edge; supersede, replan, or cancel the repaired task instead",
 			);
 		}
 		return {
 			...base,
-			applied: "depends_on_source",
-			implicitDependencyIds: [input.heldSource.taskId],
+			applied: "depends_on_held_escalation",
+			implicitDependencyIds: [input.heldTask.id],
 		};
 	}
 	return {

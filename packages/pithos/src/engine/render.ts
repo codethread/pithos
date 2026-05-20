@@ -1,8 +1,10 @@
-import type { Capability, SourceKind, TaskStatus } from "../db.js";
+import type { Capability, TaskStatus } from "../db.js";
 import type {
 	ArtifactOutput,
 	BriefingOutput,
+	GateInspectOutput,
 	GraphInspectOutput,
+	LateGrowthMarkerOutput,
 	TaskDetailOutput,
 	TaskInspectOutput,
 	TaskInspectTaskOutput,
@@ -130,11 +132,46 @@ const renderTaskBullet = (
 	unresolvedDependencyIds: readonly string[] = [],
 ): string => `- ${taskTitleLine({ ...task, unresolved_dependency_ids: unresolvedDependencyIds })}`;
 
-const sourceKindLabel = (kind: SourceKind): string =>
-	kind === "chain_source" ? "continuation provenance" : "repair provenance";
+const sourceKindLabel = (kind: "about" | "repair"): string =>
+	kind === "about" ? "about" : "repair";
 
 const renderSourceBullet = (source: TaskSourceSummaryOutput | null): string =>
-	source === null ? "- none" : `- ${sourceKindLabel(source.source_kind)}: ${taskTitleLine(source)}`;
+	source === null
+		? "- none"
+		: `- ${sourceKindLabel(source.source_kind)} source: ${taskTitleLine(source)}`;
+
+const renderAttachedContextBullet = (task: TaskSourceSummaryOutput): string =>
+	`- ${sourceKindLabel(task.source_kind)} attached: ${taskTitleLine(task)}`;
+
+const brokenStatuses = new Set<TaskStatus>(["failed", "cancelled", "dead_letter"]);
+
+const gateRelevantMembers = (
+	gate: Pick<GateInspectOutput, "state" | "members">,
+): GateInspectOutput["members"] =>
+	gate.state === "clear"
+		? []
+		: gate.members.filter((member) =>
+				gate.state === "broken" ? brokenStatuses.has(member.status) : member.status !== "done",
+			);
+
+const renderGateMarkdown = (gate: GateInspectOutput): string => {
+	const lines = [`- ${gate.target_task_id} [${gate.state}]`];
+	const members = gateRelevantMembers(gate);
+	if (members.length > 0) {
+		lines.push(`  ${gate.state === "broken" ? "Broken" : "Open"} branch members:`);
+		for (const member of members) {
+			const canonicalNote =
+				member.canonical_task_id === member.task_id ? "" : ` canonical=${member.canonical_task_id}`;
+			lines.push(`  - ${member.task_id} [${member.status}]${canonicalNote}`);
+		}
+	}
+	return lines.join("\n");
+};
+
+const renderLateGrowthMarker = (marker: LateGrowthMarkerOutput): string =>
+	marker.mutation_kind === "edge_inserted"
+		? `- ${marker.id}: allowed late ${marker.edge_kind} edge ${marker.edge_task_id} -> ${marker.edge_target_task_id} after gate ${marker.gate_task_id} -> ${marker.gate_target_task_id} attempt ${marker.gate_attempt}`
+		: `- ${marker.id}: allowed late supersession ${marker.replacement_task_id} supersedes ${marker.superseded_task_id} after gate ${marker.gate_task_id} -> ${marker.gate_target_task_id} attempt ${marker.gate_attempt}`;
 
 export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string => {
 	const lineageTasks = new Map(inspect.lineage.map((entry) => [entry.task.id, entry.task]));
@@ -155,7 +192,7 @@ export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string =>
 		.map((entry) => renderExpandedTaskMarkdown(entry.task, entry.artifacts));
 	const currentParts = [
 		renderExpandedTaskMarkdown(inspect.task, inspect.artifacts),
-		"Depends on:",
+		"Direct after dependencies:",
 		inspect.dependencies.length === 0
 			? "- none"
 			: inspect.dependencies
@@ -163,7 +200,7 @@ export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string =>
 						renderTaskBullet(task, lineageTasks.get(task.id)?.unresolved_dependency_ids),
 					)
 					.join("\n"),
-		"Unlocks:",
+		"Direct after dependents:",
 		inspect.dependents.length === 0
 			? "- none"
 			: inspect.dependents
@@ -172,11 +209,27 @@ export const renderTaskInspectMarkdown = (inspect: TaskInspectOutput): string =>
 					)
 					.join("\n"),
 	];
-	if (inspect.source !== null) {
-		currentParts.push("Source link:", renderSourceBullet(inspect.source));
-	}
+	currentParts.push(
+		"Coordination gates:",
+		inspect.task.gates.length === 0
+			? "- none"
+			: inspect.task.gates.map(renderGateMarkdown).join("\n"),
+	);
+	currentParts.push(
+		"Attached context:",
+		[
+			...(inspect.source === null ? [] : [renderSourceBullet(inspect.source)]),
+			...inspect.attached_context.map(renderAttachedContextBullet),
+		].join("\n") || "- none",
+	);
 	if (inspect.repair_alert_kind !== null) {
 		currentParts.push(`Repair Alert kind: ${inspect.repair_alert_kind}`);
+	}
+	if (inspect.late_growth_markers.length > 0) {
+		currentParts.push(
+			"Allowed late branch growth:",
+			inspect.late_growth_markers.map(renderLateGrowthMarker).join("\n"),
+		);
 	}
 	const sections = [`# ${taskTitleLine(inspect.task)}`];
 	if (inspect.superseded_by !== null) {
@@ -203,14 +256,45 @@ export const renderGraphInspectText = (
 	const byId = new Map(graph.nodes.map((node) => [node.id, node]));
 	const childrenByParent = new Map<string, string[]>();
 	const childIds = new Set<string>();
+	const contextByTarget = new Map<
+		string,
+		{ readonly taskId: string; readonly kind: "about" | "repair" }[]
+	>();
+	const gatesByTarget = new Map<
+		string,
+		{
+			readonly taskId: string;
+			readonly state: "clear" | "open" | "broken";
+			readonly members: GateInspectOutput["members"];
+		}[]
+	>();
 	for (const edge of graph.edges) {
-		if (edge.kind !== "depends_on") continue;
-		if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
-		childrenByParent.set(edge.to_task_id, [
-			...(childrenByParent.get(edge.to_task_id) ?? []),
-			edge.from_task_id,
-		]);
-		childIds.add(edge.from_task_id);
+		if (edge.kind === "after") {
+			if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
+			childrenByParent.set(edge.to_task_id, [
+				...(childrenByParent.get(edge.to_task_id) ?? []),
+				edge.from_task_id,
+			]);
+			childIds.add(edge.from_task_id);
+			continue;
+		}
+		if (edge.kind === "about" || edge.kind === "repair") {
+			if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
+			contextByTarget.set(edge.to_task_id, [
+				...(contextByTarget.get(edge.to_task_id) ?? []),
+				{ taskId: edge.from_task_id, kind: edge.kind },
+			]);
+			childIds.add(edge.from_task_id);
+			continue;
+		}
+		if (edge.kind === "gate") {
+			if (!byId.has(edge.from_task_id) || !byId.has(edge.to_task_id)) continue;
+			gatesByTarget.set(edge.to_task_id, [
+				...(gatesByTarget.get(edge.to_task_id) ?? []),
+				{ taskId: edge.from_task_id, state: edge.state, members: edge.members },
+			]);
+			childIds.add(edge.from_task_id);
+		}
 	}
 	const successorBySuperseded = new Map<string, string>();
 	const successorIds = new Set<string>();
@@ -233,10 +317,15 @@ export const renderGraphInspectText = (
 	}
 	const lines: string[] = [];
 	const written = new Set<string>();
-	const writeNode = (id: string, depth: number, supersessionChild = false): void => {
+	const writeNode = (
+		id: string,
+		depth: number,
+		supersessionChild = false,
+		label: string | undefined = undefined,
+	): void => {
 		const node = byId.get(id);
 		if (node === undefined) return;
-		const prefix = supersessionChild ? "~> " : "- ";
+		const prefix = supersessionChild ? "~> " : `- ${label === undefined ? "" : `${label} `}`;
 		if (written.has(id)) {
 			lines.push(`${"  ".repeat(depth)}${prefix}↑ ${id} already shown`);
 			return;
@@ -245,6 +334,15 @@ export const renderGraphInspectText = (
 			`${"  ".repeat(depth)}${prefix}${graphTaskTitleLineColored(node, colorEnabled, homeDir)}`,
 		);
 		written.add(id);
+		for (const context of contextByTarget.get(id) ?? []) {
+			writeNode(context.taskId, depth + 1, false, context.kind);
+		}
+		for (const gate of gatesByTarget.get(id) ?? []) {
+			writeNode(gate.taskId, depth + 1, false, `gate [${gate.state}]`);
+			for (const member of gateRelevantMembers(gate)) {
+				lines.push(`${"  ".repeat(depth + 2)}- ${member.task_id} [${member.status}]`);
+			}
+		}
 		for (const childId of childrenByParent.get(id) ?? []) writeNode(childId, depth + 1);
 		const successorId = successorBySuperseded.get(id);
 		if (successorId !== undefined) writeNode(successorId, depth + 1, true);
@@ -254,6 +352,12 @@ export const renderGraphInspectText = (
 	}
 	for (const node of graph.nodes) {
 		if (!written.has(node.id)) writeNode(node.id, 0);
+	}
+	for (const marker of graph.late_growth_markers) {
+		if (lines.length === 0 || lines[lines.length - 1] !== "Allowed late branch growth:") {
+			lines.push("Allowed late branch growth:");
+		}
+		lines.push(renderLateGrowthMarker(marker));
 	}
 	return `${lines.join("\n")}\n`;
 };
@@ -277,8 +381,14 @@ export const renderBriefingText = (briefing: BriefingOutput): string => {
 			for (const blocker of task.blockers) {
 				const descNote = blocker.scope_description ? ` (${blocker.scope_description})` : "";
 				lines.push(
-					`  - blocked by ${blocker.id} [${blocker.status}] scope=${blocker.scope_id}${descNote}`,
+					`  - after blocker ${blocker.id} [${blocker.status}] scope=${blocker.scope_id}${descNote}`,
 				);
+			}
+			for (const gate of task.gates) {
+				lines.push(`  - gate ${gate.target_task_id} [${gate.state}]`);
+				for (const member of gateRelevantMembers(gate)) {
+					lines.push(`    - branch member ${member.task_id} [${member.status}]`);
+				}
 			}
 		}
 	}

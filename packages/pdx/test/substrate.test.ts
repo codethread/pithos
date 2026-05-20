@@ -2252,7 +2252,7 @@ describe("pdx substrate", () => {
 			body: "design the change",
 			bodyFile: undefined,
 			runId: "run_hitl",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		});
 		engine.claim({ runId: "run_hitl", scope: repo, capability: "design" });
@@ -4297,7 +4297,7 @@ describe("pdx substrate", () => {
 			body: "break down the feature",
 			bodyFile: undefined,
 			runId: "run_pandora_seed",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		});
 		const registry = await run(makeRegistry);
@@ -4415,7 +4415,7 @@ describe("pdx substrate", () => {
 			body: "do work",
 			bodyFile: undefined,
 			runId: "run_toil",
-			dependsOn: [],
+			after: [],
 			chain: "auto",
 		});
 		const claimed = engine.claim({ runId: "run_war", scope: repo, capability: "execute" });

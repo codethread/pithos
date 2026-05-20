@@ -6,7 +6,7 @@ import type { RunRow } from "../rows.js";
 import { withCollisionGuard, withDb } from "./db-helpers.js";
 import { event } from "./event-log.js";
 import { createRepairAlertInTxn } from "./repair-alerts.js";
-import { taskDetail, taskSummary } from "./task-read-model.js";
+import { isClaimable, taskDetail, taskGates, taskSummary } from "./task-read-model.js";
 import type { Engine, EngineContext } from "./types.js";
 
 export interface ClaimLoopDeps {
@@ -22,21 +22,13 @@ export interface ClaimLoopDeps {
 	readonly enforceCapScope: (db: Db, scopeId: string, cap: Capability) => void;
 }
 
-const claimableTaskQuery = sql`
+const queuedTaskQuery = sql`
 SELECT id
 FROM tasks t
 WHERE t.status = 'queued'
   AND t.scope_id = ?
   AND t.capability = ?
-  AND NOT EXISTS (
-	SELECT 1
-	FROM task_dependencies td
-	JOIN tasks dep ON dep.id = td.depends_on_task_id
-	WHERE td.task_id = t.id
-	  AND dep.status <> 'done'
-  )
 ORDER BY t.created_at ASC, t.id ASC
-LIMIT 1
 `;
 
 const claimRunTaskUpdate = sql`
@@ -56,7 +48,7 @@ SET status = 'claimed',
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?
   AND status = 'queued'
-RETURNING id, fencing_token, capability
+RETURNING id, fencing_token, attempts, capability
 `;
 
 export const makeClaimLoopOps = (
@@ -75,20 +67,57 @@ export const makeClaimLoopOps = (
 				const currentRun = deps.liveRun(db, actorRunId);
 				if (currentRun.task_id !== null) fail("VALIDATION_ERROR", "run already holds a task");
 
-				const candidate = db.prepare(claimableTaskQuery).get(scope, capability) as
-					| { id: string }
-					| undefined;
+				const candidates = db.prepare(queuedTaskQuery).all(scope, capability) as { id: string }[];
+				const candidate = candidates.find((row) =>
+					isClaimable(db, { id: row.id, status: "queued" }),
+				);
 				const task = candidate ?? fail("NO_CLAIMABLE_WORK", "no claimable work");
 
 				const runRow = db.prepare(claimRunTaskUpdate).run(task.id, actorRunId);
 				if (runRow.changes === 0) fail("VALIDATION_ERROR", "run already holds a task");
 
 				const updated = db.prepare(claimTaskUpdate).get(task.id) as
-					| { id: string; fencing_token: number; capability: Capability }
+					| { id: string; fencing_token: number; attempts: number; capability: Capability }
 					| undefined;
 
 				const claimedTask =
 					updated ?? fail("STALE_TOKEN_RACE", "claim candidate changed before update");
+				for (const gate of taskGates(db, claimedTask.id)) {
+					db.prepare(sql`
+						INSERT INTO task_gate_releases(task_id,target_task_id,attempt,fencing_token,released_by_run_id)
+						VALUES (?,?,?,?,?)
+					`).run(
+						claimedTask.id,
+						gate.target_task_id,
+						claimedTask.attempts,
+						claimedTask.fencing_token,
+						actorRunId,
+					);
+					for (const member of gate.members) {
+						db.prepare(sql`
+							INSERT INTO task_gate_release_members(task_id,target_task_id,attempt,member_task_id,canonical_task_id,status_at_release)
+							VALUES (?,?,?,?,?,?)
+						`).run(
+							claimedTask.id,
+							gate.target_task_id,
+							claimedTask.attempts,
+							member.task_id,
+							member.canonical_task_id,
+							member.status,
+						);
+					}
+					event(ctx, db, "task.gate_released", {
+						task_id: claimedTask.id,
+						actor_run_id: actorRunId,
+						payload: {
+							target_task_id: gate.target_task_id,
+							attempt: claimedTask.attempts,
+							fencing_token: claimedTask.fencing_token,
+							release_run_id: actorRunId,
+							release_member_task_ids: gate.members.map((member) => member.task_id),
+						},
+					});
+				}
 				event(ctx, db, "task.claimed", {
 					task_id: claimedTask.id,
 					actor_run_id: actorRunId,

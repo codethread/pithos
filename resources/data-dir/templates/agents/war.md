@@ -22,7 +22,7 @@ Claim one execute task and perform the requested implementation work in the prov
 ## Required flow
 
 1. Claim exactly one execute task.
-2. Inspect the task before modifying anything; read the Markdown handoff, nearest history, design/triage artifacts, dependencies, and unlocks.
+2. Inspect the task before modifying anything; read the Markdown handoff, nearest history, design/triage artifacts, `after` blockers, gates, and unlocks.
 3. Perform the implementation work in `cwd`.
 4. Run checks that are relevant to the touched area.
 5. Attach a `war-completion` artifact summarizing changes and validation.

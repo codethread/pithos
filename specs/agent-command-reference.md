@@ -1,7 +1,7 @@
 # Agent Command Reference Rendering
 
 **Status:** Implemented
-**Last Updated:** 2026-05-16
+**Last Updated:** 2026-05-20
 
 ## 1. Overview
 
@@ -91,16 +91,14 @@ Usage:
 ```sh
 pithos task inspect [--json] <task-id>
 ```
-````
 
 Notes:
 
 - Default output is readable Markdown and should be your normal context.
 - Use `--json` only for exact fields, scripting, or token recovery.
+````
 
-```
-
-Pandora's `pithos graph inspect` annotations summarize the implemented graph contract: graph inspect is for inventory/provenance/audit, briefing is for ready/blocked agenda, filters narrow seeds before closure, readable output is normal, JSON is for exact fields/source edges, and scope graph views avoid reverse `repair_source` expansion into global Repair Alerts.
+Pandora's `pithos graph inspect` annotations summarize the implemented graph contract: graph inspect is for inventory/provenance/audit, briefing is for ready/blocked agenda, filters narrow seeds before closure, readable output is normal, JSON is for exact typed-edge fields, and scope graph views include attached global `about`/`repair`/checkpoint context when closure reaches it.
 
 ## 6. Template and Preview Interface
 
@@ -115,4 +113,7 @@ Pandora's `pithos graph inspect` annotations summarize the implemented graph con
 - `resources/README.md` — template variable and extension contract
 - `packages/pithos/src/cli.ts` — Pithos help JSON source
 - `packages/pdx/src/main.ts` — pdx help JSON source
+
+```
+
 ```

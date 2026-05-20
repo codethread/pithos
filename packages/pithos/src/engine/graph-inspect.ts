@@ -2,8 +2,11 @@ import type { Db } from "../db.js";
 import { sql, type TaskStatus } from "../db.js";
 import { fail } from "../errors.js";
 import {
+	canonicalTaskId,
+	gateStateForTarget,
 	isClaimable,
-	taskSourceEdge,
+	taskEdges,
+	taskGateLateGrowthMarkers,
 	taskSourceEdges,
 	taskSummary,
 	unresolvedDependencies,
@@ -123,40 +126,28 @@ const graphForIds = (
 	let changed = true;
 	while (changed) {
 		changed = false;
-		for (const row of db
-			.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`)
-			.all() as { task_id: string; depends_on_task_id: string }[]) {
-			if (ids.has(row.task_id) || ids.has(row.depends_on_task_id)) {
+		for (const row of taskEdges(db).filter(
+			(edge) => edge.kind === "after" || edge.kind === "about" || edge.kind === "repair",
+		)) {
+			if (ids.has(row.task_id) || ids.has(row.target_task_id)) {
 				if (!ids.has(row.task_id)) {
 					ids.add(row.task_id);
 					changed = true;
 				}
-				if (!ids.has(row.depends_on_task_id)) {
-					ids.add(row.depends_on_task_id);
+				if (!ids.has(row.target_task_id)) {
+					ids.add(row.target_task_id);
 					changed = true;
 				}
 			}
 		}
-		for (const row of taskSourceEdges(db)) {
-			if (row.kind === "repair_source" && selector.kind === "scope") {
-				// For scope-based graphs, repair_source expansion is one-directional:
-				// follow alert → affected task, but not the reverse. This prevents
-				// global Repair Alert tasks from leaking into scoped (repo/worktree)
-				// graph views just because a failed task in that scope is in the
-				// seed set. For task-by-ID graphs the bidirectional path below is
-				// intentional so the repair alert is visible when inspecting the
-				// affected task directly.
-				if (ids.has(row.task_id) && !ids.has(row.source_task_id)) {
-					ids.add(row.source_task_id);
-					changed = true;
-				}
-			} else if (ids.has(row.task_id) || ids.has(row.source_task_id)) {
+		for (const row of taskEdges(db).filter((edge) => edge.kind === "gate")) {
+			if (ids.has(row.task_id) || ids.has(row.target_task_id)) {
 				if (!ids.has(row.task_id)) {
 					ids.add(row.task_id);
 					changed = true;
 				}
-				if (!ids.has(row.source_task_id)) {
-					ids.add(row.source_task_id);
+				if (!ids.has(row.target_task_id)) {
+					ids.add(row.target_task_id);
 					changed = true;
 				}
 			}
@@ -203,35 +194,35 @@ const graphForIds = (
 					.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id=?`)
 					.pluck()
 					.get(task.id) as string | undefined) ?? null,
-			source_task_id: taskSourceEdge(db, task.id)?.source_task_id ?? null,
-			source_kind: taskSourceEdge(db, task.id)?.kind ?? null,
 		}));
 	const edges = [
-		...(
-			db.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`).all() as {
-				task_id: string;
-				depends_on_task_id: string;
-			}[]
-		)
-			.filter((e) => ids.has(e.task_id) && ids.has(e.depends_on_task_id))
+		...taskEdges(db)
+			.filter((e) => e.kind === "after" && ids.has(e.task_id) && ids.has(e.target_task_id))
 			.map((e) => ({
-				kind: "depends_on" as const,
+				kind: "after" as const,
 				from_task_id: e.task_id,
-				to_task_id: e.depends_on_task_id,
-				satisfied:
-					(db
-						.prepare(sql`SELECT status FROM tasks WHERE id=?`)
-						.pluck()
-						.get(e.depends_on_task_id) as string) === "done",
+				to_task_id: e.target_task_id,
+				satisfied: taskSummary(db, canonicalTaskId(db, e.target_task_id)).status === "done",
 			})),
 		...taskSourceEdges(db)
 			.filter((e) => ids.has(e.task_id) && ids.has(e.source_task_id))
 			.map((e) => ({
-				kind: "source" as const,
+				kind: e.kind,
 				from_task_id: e.task_id,
 				to_task_id: e.source_task_id,
-				source_kind: e.kind,
 			})),
+		...taskEdges(db)
+			.filter((e) => e.kind === "gate" && ids.has(e.task_id) && ids.has(e.target_task_id))
+			.map((e) => {
+				const state = gateStateForTarget(db, e.target_task_id);
+				return {
+					kind: "gate" as const,
+					from_task_id: e.task_id,
+					to_task_id: e.target_task_id,
+					state: state.state,
+					members: state.members,
+				};
+			}),
 		...(
 			db.prepare(sql`SELECT old_task_id, new_task_id FROM task_supersessions`).all() as {
 				old_task_id: string;
@@ -250,7 +241,19 @@ const graphForIds = (
 			a.from_task_id.localeCompare(b.from_task_id) ||
 			a.to_task_id.localeCompare(b.to_task_id),
 	);
-	return { ok: true as const, graph: { selector, nodes, edges } };
+	const lateGrowthMarkers = taskGateLateGrowthMarkers(db).filter(
+		(marker) =>
+			ids.has(marker.gate_task_id) ||
+			ids.has(marker.gate_target_task_id) ||
+			(marker.mutation_kind === "edge_inserted" &&
+				(ids.has(marker.edge_task_id) || ids.has(marker.edge_target_task_id))) ||
+			(marker.mutation_kind === "supersession" &&
+				(ids.has(marker.superseded_task_id) || ids.has(marker.replacement_task_id))),
+	);
+	return {
+		ok: true as const,
+		graph: { selector, nodes, edges, late_growth_markers: lateGrowthMarkers },
+	};
 };
 
 export const inspectGraph = (

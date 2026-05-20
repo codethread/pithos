@@ -74,6 +74,53 @@ export const REPAIR_ALERT_KINDS = [
 export const RepairAlertKindSchema = Schema.Literal(...REPAIR_ALERT_KINDS);
 export type RepairAlertKind = typeof RepairAlertKindSchema.Type;
 
+export const TaskEdgeKindSchema = Schema.Literal("after", "gate", "about", "repair");
+export type TaskEdgeKind = typeof TaskEdgeKindSchema.Type;
+
+export const TaskEdgeRowSchema = Schema.Struct({
+	task_id: NonEmptyString,
+	target_task_id: NonEmptyString,
+	kind: TaskEdgeKindSchema,
+	created_by_run_id: NonEmptyString,
+	created_at: NonEmptyString,
+});
+export type TaskEdgeRow = typeof TaskEdgeRowSchema.Type;
+
+const TaskGateLateGrowthMarkerBaseRowSchema = Schema.Struct({
+	id: NonEmptyString,
+	gate_task_id: NonEmptyString,
+	gate_target_task_id: NonEmptyString,
+	gate_attempt: Schema.Number,
+	created_by_run_id: NonEmptyString,
+	created_at: NonEmptyString,
+});
+
+export const TaskGateLateGrowthMarkerRowSchema = Schema.Union(
+	Schema.extend(
+		TaskGateLateGrowthMarkerBaseRowSchema,
+		Schema.Struct({
+			mutation_kind: Schema.Literal("edge_inserted"),
+			edge_task_id: NonEmptyString,
+			edge_target_task_id: NonEmptyString,
+			edge_kind: Schema.Literal("after", "about", "repair"),
+			superseded_task_id: Schema.Null,
+			replacement_task_id: Schema.Null,
+		}),
+	),
+	Schema.extend(
+		TaskGateLateGrowthMarkerBaseRowSchema,
+		Schema.Struct({
+			mutation_kind: Schema.Literal("supersession"),
+			edge_task_id: Schema.Null,
+			edge_target_task_id: Schema.Null,
+			edge_kind: Schema.Null,
+			superseded_task_id: NonEmptyString,
+			replacement_task_id: NonEmptyString,
+		}),
+	),
+);
+export type TaskGateLateGrowthMarkerRow = typeof TaskGateLateGrowthMarkerRowSchema.Type;
+
 export type RunRow = typeof RunRowSchema.Type;
 export type TaskRow = typeof TaskRowSchema.Type;
 export type ScopeRow = typeof ScopeRowSchema.Type;

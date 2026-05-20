@@ -11,8 +11,8 @@
 - Global scope is for escalations or genuinely cross-project/unknown routing. Repo and worktree scopes are for project-local work; execution tasks must target one of those filesystem-backed scopes.
 - Creating or reactivating a repo/worktree scope records the path in Pithos; if the target directory does not exist yet, create it first with filesystem commands, then upsert the scope and use the returned scope id.
 - Pithos stores the full task graph; agents usually work the task chain reconstructed from it.
-- A task chain is the inspectable history the user will review later: dependencies, source links, supersessions, artifacts, runs, and events together explain what happened.
-- Dependencies gate claimability; source links are non-blocking provenance.
+- A task chain is the inspectable history the user will review later: typed task edges, supersessions, artifacts, runs, and events together explain what happened.
+- Typed edges are `after` (direct prerequisite), `gate` (wait for a target branch to drain), `about` (immediate Pandora context), and `repair` (system-authored broken-work alert).
 - For any Pithos command using `--stdin`, send exactly one stdin document; prefer quoted heredocs (`<<'EOF'`) and do not stage temp files solely for payload upload.
 - Queue capabilities are `triage`, `design`, `execute`, `review`, and `escalate`; only enqueue capabilities listed in your launch context.
 - Escalation is a normal global-scope task claimed by Pandora.
@@ -28,7 +28,7 @@ After claiming, inspect the held task:
 pithos task inspect <task-id>
 ```
 
-`task inspect` renders a Markdown handoff by default: current task, nearest upstream history, nested artifacts, direct dependencies, and compact unlocks. Use this readable view as your normal working context. Use `task inspect <task-id> --json` only when you need the full structured object for exact fields, scripting, or a lost fencing token.
+`task inspect` renders a Markdown handoff by default: current task, nearest upstream history, nested artifacts, direct `after` blockers, coordination gates, and compact unlocks. Use this readable view as your normal working context. Use `task inspect <task-id> --json` only when you need the full structured object for exact fields, scripting, or a lost fencing token.
 
 Attach an artifact with a stdin body:
 
@@ -58,10 +58,10 @@ pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <
 EOF
 ```
 
-Enqueue with `--chain none` (manual chaining):
+Enqueue with `--chain none` (manual edges):
 
 ```sh
-pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <capability-from-your-enqueues> --title '<title>' --stdin --chain none [--depends-on <task-id>] <<'EOF'
+pithos task enqueue --run $PITHOS_RUN_ID --scope $PITHOS_SCOPE_ID --capability <capability-from-your-enqueues> --title '<title>' --stdin --chain none [--after <task-id>] [--gate-on <task-id>] <<'EOF'
 <task body>
 EOF
 ```

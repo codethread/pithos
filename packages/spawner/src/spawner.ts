@@ -256,13 +256,13 @@ const PITHOS_COMMAND_ANNOTATIONS: Readonly<Record<string, readonly string[]>> = 
 		"Run `pithos briefing --agent pandora` before broad graph interrogation for sitrep.",
 	],
 	"pithos graph inspect": [
-		"Use for task inventory, dependency shape, provenance, audit questions, and drill-down task ids.",
+		"Use for task inventory, edge/gate shape, provenance, audit questions, and drill-down task ids.",
 		"`--task`, `--scope`, and `--all` are mutually exclusive selectors.",
 		"Repeat `--status` to OR literal task statuses; repeat `--search` to AND terms over task title/body only.",
 		"`--since` accepts `today`, `<n>h`, `<n>d`, `YYYY-MM-DD`, and ISO timestamps with timezone.",
-		"Filters narrow seed selection before graph closure; closure may include related non-matching tasks so blockers, provenance, and supersessions remain understandable.",
-		"Readable output is the normal agent surface; use `--json` for source edges, exact fields, or scripting.",
-		"Scope graph views do not pull global Repair Alerts into repo/worktree views through reverse `repair_source` closure; inspect a named task or use `--all` when that provenance matters.",
+		"Filters narrow seed selection before graph closure; closure may include related non-matching tasks so blockers, attached context, gates, and supersessions remain understandable.",
+		"Readable output is the normal agent surface; use `--json` for typed-edge details, exact fields, or scripting.",
+		"Scope graph views can include global `about`/`repair`/checkpoint context attached to selected scoped work.",
 	],
 };
 

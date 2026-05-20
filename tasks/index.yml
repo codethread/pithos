@@ -22,35 +22,35 @@ tasks:
   - id: 5
     description: Port graph storage to typed edges
     task_file: tasks/005-port-graph-storage-to-typed-edges.md
-    status: pending
+    status: complete
     blocked_by: []
   - id: 6
     description: Expose typed edge enqueue surface
     task_file: tasks/006-expose-typed-edge-enqueue-surface.md
-    status: pending
+    status: complete
     blocked_by: [5]
   - id: 7
     description: Add dynamic gate claimability
     task_file: tasks/007-add-dynamic-gate-claimability.md
-    status: pending
+    status: complete
     blocked_by: [5, 6]
   - id: 8
     description: Enforce released gate protection
     task_file: tasks/008-enforce-released-gate-protection.md
-    status: pending
+    status: complete
     blocked_by: [7]
   - id: 9
     description: Render typed edge graph context
     task_file: tasks/009-render-typed-edge-graph-context.md
-    status: pending
+    status: complete
     blocked_by: [7, 8]
   - id: 10
     description: Fold typed edges into docs
     task_file: tasks/010-fold-typed-edges-into-docs.md
-    status: pending
+    status: complete
     blocked_by: [5, 6, 7, 8, 9]
   - id: 11
     description: Verify typed edge integration
     task_file: tasks/011-verify-typed-edge-integration.md
-    status: pending
+    status: complete
     blocked_by: [10]

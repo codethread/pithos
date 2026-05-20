@@ -11,6 +11,7 @@ import {
 } from "../rows.js";
 import { withCollisionGuard, withDb } from "./db-helpers.js";
 import { event } from "./event-log.js";
+import { enforceReleasedGateLateGrowth } from "./late-growth.js";
 import { insertTaskSource, taskSummary } from "./task-read-model.js";
 import {
 	PDX_SYSTEM_RUN_ID,
@@ -79,10 +80,12 @@ export const createRepairAlertInTxn = (
 				scope_id: "global",
 				capability: "escalate",
 				title: input.escalationTitle,
-				depends_on_task_ids: [],
-				...(input.affectedTaskId !== undefined
-					? { source_task_id: input.affectedTaskId, source_kind: "repair_source" }
-					: {}),
+				edges: {
+					after: [],
+					about: [],
+					repair: input.affectedTaskId !== undefined ? [input.affectedTaskId] : [],
+					gate: [],
+				},
 			},
 		});
 	});
@@ -118,6 +121,12 @@ const createRepairAlertTask = (
 			insertRepairAlert(db, escalationId, input.kind);
 			if (affectedTask !== undefined) {
 				insertTaskSource(db, escalationId, affectedTask.id, input.actorRunId, "repair_source");
+				enforceReleasedGateLateGrowth(ctx, db, input.actorRunId, affectedTask.id, {
+					kind: "edge_inserted",
+					edgeTaskId: escalationId,
+					edgeTargetTaskId: affectedTask.id,
+					edgeKind: "repair",
+				});
 			}
 			event(ctx, db, "task.created", {
 				task_id: escalationId,
@@ -126,10 +135,12 @@ const createRepairAlertTask = (
 					scope_id: "global",
 					capability: "escalate",
 					title,
-					depends_on_task_ids: [],
-					...(affectedTask !== undefined
-						? { source_task_id: affectedTask.id, source_kind: "repair_source" }
-						: {}),
+					edges: {
+						after: [],
+						about: [],
+						repair: affectedTask !== undefined ? [affectedTask.id] : [],
+						gate: [],
+					},
 				},
 			});
 			return {
@@ -140,7 +151,7 @@ const createRepairAlertTask = (
 					scope_id: "global" as const,
 					capability: "escalate" as const,
 					source_task_id: affectedTask?.id ?? null,
-					source_kind: affectedTask !== undefined ? ("repair_source" as const) : null,
+					source_kind: affectedTask !== undefined ? ("repair" as const) : null,
 					kind: input.kind,
 				},
 			};
@@ -218,6 +229,12 @@ export const makeRepairAlertOps = (
 						sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
 					).run(escalationId, "global", "escalate", title, bodyText, actorRunId);
 					insertTaskSource(db, escalationId, expectedTaskId, actorRunId, "repair_source");
+					enforceReleasedGateLateGrowth(ctx, db, actorRunId, expectedTaskId, {
+						kind: "edge_inserted",
+						edgeTaskId: escalationId,
+						edgeTargetTaskId: expectedTaskId,
+						edgeKind: "repair",
+					});
 					insertRepairAlert(db, escalationId, "launch_precondition");
 					event(ctx, db, "task.cancelled", {
 						task_id: expectedTaskId,
@@ -229,7 +246,7 @@ export const makeRepairAlertOps = (
 							canonical_path: expectedPath,
 							agent_kind: agentKind,
 							escalation_task_id: escalationId,
-							source_kind: "repair_source",
+							source_kind: "repair",
 						},
 					});
 					event(ctx, db, "task.created", {
@@ -239,9 +256,9 @@ export const makeRepairAlertOps = (
 							scope_id: "global",
 							capability: "escalate",
 							title,
-							depends_on_task_ids: [],
+							edges: { after: [], about: [], repair: [expectedTaskId], gate: [] },
 							source_task_id: expectedTaskId,
-							source_kind: "repair_source",
+							source_kind: "repair",
 							reason: nonEmptyReason,
 							launch_precondition: {
 								task_id: expectedTaskId,
@@ -261,7 +278,7 @@ export const makeRepairAlertOps = (
 							scope_id: "global" as const,
 							capability: "escalate" as const,
 							source_task_id: expectedTaskId,
-							source_kind: "repair_source" as const,
+							source_kind: "repair" as const,
 						},
 					};
 				})(),
@@ -289,9 +306,9 @@ export const makeRepairAlertOps = (
 					  AND t.scope_id = 'global'
 					  AND t.capability = 'escalate'
 					  AND NOT EXISTS (
-					    SELECT 1 FROM task_dependencies td
-					    JOIN tasks dep ON dep.id = td.depends_on_task_id
-					    WHERE td.task_id = t.id AND dep.status <> 'done'
+					    SELECT 1 FROM task_edges te
+					    JOIN tasks dep ON dep.id = te.target_task_id
+					    WHERE te.task_id = t.id AND te.kind = 'after' AND dep.status <> 'done'
 					  )
 				`,
 				)

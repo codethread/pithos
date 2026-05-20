@@ -113,7 +113,7 @@ describe("chain policy resolver", () => {
 		});
 	});
 
-	it("routes ordinary auto follow-up from held escalation to its source", () => {
+	it("routes ordinary auto follow-up from held about escalation after the escalation", () => {
 		expect(
 			resolveChainPolicy({
 				policy: "auto",
@@ -122,8 +122,8 @@ describe("chain policy resolver", () => {
 				heldSource: { taskId: "source", kind: "chain_source" },
 			}),
 		).toMatchObject({
-			applied: "depends_on_source",
-			implicitDependencyIds: ["source"],
+			applied: "depends_on_held_escalation",
+			implicitDependencyIds: ["esc"],
 			sourceTaskId: "source",
 		});
 	});
@@ -138,7 +138,7 @@ describe("chain policy resolver", () => {
 					heldTask: escalation,
 					heldSource: { taskId: "source", kind: "repair_source" },
 				}),
-			"--chain auto cannot continue from repair_source; supersede or replan the source task instead",
+			"--chain auto cannot continue from repair edge; supersede, replan, or cancel the repaired task instead",
 		);
 	});
 
@@ -214,57 +214,6 @@ describe("chain policy resolver", () => {
 					heldSource: null,
 				}),
 			"--chain held cannot be used when enqueueing escalation tasks",
-		);
-	});
-
-	it("source succeeds only with held source and non-escalate follow-up", () => {
-		expect(
-			resolveChainPolicy({
-				policy: "source",
-				newTaskCapability: "triage",
-				heldTask: escalation,
-				heldSource: { taskId: "source", kind: "chain_source" },
-			}).implicitDependencyIds,
-		).toEqual(["source"]);
-		expectValidationError(
-			() =>
-				resolveChainPolicy({
-					policy: "source",
-					newTaskCapability: "execute",
-					heldTask: null,
-					heldSource: { taskId: "source", kind: "chain_source" },
-				}),
-			"--chain source requires a held task",
-		);
-		expectValidationError(
-			() =>
-				resolveChainPolicy({
-					policy: "source",
-					newTaskCapability: "execute",
-					heldTask: escalation,
-					heldSource: null,
-				}),
-			"--chain source requires the held task to have a source link",
-		);
-		expectValidationError(
-			() =>
-				resolveChainPolicy({
-					policy: "source",
-					newTaskCapability: "execute",
-					heldTask: escalation,
-					heldSource: { taskId: "source", kind: "repair_source" },
-				}),
-			"--chain source requires a chain_source; repair_source must be superseded or replanned",
-		);
-		expectValidationError(
-			() =>
-				resolveChainPolicy({
-					policy: "source",
-					newTaskCapability: "escalate",
-					heldTask: escalation,
-					heldSource: { taskId: "source", kind: "chain_source" },
-				}),
-			"--chain source cannot be used when enqueueing escalation tasks",
 		);
 	});
 });

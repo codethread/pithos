@@ -68,7 +68,10 @@ type CommandInput =
 			readonly title: string;
 			readonly stdin: boolean;
 			readonly runId: string | undefined;
-			readonly dependsOn: readonly string[];
+			readonly after: readonly string[];
+			readonly gate: readonly string[];
+			readonly about: string | undefined;
+			readonly repair: string | undefined;
 			readonly chain: string;
 	  }
 	| {
@@ -532,19 +535,17 @@ const stdinFlag = Options.boolean("stdin").pipe(
 	Options.withDescription("Read the task or artifact body from stdin."),
 );
 const chainOption = Options.text("chain").pipe(
-	Options.withDescription(
-		"Task chaining policy: auto (default), none (manual-only), or advanced fail-loud held/source.",
-	),
+	Options.withDescription("Task chaining policy: auto (default), none (manual-only), or held."),
 	Options.withDefault("auto"),
 );
 
 const parseChainPolicy = (value: string): ChainPolicy => {
-	if ((["auto", "none", "held", "source"] as const).includes(value as ChainPolicy)) {
+	if ((["auto", "none", "held"] as const).includes(value as ChainPolicy)) {
 		return value as ChainPolicy;
 	}
 	throw new PithosError({
 		code: "VALIDATION_ERROR",
-		message: `Invalid --chain value: '${value}'. Valid values: auto, none, held, source`,
+		message: `Invalid --chain value: '${value}'. Valid values: auto, none, held`,
 	});
 };
 
@@ -738,11 +739,25 @@ export const makePithosCommand = (ctx: CliContext) => {
 			),
 			stdin: stdinFlag,
 			runId: runIdOption.pipe(Options.optional),
-			dependsOn: Options.text("depends-on").pipe(
+			after: Options.text("after").pipe(
 				Options.withDescription(
 					"Upstream task id that must be done before this task is claimable; repeatable.",
 				),
 				Options.repeated,
+			),
+			about: Options.text("about").pipe(
+				Options.withDescription("Singular branch-attention task id this task is about."),
+				Options.optional,
+			),
+			gate: Options.text("gate-on").pipe(
+				Options.withDescription(
+					"Target task id whose canonical branch closure must drain before this task is claimable; repeatable.",
+				),
+				Options.repeated,
+			),
+			repair: Options.text("repair").pipe(
+				Options.withDescription("System-only Repair Alert target task id."),
+				Options.optional,
 			),
 			chain: chainOption,
 		},
@@ -754,12 +769,15 @@ export const makePithosCommand = (ctx: CliContext) => {
 				title: o.title,
 				stdin: o.stdin,
 				runId: opt(o.runId),
-				dependsOn: o.dependsOn,
+				after: o.after,
+				gate: o.gate,
+				about: opt(o.about),
+				repair: opt(o.repair),
 				chain: o.chain,
 			}),
 	).pipe(
 		Command.withDescription(
-			"Queue a durable task; --chain auto preserves held-task chains, while source links remain non-blocking provenance.",
+			"Queue a durable task with typed edges; --chain auto preserves held-task chains.",
 		),
 	);
 	const taskClaim = Command.make(
@@ -990,13 +1008,11 @@ export const makePithosCommand = (ctx: CliContext) => {
 			}),
 	).pipe(
 		Command.withDescription(
-			"Render a readable task graph with dependencies, source links, and supersessions; pass --json for structured metadata.",
+			"Render a readable task graph with typed edges, gates, and supersessions; pass --json for structured metadata.",
 		),
 	);
 	const graph = Command.make("graph").pipe(
-		Command.withDescription(
-			"Inspect Pithos task dependency, source-link, and supersession graphs.",
-		),
+		Command.withDescription("Inspect Pithos task typed-edge and supersession graphs."),
 		Command.withSubcommands([graphInspect]),
 	);
 	const briefing = Command.make(

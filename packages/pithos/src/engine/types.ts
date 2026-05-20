@@ -1,7 +1,15 @@
 import type { ChainPolicy, ChainPolicyDecision } from "../chain-policy.js";
 import type { Config } from "../config.js";
-import type { Capability, HarnessKind, Mode, ScopeKind, SourceKind, TaskStatus } from "../db.js";
-import type { RepairAlertKind } from "../rows.js";
+import type {
+	Capability,
+	EdgeKind,
+	HarnessKind,
+	Mode,
+	ScopeKind,
+	SourceKind,
+	TaskStatus,
+} from "../db.js";
+import type { RepairAlertKind, TaskGateLateGrowthMarkerRow } from "../rows.js";
 import type { Services } from "../services.js";
 
 export const PDX_SYSTEM_RUN_ID = "run_pdx_system";
@@ -90,7 +98,10 @@ export interface Engine {
 		readonly body: string | undefined;
 		readonly bodyFile: string | undefined;
 		readonly runId: string | undefined;
-		readonly dependsOn: readonly string[];
+		readonly after: readonly string[];
+		readonly gate?: readonly string[] | undefined;
+		readonly about?: string | undefined;
+		readonly repair?: string | undefined;
 		readonly chain: ChainPolicy;
 	}) => EnqueueOutput;
 	readonly claim: (input: {
@@ -212,10 +223,25 @@ export interface TaskDetailOutput extends TaskSummaryOutput {
 	readonly max_attempts: number;
 }
 
+export type GateState = "clear" | "open" | "broken";
+
+export interface GateInspectOutput {
+	readonly target_task_id: string;
+	readonly state: GateState;
+	readonly members: readonly {
+		readonly task_id: string;
+		readonly canonical_task_id: string;
+		readonly status: TaskStatus;
+	}[];
+}
+
 export interface TaskInspectTaskOutput extends TaskDetailOutput {
 	readonly claimable: boolean;
 	readonly unresolved_dependency_ids: readonly string[];
+	readonly gates: readonly GateInspectOutput[];
 }
+
+export type LateGrowthMarkerOutput = TaskGateLateGrowthMarkerRow;
 
 export interface LineageEntryOutput {
 	readonly depth: number;
@@ -227,7 +253,7 @@ export interface LineageEntryOutput {
 }
 
 export interface TaskSourceSummaryOutput extends TaskSummaryOutput {
-	readonly source_kind: SourceKind;
+	readonly source_kind: Extract<EdgeKind, "about" | "repair">;
 }
 
 export interface TaskInspectOutput {
@@ -236,11 +262,13 @@ export interface TaskInspectOutput {
 	readonly dependencies: readonly TaskDetailOutput[];
 	readonly dependents: readonly TaskDetailOutput[];
 	readonly source: TaskSourceSummaryOutput | null;
+	readonly attached_context: readonly TaskSourceSummaryOutput[];
 	readonly lineage: readonly LineageEntryOutput[];
 	readonly supersedes: string | null;
 	readonly superseded_by: string | null;
 	readonly artifacts: readonly ArtifactOutput[];
 	readonly repair_alert_kind: RepairAlertKind | null;
+	readonly late_growth_markers: readonly LateGrowthMarkerOutput[];
 }
 
 export interface ArtifactOutput {
@@ -261,22 +289,26 @@ export interface GraphNodeOutput extends TaskSummaryOutput {
 	readonly unresolved_dependency_ids: readonly string[];
 	readonly supersedes_task_id: string | null;
 	readonly superseded_by_task_id: string | null;
-	readonly source_task_id: string | null;
-	readonly source_kind: SourceKind | null;
 }
 
 export type GraphEdgeOutput =
 	| {
-			readonly kind: "depends_on";
+			readonly kind: "after";
 			readonly from_task_id: string;
 			readonly to_task_id: string;
 			readonly satisfied: boolean;
 	  }
 	| {
-			readonly kind: "source";
+			readonly kind: Extract<EdgeKind, "about" | "repair">;
 			readonly from_task_id: string;
 			readonly to_task_id: string;
-			readonly source_kind: SourceKind;
+	  }
+	| {
+			readonly kind: "gate";
+			readonly from_task_id: string;
+			readonly to_task_id: string;
+			readonly state: GateState;
+			readonly members: GateInspectOutput["members"];
 	  }
 	| {
 			readonly kind: "supersedes";
@@ -290,6 +322,7 @@ export interface GraphInspectOutput {
 		readonly selector: GraphSelectorOutput;
 		readonly nodes: readonly GraphNodeOutput[];
 		readonly edges: readonly GraphEdgeOutput[];
+		readonly late_growth_markers: readonly LateGrowthMarkerOutput[];
 	};
 }
 
@@ -303,6 +336,7 @@ export interface BlockerOutput {
 export interface BlockedTaskOutput extends TaskSummaryOutput {
 	readonly unresolved_dependency_ids: readonly string[];
 	readonly blockers: readonly BlockerOutput[];
+	readonly gates: readonly GateInspectOutput[];
 }
 
 export interface BriefingOutput {
@@ -352,7 +386,7 @@ export interface LaunchPreconditionEscalationOutput {
 		readonly scope_id: "global";
 		readonly capability: "escalate";
 		readonly source_task_id: string;
-		readonly source_kind: "repair_source";
+		readonly source_kind: "repair";
 	};
 }
 
@@ -364,7 +398,7 @@ export interface RepairAlertOutput {
 		readonly scope_id: "global";
 		readonly capability: "escalate";
 		readonly source_task_id: string | null;
-		readonly source_kind: "repair_source" | null;
+		readonly source_kind: "repair" | null;
 		readonly kind: RepairAlertKind;
 	};
 }

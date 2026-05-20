@@ -1,0 +1,40 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`engine render helpers > snapshots typed-edge graph display variations 1`] = `
+"## plain after chain
+- task_a [execute] [queued] (~) A
+  - task_b [execute] [blocked] (~) B
+
+## open gate
+- task_branch [execute] [queued] (~) Branch
+  - gate [open] task_gate [escalate] [queued] (~) Checkpoint
+    - task_branch [queued]
+
+## clear gate
+- task_branch [execute] [done] (~) Branch
+  - gate [clear] task_gate [escalate] [queued] (~) Checkpoint
+
+## broken gate
+- task_branch [execute] [failed] (~) Branch
+  - gate [broken] task_gate [escalate] [queued] (~) Checkpoint
+    - task_branch [failed]
+
+## about escalation
+- task_branch [execute] [queued] (~) Branch
+  - about task_about [escalate] [queued] Needs attention
+
+## repair alert
+- task_branch [execute] [failed] (~) Branch
+  - repair task_repair [escalate] [queued] Repair
+
+## supersession
+- task_old [execute] [cancelled] (~) Old
+  ~> task_new [execute] [queued] (~) New
+
+## allowed late growth
+- task_branch [execute] [done] (~) Branch
+  - gate [clear] task_gate [execute] [done] (~) Checkpoint
+Allowed late branch growth:
+- marker_1: allowed late after edge task_late -> task_branch after gate task_gate -> task_branch attempt 1
+"
+`;

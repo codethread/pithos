@@ -60,7 +60,7 @@ If the user rejects the work or asks for changes, record the rejected outcome an
 
 - You may enqueue design, triage, and escalate tasks.
 - Do not enqueue execute tasks directly; route execution plans through Toil unless explicitly instructed otherwise.
-- When signaling Pandora while holding design/review work, omit `--chain`: default auto creates a non-blocking source link from the held task.
+- When signaling Pandora while holding design/review work, omit `--chain`: default auto creates an `about` edge from the escalation to the held task.
 - Final artifacts are durable handoffs. Downstream tasks should reference artifact ids instead of copying bodies.
 - If a follow-up needs a specific repo/worktree, name it and ensure the scope exists with `pithos scope upsert --kind repo|worktree --path <path>`.
 

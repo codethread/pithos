@@ -147,7 +147,7 @@ const taskDependencies = (dbPath: string, taskId: string): readonly string[] => 
 	try {
 		return db
 			.prepare(
-				"SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ? ORDER BY depends_on_task_id ASC",
+				"SELECT target_task_id FROM task_edges WHERE task_id = ? AND kind = 'after' ORDER BY target_task_id ASC",
 			)
 			.pluck()
 			.all(taskId) as string[];
@@ -553,7 +553,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				origin,
 			],
 			dbPath,
@@ -578,7 +578,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				ancestor,
 			],
 			dbPath,
@@ -603,7 +603,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				parent,
 			],
 			dbPath,
@@ -628,7 +628,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				current,
 			],
 			dbPath,
@@ -692,13 +692,21 @@ describe("pithos cli", () => {
 			current artifact
 			\`\`\`
 
-			Depends on:
+			Direct after dependencies:
 
 			- task_cli_N [triage] [blocked] Parent plan
 
-			Unlocks:
+			Direct after dependents:
 
 			- task_cli_N [triage] [blocked] Dependent follow-up
+
+			Coordination gates:
+
+			- none
+
+			Attached context:
+
+			- none
 			"
 		`);
 	});
@@ -723,7 +731,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				origin,
 			],
 			dbPath,
@@ -744,7 +752,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				triage,
 			],
 			dbPath,
@@ -769,7 +777,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				design,
 			],
 			dbPath,
@@ -794,7 +802,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				execute,
 			],
 			dbPath,
@@ -849,11 +857,19 @@ describe("pithos cli", () => {
 			follow-up body
 			\`\`\`
 
-			Depends on:
+			Direct after dependencies:
 
 			- task_cli_N [triage] [blocked] Execute renderer
 
-			Unlocks:
+			Direct after dependents:
+
+			- none
+
+			Coordination gates:
+
+			- none
+
+			Attached context:
 
 			- none
 			"
@@ -890,7 +906,7 @@ describe("pithos cli", () => {
 		const enqueue = async (
 			title: string,
 			capability: "triage" | "design" | "execute",
-			dependsOn: readonly string[] = [],
+			after: readonly string[] = [],
 		): Promise<string> =>
 			runCli(
 				[
@@ -907,7 +923,7 @@ describe("pithos cli", () => {
 					"run_toil_repo",
 					"--chain",
 					"none",
-					...dependsOn.flatMap((id) => ["--depends-on", id]),
+					...after.flatMap((id) => ["--after", id]),
 				],
 				dbPath,
 				{ _tag: "RedirectedText", text: `${title} body` },
@@ -952,7 +968,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				ready,
 			],
 			dbPath,
@@ -1027,7 +1043,7 @@ describe("pithos cli", () => {
 
 			## Blocked
 			- task_cli_N [triage] [blocked] Blocked triage
-			  - blocked by task_cli_N [queued] scope=global
+			  - after blocker task_cli_N [queued] scope=global
 
 			## Recently Completed
 			- none
@@ -1545,7 +1561,7 @@ describe("pithos cli", () => {
 				"run_toil",
 				"--chain",
 				"none",
-				"--depends-on",
+				"--after",
 				blocker,
 			],
 			dbPath,
@@ -1589,15 +1605,15 @@ describe("pithos cli", () => {
 			ok: false,
 			error: {
 				code: "VALIDATION_ERROR",
-				message: "Invalid --chain value: 'bogus'. Valid values: auto, none, held, source",
+				message: "Invalid --chain value: 'bogus'. Valid values: auto, none, held",
 			},
 		});
 		expect(result.exitCode).toBe(2);
 		expect(result.configRead).toBe(false);
 	});
 
-	it("accepts held and source modes and fails loudly without a held task", async () => {
-		for (const chain of ["held", "source"] as const) {
+	it("accepts held mode and rejects source mode", async () => {
+		for (const chain of ["held"] as const) {
 			const dbPath = tempDb();
 			await runCli(["init", "--fresh"], dbPath);
 			await upsertRun(dbPath, "run_toil");
@@ -1626,6 +1642,31 @@ describe("pithos cli", () => {
 			});
 			expect(result.exitCode).toBe(2);
 		}
+		const source = await runCli(
+			[
+				"task",
+				"enqueue",
+				"--scope",
+				"global",
+				"--capability",
+				"triage",
+				"--title",
+				"source chain",
+				"--stdin",
+				"--chain",
+				"source",
+			],
+			tempDb(),
+			{ _tag: "RedirectedText", text: "body" },
+		);
+		expect(JSON.parse(source.stderr[0] ?? "")).toEqual({
+			ok: false,
+			error: {
+				code: "VALIDATION_ERROR",
+				message: "Invalid --chain value: 'source'. Valid values: auto, none, held",
+			},
+		});
+		expect(source.exitCode).toBe(2);
 	});
 
 	it("returns validation JSON when enqueue omits --stdin", async () => {

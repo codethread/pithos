@@ -13,6 +13,7 @@ export type Db = Database.Database;
 export type ScopeKind = "global" | "repo" | "worktree";
 export type Mode = "afk" | "hitl";
 export type HarnessKind = "claude" | "pi" | "system";
+export type EdgeKind = "after" | "about" | "repair" | "gate";
 export type SourceKind = "chain_source" | "repair_source";
 export type { AgentKind, Capability };
 
@@ -130,12 +131,14 @@ CREATE TABLE IF NOT EXISTS tasks (
 	completed_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS task_dependencies (
+CREATE TABLE IF NOT EXISTS task_edges (
 	task_id TEXT NOT NULL REFERENCES tasks(id),
-	depends_on_task_id TEXT NOT NULL REFERENCES tasks(id),
+	target_task_id TEXT NOT NULL REFERENCES tasks(id),
+	kind TEXT NOT NULL CHECK (kind IN ('after', 'gate', 'about', 'repair')),
+	created_by_run_id TEXT NOT NULL REFERENCES runs(id),
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	PRIMARY KEY (task_id, depends_on_task_id),
-	CHECK (task_id <> depends_on_task_id)
+	PRIMARY KEY (task_id, target_task_id, kind),
+	CHECK (task_id <> target_task_id)
 );
 
 CREATE TABLE IF NOT EXISTS task_supersessions (
@@ -147,13 +150,57 @@ CREATE TABLE IF NOT EXISTS task_supersessions (
 	CHECK (old_task_id <> new_task_id)
 );
 
-CREATE TABLE IF NOT EXISTS task_sources (
-	task_id TEXT PRIMARY KEY REFERENCES tasks(id),
-	source_task_id TEXT NOT NULL REFERENCES tasks(id),
-	source_run_id TEXT NOT NULL REFERENCES runs(id),
-	kind TEXT NOT NULL CHECK (kind IN ('chain_source', 'repair_source')),
+CREATE TABLE IF NOT EXISTS task_gate_releases (
+	task_id TEXT NOT NULL REFERENCES tasks(id),
+	target_task_id TEXT NOT NULL REFERENCES tasks(id),
+	attempt INTEGER NOT NULL,
+	fencing_token INTEGER NOT NULL,
+	released_by_run_id TEXT NOT NULL REFERENCES runs(id),
+	released_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (task_id, target_task_id, attempt)
+);
+
+CREATE TABLE IF NOT EXISTS task_gate_release_members (
+	task_id TEXT NOT NULL,
+	target_task_id TEXT NOT NULL,
+	attempt INTEGER NOT NULL,
+	member_task_id TEXT NOT NULL REFERENCES tasks(id),
+	canonical_task_id TEXT NOT NULL REFERENCES tasks(id),
+	status_at_release TEXT NOT NULL,
+	PRIMARY KEY (task_id, target_task_id, attempt, member_task_id),
+	FOREIGN KEY (task_id, target_task_id, attempt)
+		REFERENCES task_gate_releases(task_id, target_task_id, attempt)
+);
+
+CREATE TABLE IF NOT EXISTS task_gate_late_growth_markers (
+	id TEXT PRIMARY KEY,
+	gate_task_id TEXT NOT NULL,
+	gate_target_task_id TEXT NOT NULL,
+	gate_attempt INTEGER NOT NULL,
+	mutation_kind TEXT NOT NULL CHECK (mutation_kind IN ('edge_inserted', 'supersession')),
+	edge_task_id TEXT REFERENCES tasks(id),
+	edge_target_task_id TEXT REFERENCES tasks(id),
+	edge_kind TEXT CHECK (edge_kind IN ('after', 'about', 'repair')),
+	superseded_task_id TEXT REFERENCES tasks(id),
+	replacement_task_id TEXT REFERENCES tasks(id),
+	created_by_run_id TEXT NOT NULL REFERENCES runs(id),
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	CHECK (task_id <> source_task_id)
+	FOREIGN KEY (gate_task_id, gate_target_task_id, gate_attempt)
+		REFERENCES task_gate_releases(task_id, target_task_id, attempt),
+	CHECK (
+		(mutation_kind = 'edge_inserted'
+			AND edge_task_id IS NOT NULL
+			AND edge_target_task_id IS NOT NULL
+			AND edge_kind IS NOT NULL
+			AND superseded_task_id IS NULL
+			AND replacement_task_id IS NULL)
+		OR (mutation_kind = 'supersession'
+			AND edge_task_id IS NULL
+			AND edge_target_task_id IS NULL
+			AND edge_kind IS NULL
+			AND superseded_task_id IS NOT NULL
+			AND replacement_task_id IS NOT NULL)
+	)
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -182,17 +229,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_task_id
 	ON runs(task_id)
 	WHERE task_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_task_dependencies_task
-	ON task_dependencies(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_edges_task_kind
+	ON task_edges(task_id, kind);
 
-CREATE INDEX IF NOT EXISTS idx_task_dependencies_blocker
-	ON task_dependencies(depends_on_task_id);
+CREATE INDEX IF NOT EXISTS idx_task_edges_target_kind
+	ON task_edges(target_task_id, kind);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_edges_one_attention_anchor
+	ON task_edges(task_id)
+	WHERE kind IN ('about', 'repair');
 
 CREATE INDEX IF NOT EXISTS idx_task_supersessions_new
 	ON task_supersessions(new_task_id);
-
-CREATE INDEX IF NOT EXISTS idx_task_sources_source
-	ON task_sources(source_task_id);
 
 CREATE INDEX IF NOT EXISTS idx_events_created_at
 	ON events(created_at);

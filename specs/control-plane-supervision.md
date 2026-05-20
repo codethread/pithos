@@ -1,7 +1,7 @@
 # Control Plane Supervision
 
 **Status:** Implemented
-**Last Updated:** 2026-05-17
+**Last Updated:** 2026-05-20
 
 ## 1. Overview
 
@@ -31,7 +31,7 @@ Agents claim work themselves through Pithos. pdx never injects Task content into
 - No distributed or multi-host supervision.
 - No persisted Registry; Pithos is durable truth, Registry is live pdx memory.
 - No Same-run resurrection. Dead Agents are cleaned up; later reconcile may create a Fresh run.
-- No automatic repair of failed/cancelled/dead-lettered Dependencies.
+- No automatic repair of failed/cancelled/dead-lettered branch work.
 - No generic message injection into Harness sessions; Nudges are content-free signals paired with durable Pithos state.
 
 ## 2. Design Decisions
@@ -131,9 +131,17 @@ Implemented kinds include:
 - `input_hook_stuck` — the configured input hook crash-looped
 - `hook_config_error` — input hook configuration/rendering failed
 
-Repair Alerts that reference one affected Task carry a `repair_source` Source link. They do not depend on the affected Task because failed, cancelled, and dead-lettered Tasks do not satisfy Dependencies. Pandora repairs the Broken chain with Supersession, explicit replanning, or intentional Cancel.
+Escalation routing uses typed Task edges:
 
-Task-failure, dead-letter, and interrupt Repair Alerts are created by Pithos in the relevant Task/Run transition. pdx owns invoking Interrupt before killing the live resource, but Pithos owns the durable Alert side effect transactionally. Launch-precondition Repair Alerts are created by a Pithos atomic transition that cancels the still-queued Task, records repair provenance, creates the Escalation task, and emits Events in one transaction.
+| Form                  | Edge shape                        | Claimability               | Workflow meaning                                                               |
+| --------------------- | --------------------------------- | -------------------------- | ------------------------------------------------------------------------------ |
+| Immediate escalation  | `escalation --about--> target`    | immediate                  | Human attention/context about in-flight or planned work.                       |
+| Checkpoint escalation | `escalation --gate--> target`     | after target branch drains | Human checkpoint after successful branch completion.                           |
+| Repair Alert          | `repair_alert --repair--> target` | immediate                  | Broken-work repair; Pandora should supersede, replan, or intentionally cancel. |
+
+Repair Alerts that reference one affected Task carry a `repair` edge. They do not use `after`, because failed, cancelled, and dead-lettered Tasks do not unblock downstream work. `repair` is not ordinary context: a held `repair` escalation cannot ordinary-auto-continue. Pandora repairs the Broken chain with Supersession, explicit replanning, or intentional Cancel.
+
+Task-failure, dead-letter, and interrupt Repair Alerts are created by Pithos in the relevant Task/Run transition. pdx owns invoking Interrupt before killing the live resource, but Pithos owns the durable Alert side effect transactionally. Launch-precondition Repair Alerts are created by a Pithos atomic transition that cancels the still-queued Task, records `repair` provenance, creates the Escalation task, and emits Events in one transaction.
 
 ## 7. Kill, Cleanup, Timeout, and Launch Abort
 

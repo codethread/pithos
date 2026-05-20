@@ -120,6 +120,15 @@ Current built-in claim/enqueue contract:
 
 Built-in claim/enqueue authorization stays in Pithos. If you change Agent kinds or Capabilities, update Pithos built-ins and keep the manifest's agent roster aligned. Greed claims both `design` and `review`, but Greed, War, and Envy do not enqueue `review`; only Pandora and Toil route requested review work.
 
+Agent prompts and generated command cards use the typed-edge enqueue surface:
+
+- `--after <task-id>` for direct prerequisites.
+- `--gate-on <task-id>` for checkpoint work that waits for a target branch to drain.
+- `--about <task-id>` for immediate Pandora context.
+- `--repair <task-id>` for pdx-system-authored Repair Alerts only.
+
+The old dependency/source-link command language is not part of the template contract.
+
 ## Layered assets and `appends`
 
 Place customisations under `<user-data-dir>/templates/`,

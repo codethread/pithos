@@ -1,14 +1,24 @@
 import { Schema } from "effect";
-import type { Db, SourceKind } from "../db.js";
+import type { Db, EdgeKind, SourceKind, TaskStatus } from "../db.js";
 import { sql } from "../db.js";
 import { fail } from "../errors.js";
-import { decodeRow, ScopeRowSchema, TaskRowSchema, type ScopeRow } from "../rows.js";
+import {
+	decodeRow,
+	ScopeRowSchema,
+	TaskEdgeRowSchema,
+	TaskGateLateGrowthMarkerRowSchema,
+	TaskRowSchema,
+	type ScopeRow,
+	type TaskEdgeRow,
+	type TaskGateLateGrowthMarkerRow,
+} from "../rows.js";
 import type {
 	ArtifactOutput,
 	LineageEntryOutput,
 	ScopeIdentityOutput,
 	ScopeOutput,
 	TaskDetailOutput,
+	GateInspectOutput,
 	TaskInspectTaskOutput,
 	TaskSourceSummaryOutput,
 	TaskSummaryOutput,
@@ -28,19 +38,130 @@ const TaskSummaryRowSchema = Schema.extend(
 );
 type TaskSummaryRow = typeof TaskSummaryRowSchema.Type;
 
-export const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
-	(
-		db
-			.prepare(sql`
-			SELECT td.depends_on_task_id AS id
-			FROM task_dependencies td
-			JOIN tasks dep ON dep.id = td.depends_on_task_id
-			WHERE td.task_id = ?
-			  AND dep.status <> 'done'
-			ORDER BY td.created_at ASC, td.depends_on_task_id ASC
+export const taskEdges = (db: Db): readonly TaskEdgeRow[] =>
+	db
+		.prepare(
+			sql`SELECT task_id, target_task_id, kind, created_by_run_id, created_at FROM task_edges`,
+		)
+		.all()
+		.map((row) => decodeRow(TaskEdgeRowSchema, row, "malformed task edge row"));
+
+export const taskGateLateGrowthMarkers = (db: Db): readonly TaskGateLateGrowthMarkerRow[] =>
+	db
+		.prepare(sql`
+			SELECT
+				id,
+				gate_task_id,
+				gate_target_task_id,
+				gate_attempt,
+				mutation_kind,
+				edge_task_id,
+				edge_target_task_id,
+				edge_kind,
+				superseded_task_id,
+				replacement_task_id,
+				created_by_run_id,
+				created_at
+			FROM task_gate_late_growth_markers
+			ORDER BY created_at ASC, id ASC
 		`)
-			.all(taskId) as { readonly id: string }[]
-	).map((r) => r.id);
+		.all()
+		.map((row) =>
+			decodeRow(TaskGateLateGrowthMarkerRowSchema, row, "malformed late-growth marker row"),
+		);
+
+const TaskEdgeTargetRowSchema = Schema.Struct({ id: Schema.String });
+
+export const canonicalTaskId = (db: Db, taskId: string): string => {
+	let current = taskId;
+	const seen = new Set<string>();
+	while (true) {
+		if (seen.has(current)) fail("VALIDATION_ERROR", "task supersession cycle detected");
+		seen.add(current);
+		const next = db
+			.prepare(sql`SELECT new_task_id FROM task_supersessions WHERE old_task_id = ?`)
+			.pluck()
+			.get(current) as string | undefined;
+		if (next === undefined) return current;
+		current = next;
+	}
+};
+
+const taskStatus = (db: Db, taskId: string): TaskStatus =>
+	(db
+		.prepare(sql`SELECT status FROM tasks WHERE id = ?`)
+		.pluck()
+		.get(taskId) as TaskStatus | undefined) ?? fail("NOT_FOUND", `task not found: ${taskId}`);
+
+export const unresolvedDependencies = (db: Db, taskId: string): readonly string[] =>
+	db
+		.prepare(sql`
+			SELECT te.target_task_id AS id
+			FROM task_edges te
+			WHERE te.task_id = ?
+			  AND te.kind = 'after'
+			ORDER BY te.created_at ASC, te.target_task_id ASC
+		`)
+		.all(taskId)
+		.map((row) => decodeRow(TaskEdgeTargetRowSchema, row, "malformed unresolved edge row").id)
+		.filter((id) => taskStatus(db, canonicalTaskId(db, id)) !== "done");
+
+export const branchClosure = (db: Db, anchorTaskId: string): GateInspectOutput["members"] => {
+	const canonicalClosure = new Set<string>();
+	const members = new Map<string, string>();
+	const addMember = (taskId: string): boolean => {
+		const canonicalId = canonicalTaskId(db, taskId);
+		const beforeSize = canonicalClosure.size;
+		canonicalClosure.add(canonicalId);
+		members.set(taskId, canonicalId);
+		return canonicalClosure.size !== beforeSize;
+	};
+	addMember(anchorTaskId);
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const edge of taskEdges(db).filter((row) => row.kind !== "gate")) {
+			const canonicalTarget = canonicalTaskId(db, edge.target_task_id);
+			if (!canonicalClosure.has(canonicalTarget)) continue;
+			if (addMember(edge.task_id)) changed = true;
+		}
+	}
+	return [...members.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([taskId, canonicalId]) => ({
+			task_id: taskId,
+			canonical_task_id: canonicalId,
+			status: taskStatus(db, canonicalId),
+		}));
+};
+
+export const gateStateForTarget = (db: Db, targetTaskId: string): GateInspectOutput => {
+	const members = branchClosure(db, targetTaskId);
+	const brokenStatuses = new Set(["failed", "cancelled", "dead_letter"]);
+	return {
+		target_task_id: targetTaskId,
+		state: members.every((member) => member.status === "done")
+			? "clear"
+			: members.some((member) => brokenStatuses.has(member.status))
+				? "broken"
+				: "open",
+		members,
+	};
+};
+
+export const taskGates = (db: Db, taskId: string): readonly GateInspectOutput[] =>
+	db
+		.prepare(sql`
+			SELECT target_task_id AS id
+			FROM task_edges
+			WHERE task_id = ?
+			  AND kind = 'gate'
+			ORDER BY created_at ASC, target_task_id ASC
+		`)
+		.all(taskId)
+		.map((row) =>
+			gateStateForTarget(db, decodeRow(TaskEdgeTargetRowSchema, row, "malformed gate edge row").id),
+		);
 
 export const taskSummarySelect = sql`
 SELECT t.id, t.scope_id, s.kind AS scope_kind, s.canonical_path, s.parent_repo_path, s.description AS scope_description, t.capability, t.title, t.body, t.status, t.fencing_token, t.attempts, t.max_attempts, t.created_at, t.completed_at
@@ -130,18 +251,18 @@ const ArtifactRowSchema = Schema.Struct({
 const parseArtifact = (value: unknown): ArtifactOutput =>
 	decodeRow(ArtifactRowSchema, value, "malformed artifact row");
 
-const SourceKindSchema = Schema.Literal("chain_source", "repair_source");
+const TaskEdgeKindSchema = Schema.Literal("about", "repair");
 
 const TaskSourceEdgeRowSchema = Schema.Struct({
 	task_id: Schema.String,
 	source_task_id: Schema.String,
-	kind: SourceKindSchema,
+	kind: TaskEdgeKindSchema,
 });
 
 type TaskSourceEdgeRow = typeof TaskSourceEdgeRowSchema.Type;
 
 const parseTaskSourceEdge = (value: unknown): TaskSourceEdgeRow =>
-	decodeRow(TaskSourceEdgeRowSchema, value, "malformed task source edge row");
+	decodeRow(TaskSourceEdgeRowSchema, value, "malformed task edge row");
 
 export const compareTaskCreatedAt = <
 	T extends { readonly created_at: string; readonly id: string },
@@ -187,14 +308,23 @@ export const taskSupersessionLinks = (
 });
 
 export const taskSourceEdges = (db: Db): readonly TaskSourceEdgeRow[] =>
-	db
-		.prepare(sql`SELECT task_id, source_task_id, kind FROM task_sources`)
-		.all()
-		.map(parseTaskSourceEdge);
+	taskEdges(db)
+		.filter((edge) => edge.kind === "about" || edge.kind === "repair")
+		.map((edge) =>
+			parseTaskSourceEdge({
+				task_id: edge.task_id,
+				source_task_id: edge.target_task_id,
+				kind: edge.kind,
+			}),
+		);
 
 export const taskSourceEdge = (db: Db, taskId: string): TaskSourceEdgeRow | null => {
 	const row = db
-		.prepare(sql`SELECT task_id, source_task_id, kind FROM task_sources WHERE task_id=?`)
+		.prepare(sql`
+			SELECT task_id, target_task_id AS source_task_id, kind
+			FROM task_edges
+			WHERE task_id=? AND kind IN ('about', 'repair')
+		`)
 		.get(taskId);
 	return row === undefined ? null : parseTaskSourceEdge(row);
 };
@@ -203,6 +333,22 @@ export const taskSourceSummary = (db: Db, taskId: string): TaskSourceSummaryOutp
 	const edge = taskSourceEdge(db, taskId);
 	return edge === null ? null : { ...taskSummary(db, edge.source_task_id), source_kind: edge.kind };
 };
+
+export const taskAttachedContext = (db: Db, taskId: string): readonly TaskSourceSummaryOutput[] =>
+	taskEdges(db)
+		.filter(
+			(edge) => edge.target_task_id === taskId && (edge.kind === "about" || edge.kind === "repair"),
+		)
+		.sort(
+			(a, b) =>
+				a.kind.localeCompare(b.kind) ||
+				a.created_at.localeCompare(b.created_at) ||
+				a.task_id.localeCompare(b.task_id),
+		)
+		.map((edge) => ({
+			...taskSummary(db, edge.task_id),
+			source_kind: edge.kind === "about" ? "about" : "repair",
+		}));
 
 export const validateReferenceTaskCurrent = (db: Db, taskId: string, label: string): void => {
 	const exists = db.prepare(sql`SELECT 1 FROM tasks WHERE id = ?`).get(taskId);
@@ -215,16 +361,16 @@ export const validateReferenceTaskCurrent = (db: Db, taskId: string, label: stri
 		fail("VALIDATION_ERROR", `${label} task ${taskId} was superseded by ${replacement}`);
 };
 
-export const insertTaskSource = (
+export const insertTaskEdge = (
 	db: Db,
 	taskId: string,
-	sourceTaskId: string,
-	sourceRunId: string,
-	kind: SourceKind,
+	targetTaskId: string,
+	createdByRunId: string,
+	kind: EdgeKind,
 ): void => {
 	const inserted = db
 		.prepare(sql`
-			INSERT INTO task_sources(task_id, source_task_id, source_run_id, kind)
+			INSERT INTO task_edges(task_id, target_task_id, kind, created_by_run_id)
 			SELECT ?, t.id, ?, ?
 			FROM tasks t
 			WHERE t.id = ?
@@ -232,11 +378,26 @@ export const insertTaskSource = (
 				SELECT 1 FROM task_supersessions ts WHERE ts.old_task_id = t.id
 			  )
 		`)
-		.run(taskId, sourceRunId, kind, sourceTaskId);
+		.run(taskId, kind, createdByRunId, targetTaskId);
 	if (inserted.changes === 1) return;
-	validateReferenceTaskCurrent(db, sourceTaskId, "source");
-	fail("STALE_TOKEN_RACE", "source task changed before source link write");
+	validateReferenceTaskCurrent(db, targetTaskId, "edge target");
+	fail("STALE_TOKEN_RACE", "target task changed before task edge write");
 };
+
+export const insertTaskSource = (
+	db: Db,
+	taskId: string,
+	sourceTaskId: string,
+	sourceRunId: string,
+	kind: SourceKind,
+): void =>
+	insertTaskEdge(
+		db,
+		taskId,
+		sourceTaskId,
+		sourceRunId,
+		kind === "chain_source" ? "about" : "repair",
+	);
 
 export const sortTaskIdsDeterministically = (
 	db: Db,
@@ -250,7 +411,10 @@ export const sortTaskIdsDeterministically = (
 export const isClaimable = (
 	db: Db,
 	task: { readonly id: string; readonly status: string },
-): boolean => task.status === "queued" && unresolvedDependencies(db, task.id).length === 0;
+): boolean =>
+	task.status === "queued" &&
+	unresolvedDependencies(db, task.id).length === 0 &&
+	taskGates(db, task.id).every((gate) => gate.state === "clear");
 
 export const taskInspectTask = (db: Db, taskId: string): TaskInspectTaskOutput => {
 	const task = taskDetail(db, taskId);
@@ -258,22 +422,23 @@ export const taskInspectTask = (db: Db, taskId: string): TaskInspectTaskOutput =
 		...task,
 		claimable: isClaimable(db, task),
 		unresolved_dependency_ids: unresolvedDependencies(db, taskId),
+		gates: taskGates(db, taskId),
 	};
 };
 
 export const taskLineage = (db: Db, taskId: string): readonly LineageEntryOutput[] => {
 	const parentsByTaskId = new Map<string, string[]>();
-	for (const row of db
-		.prepare(
-			sql`SELECT task_id, depends_on_task_id FROM task_dependencies ORDER BY created_at ASC, task_id ASC, depends_on_task_id ASC`,
-		)
-		.all() as {
-		readonly task_id: string;
-		readonly depends_on_task_id: string;
-	}[]) {
+	for (const row of taskEdges(db)
+		.filter((edge) => edge.kind === "after")
+		.sort(
+			(a, b) =>
+				a.created_at.localeCompare(b.created_at) ||
+				a.task_id.localeCompare(b.task_id) ||
+				a.target_task_id.localeCompare(b.target_task_id),
+		)) {
 		parentsByTaskId.set(row.task_id, [
 			...(parentsByTaskId.get(row.task_id) ?? []),
-			row.depends_on_task_id,
+			row.target_task_id,
 		]);
 	}
 	const lineage = new Map<string, { depth: number; via_task_ids: Set<string> }>();

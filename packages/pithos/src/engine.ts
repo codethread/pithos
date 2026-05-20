@@ -18,8 +18,11 @@ import { makeClaimLoopOps } from "./engine/claim-loop.js";
 import { withCollisionGuard, withDb } from "./engine/db-helpers.js";
 import { event, eventsTail, pruneEvents } from "./engine/event-log.js";
 import { inspectGraph } from "./engine/graph-inspect.js";
+import { enforceReleasedGateLateGrowth } from "./engine/late-growth.js";
 import { createRepairAlertInTxn, makeRepairAlertOps } from "./engine/repair-alerts.js";
 import {
+	branchClosure,
+	insertTaskEdge,
 	insertTaskSource,
 	isClaimable,
 	parseScopeArchiveCheck,
@@ -28,6 +31,9 @@ import {
 	parseTaskDetail,
 	parseTaskSummary,
 	taskArtifacts,
+	taskAttachedContext,
+	taskEdges,
+	taskGateLateGrowthMarkers,
 	taskInspectTask,
 	taskLineage,
 	taskSourceEdge,
@@ -36,6 +42,8 @@ import {
 	taskSummarySelect,
 	taskSupersessionLinks,
 	toScopeOutput,
+	canonicalTaskId,
+	taskGates,
 	type TaskSummary,
 	unresolvedDependencies,
 	validateReferenceTaskCurrent,
@@ -295,21 +303,52 @@ const terminalTaskStatuses = ["done", "failed", "dead_letter", "cancelled"] as c
 const runTerminalStatusForTask = (taskStatus: string): "ended" | "failed" =>
 	taskStatus === "done" ? "ended" : "failed";
 
-const assertAcyclic = (db: Db): void => {
-	const edges = db
-		.prepare(sql`SELECT task_id, depends_on_task_id FROM task_dependencies`)
-		.all() as {
-		readonly task_id: string;
-		readonly depends_on_task_id: string;
-	}[];
+const assertBlockingAcyclic = (db: Db): void => {
 	const outgoing = new Map<string, string[]>();
-	for (const edge of edges) {
-		outgoing.set(edge.task_id, [...(outgoing.get(edge.task_id) ?? []), edge.depends_on_task_id]);
+	for (const edge of taskEdges(db).filter((row) => row.kind === "after" || row.kind === "gate")) {
+		const owner = canonicalTaskId(db, edge.task_id);
+		outgoing.set(owner, [...(outgoing.get(owner) ?? []), canonicalTaskId(db, edge.target_task_id)]);
 	}
 	const visiting = new Set<string>();
 	const visited = new Set<string>();
 	const visit = (id: string): void => {
-		if (visiting.has(id)) fail("VALIDATION_ERROR", "task dependency cycle detected");
+		if (visiting.has(id)) fail("VALIDATION_ERROR", "task blocking cycle detected");
+		if (visited.has(id)) return;
+		visiting.add(id);
+		for (const next of outgoing.get(id) ?? []) visit(next);
+		visiting.delete(id);
+		visited.add(id);
+	};
+	for (const id of outgoing.keys()) visit(id);
+};
+
+const assertGateOwnersOutsideTargetClosures = (db: Db): void => {
+	for (const edge of taskEdges(db).filter((row) => row.kind === "gate")) {
+		const owner = canonicalTaskId(db, edge.task_id);
+		if (
+			branchClosure(db, edge.target_task_id).some((member) => member.canonical_task_id === owner)
+		) {
+			fail("VALIDATION_ERROR", "gate owner is already in target branch closure");
+		}
+	}
+};
+
+const assertGraphIntegrity = (db: Db): void => {
+	assertMembershipAcyclic(db);
+	assertGateOwnersOutsideTargetClosures(db);
+	assertBlockingAcyclic(db);
+};
+
+const assertMembershipAcyclic = (db: Db): void => {
+	const outgoing = new Map<string, string[]>();
+	for (const edge of taskEdges(db).filter((row) => row.kind !== "gate")) {
+		const owner = canonicalTaskId(db, edge.task_id);
+		outgoing.set(owner, [...(outgoing.get(owner) ?? []), canonicalTaskId(db, edge.target_task_id)]);
+	}
+	const visiting = new Set<string>();
+	const visited = new Set<string>();
+	const visit = (id: string): void => {
+		if (visiting.has(id)) fail("VALIDATION_ERROR", "task branch-membership cycle detected");
 		if (visited.has(id)) return;
 		visiting.add(id);
 		for (const next of outgoing.get(id) ?? []) visit(next);
@@ -840,14 +879,32 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 		}),
 	eventsTail: ({ limit }) => eventsTail(ctx, limit),
 	pruneEvents: (input) => pruneEvents(ctx, input),
-	enqueue: ({ scope, capability, title, body, bodyFile, runId, dependsOn, chain }) =>
+	enqueue: ({
+		scope,
+		capability,
+		title,
+		body,
+		bodyFile,
+		runId,
+		after,
+		gate = [],
+		about,
+		repair,
+		chain,
+	}) =>
 		withDb(ctx, (db) => {
 			const actorRunId = resolveRunId(ctx, runId);
-			authorized(db, "agent_enqueues", actorRunId, capability);
+			const actorRun = authorized(db, "agent_enqueues", actorRunId, capability);
 			enforceTaskAdmissionScope(ctx, db, scope, capability);
-			const uniqueDepends = new Set(dependsOn);
-			if (uniqueDepends.size !== dependsOn.length) {
-				fail("VALIDATION_ERROR", "duplicate --depends-on task id");
+			const uniqueAfter = new Set(after);
+			if (uniqueAfter.size !== after.length) fail("VALIDATION_ERROR", "duplicate --after task id");
+			const uniqueGate = new Set(gate);
+			if (uniqueGate.size !== gate.length) fail("VALIDATION_ERROR", "duplicate --gate-on task id");
+			if (about !== undefined && repair !== undefined) {
+				fail("VALIDATION_ERROR", "provide only one of --about or --repair");
+			}
+			if (repair !== undefined && actorRun.agent_kind !== "pdx") {
+				fail("VALIDATION_ERROR", "--repair edges must be authored by pdx");
 			}
 			const taskBody = resolveBody(ctx, body, bodyFile);
 			const taskTitle = requireNonEmpty(title, "--title");
@@ -855,23 +912,44 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 
 			const chainOutput = withCollisionGuard(taskId, () =>
 				db.transaction((): ChainOutput => {
-					const actorRun = liveRun(db, actorRunId);
-					const heldTask = actorRun.task_id === null ? null : taskSummary(db, actorRun.task_id);
+					const currentActorRun = liveRun(db, actorRunId);
+					const heldTask =
+						currentActorRun.task_id === null ? null : taskSummary(db, currentActorRun.task_id);
 					const heldSource =
-						actorRun.task_id === null ? null : taskSourceEdge(db, actorRun.task_id);
+						currentActorRun.task_id === null ? null : taskSourceEdge(db, currentActorRun.task_id);
+					const heldGateTarget =
+						currentActorRun.task_id === null
+							? undefined
+							: (db
+									.prepare(
+										sql`SELECT target_task_id FROM task_edges WHERE task_id=? AND kind='gate' ORDER BY created_at ASC, target_task_id ASC LIMIT 1`,
+									)
+									.pluck()
+									.get(currentActorRun.task_id) as string | undefined);
 					const decision = resolveChainPolicy({
 						policy: chain,
 						newTaskCapability: capability,
 						heldTask,
 						heldSource:
-							heldSource === null
-								? null
-								: { taskId: heldSource.source_task_id, kind: heldSource.kind },
+							heldSource !== null
+								? {
+										taskId: heldSource.source_task_id,
+										kind: heldSource.kind === "about" ? "chain_source" : "repair_source",
+									}
+								: heldGateTarget === undefined
+									? null
+									: { taskId: heldGateTarget, kind: "chain_source" },
 					});
 					const dependencyIds = finalDependencyIds({
-						manualDependencyIds: dependsOn,
+						manualDependencyIds: after,
 						implicitDependencyIds: decision.implicitDependencyIds,
 					});
+					const aboutIds = [
+						about,
+						decision.applied === "source_from_held" ? decision.sourceTaskId : null,
+					].filter((id): id is string => id !== undefined && id !== null);
+					if (aboutIds.length > 1) fail("VALIDATION_ERROR", "about edge is singular per task");
+					const repairIds = repair === undefined ? [] : [repair];
 					const output: ChainOutput = {
 						policy: decision.policy,
 						applied: decision.applied,
@@ -881,28 +959,38 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						implicit_dependency_ids: decision.implicitDependencyIds,
 						final_dependency_ids: dependencyIds,
 					};
-					for (const depId of dependencyIds) {
-						validateReferenceTaskCurrent(db, depId, "dependency");
-					}
+					for (const depId of dependencyIds) validateReferenceTaskCurrent(db, depId, "after");
+					for (const gateId of gate) validateReferenceTaskCurrent(db, gateId, "gate");
+					for (const aboutId of aboutIds) validateReferenceTaskCurrent(db, aboutId, "about");
+					for (const repairId of repairIds) validateReferenceTaskCurrent(db, repairId, "repair");
 					db.prepare(
 						sql`INSERT INTO tasks(id,scope_id,capability,title,body,created_by_run_id) VALUES (?,?,?,?,?,?)`,
 					).run(taskId, scope, capability, taskTitle, taskBody, actorRunId);
 					for (const depId of dependencyIds) {
-						db.prepare(
-							sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
-						).run(taskId, depId);
+						insertTaskEdge(db, taskId, depId, actorRunId, "after");
 					}
-					if (decision.applied === "source_from_held") {
-						insertTaskSource(
-							db,
-							taskId,
-							decision.sourceTaskId ??
-								fail("INTERNAL_ERROR", "source decision missing source task"),
-							actorRunId,
-							"chain_source",
-						);
+					for (const gateId of gate) {
+						insertTaskEdge(db, taskId, gateId, actorRunId, "gate");
 					}
-					assertAcyclic(db);
+					for (const aboutId of aboutIds) {
+						insertTaskSource(db, taskId, aboutId, actorRunId, "chain_source");
+					}
+					for (const repairId of repairIds) {
+						insertTaskSource(db, taskId, repairId, actorRunId, "repair_source");
+					}
+					assertGraphIntegrity(db);
+					for (const edge of [
+						...dependencyIds.map((targetId) => ({ targetId, kind: "after" as const })),
+						...aboutIds.map((targetId) => ({ targetId, kind: "about" as const })),
+						...repairIds.map((targetId) => ({ targetId, kind: "repair" as const })),
+					]) {
+						enforceReleasedGateLateGrowth(ctx, db, actorRunId, edge.targetId, {
+							kind: "edge_inserted",
+							edgeTaskId: taskId,
+							edgeTargetTaskId: edge.targetId,
+							edgeKind: edge.kind,
+						});
+					}
 					event(ctx, db, "task.created", {
 						task_id: taskId,
 						actor_run_id: actorRunId,
@@ -910,7 +998,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							scope_id: scope,
 							capability,
 							title: taskTitle,
-							depends_on_task_ids: dependencyIds,
+							edges: {
+								after: dependencyIds,
+								about: aboutIds,
+								repair: repairIds,
+								gate,
+							},
 							chain: {
 								policy: output.policy,
 								applied: output.applied,
@@ -939,13 +1032,13 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 			const task = taskInspectTask(db, taskId);
 			const dependencies = db
 				.prepare(
-					`${taskSummarySelect} WHERE t.id IN (SELECT depends_on_task_id FROM task_dependencies WHERE task_id=?) ORDER BY t.created_at ASC, t.id ASC`,
+					`${taskSummarySelect} WHERE t.id IN (SELECT target_task_id FROM task_edges WHERE task_id=? AND kind='after') ORDER BY t.created_at ASC, t.id ASC`,
 				)
 				.all(taskId)
 				.map((row) => parseTaskDetail(row, "malformed dependency task row"));
 			const dependents = db
 				.prepare(
-					`${taskSummarySelect} WHERE t.id IN (SELECT task_id FROM task_dependencies WHERE depends_on_task_id=?) ORDER BY t.created_at ASC, t.id ASC`,
+					`${taskSummarySelect} WHERE t.id IN (SELECT task_id FROM task_edges WHERE target_task_id=? AND kind='after') ORDER BY t.created_at ASC, t.id ASC`,
 				)
 				.all(taskId)
 				.map((row) => parseTaskDetail(row, "malformed dependent task row"));
@@ -967,11 +1060,21 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 				dependencies,
 				dependents,
 				source: taskSourceSummary(db, taskId),
+				attached_context: taskAttachedContext(db, taskId),
 				lineage: taskLineage(db, taskId),
 				supersedes,
 				superseded_by,
 				artifacts: taskArtifacts(db, taskId),
 				repair_alert_kind: repairAlertKind,
+				late_growth_markers: taskGateLateGrowthMarkers(db).filter(
+					(marker) =>
+						marker.gate_task_id === taskId ||
+						marker.gate_target_task_id === taskId ||
+						(marker.mutation_kind === "edge_inserted" &&
+							(marker.edge_task_id === taskId || marker.edge_target_task_id === taskId)) ||
+						(marker.mutation_kind === "supersession" &&
+							(marker.superseded_task_id === taskId || marker.replacement_task_id === taskId)),
+				),
 			};
 		}),
 	graphInspect: ({ taskId, scope, all, status = [], search = [], sinceCutoff }) =>
@@ -1015,7 +1118,12 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 								scope_description: blocker.scope_description,
 							};
 						});
-						return { ...t, unresolved_dependency_ids: blockers.map((b) => b.id), blockers };
+						return {
+							...t,
+							unresolved_dependency_ids: blockers.map((b) => b.id),
+							blockers,
+							gates: taskGates(db, t.id).filter((gate) => gate.state !== "clear"),
+						};
 					}),
 				recentlyCompleted,
 			};
@@ -1049,7 +1157,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						fail("VALIDATION_ERROR", "task has already been superseded");
 					const dependents = db
 						.prepare(
-							sql`SELECT t.id, t.status FROM tasks t JOIN task_dependencies td ON td.task_id=t.id WHERE td.depends_on_task_id=?`,
+							sql`SELECT t.id, t.status FROM tasks t JOIN task_edges td ON td.task_id=t.id WHERE td.target_task_id=? AND td.kind IN ('after','gate')`,
 						)
 						.all(taskId) as { id: string; status: string }[];
 					const retargeted = dependents.filter((d) => d.status === "queued").map((d) => d.id);
@@ -1069,16 +1177,24 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 						old.max_attempts,
 						actorRunId,
 					);
-					for (const dep of db
-						.prepare(sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`)
-						.all(taskId) as { id: string }[])
+					const copiedBlockingEdges = db
+						.prepare(
+							sql`SELECT target_task_id AS id, kind FROM task_edges WHERE task_id=? AND kind IN ('after','gate')`,
+						)
+						.all(taskId) as { id: string; kind: "after" | "gate" }[];
+					for (const edge of copiedBlockingEdges)
 						db.prepare(
-							sql`INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES (?,?)`,
-						).run(replacementId, dep.id);
+							sql`INSERT INTO task_edges(task_id,target_task_id,kind,created_by_run_id) VALUES (?,?,?,?)`,
+						).run(replacementId, edge.id, edge.kind, actorRunId);
 					for (const id of retargeted)
 						db.prepare(
-							sql`UPDATE task_dependencies SET depends_on_task_id=? WHERE task_id=? AND depends_on_task_id=?`,
+							sql`UPDATE task_edges SET target_task_id=? WHERE task_id=? AND target_task_id=? AND kind IN ('after','gate')`,
 						).run(replacementId, id, taskId);
+					enforceReleasedGateLateGrowth(ctx, db, actorRunId, taskId, {
+						kind: "supersession",
+						supersededTaskId: taskId,
+						replacementTaskId: replacementId,
+					});
 					db.prepare(
 						sql`INSERT INTO task_supersessions(old_task_id,new_task_id,created_by_run_id,reason) VALUES (?,?,?,?)`,
 					).run(taskId, replacementId, actorRunId, nonEmptyReason);
@@ -1099,13 +1215,16 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							scope_id: replacementScope,
 							capability: replacementCap,
 							title: replacementTitle,
-							depends_on_task_ids: (
-								db
-									.prepare(
-										sql`SELECT depends_on_task_id AS id FROM task_dependencies WHERE task_id=?`,
-									)
-									.all(replacementId) as { id: string }[]
-							).map((r) => r.id),
+							edges: {
+								after: copiedBlockingEdges
+									.filter((edge) => edge.kind === "after")
+									.map((edge) => edge.id),
+								about: [],
+								repair: [],
+								gate: copiedBlockingEdges
+									.filter((edge) => edge.kind === "gate")
+									.map((edge) => edge.id),
+							},
 							supersedes_task_id: taskId,
 						},
 					});
@@ -1118,7 +1237,7 @@ export const makeEngine = (ctx: EngineContext): Engine => ({
 							retargeted_dependent_task_ids: retargeted,
 						},
 					});
-					assertAcyclic(db);
+					assertGraphIntegrity(db);
 					return {
 						ok: true as const,
 						task: {
@@ -1199,4 +1318,4 @@ export const enforceCapScope = (db: Db, scopeId: string, cap: Capability): void 
 	void scopeForCapability(db, scopeId, cap);
 };
 
-export { authorized, event };
+export { authorized, event, taskGateLateGrowthMarkers };

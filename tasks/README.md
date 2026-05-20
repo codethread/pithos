@@ -1,28 +1,32 @@
-# Scoped Review Capability Task Plan
+# Task Plans
 
 ## Problem statement / MVP goal
 
-Implement the planned scoped `review` capability change. The MVP adds `review` as a first-class Pithos Capability claimed by Greed, enqueueable by Pandora and Toil, and documented as an explicitly requested HITL assessment step rather than an automatic workflow gate. `review` should behave like ordinary dependency-chained work, while `escalate` remains global immediate Pandora attention/repair/routing.
+The completed first plan implemented the scoped `review` capability change. The current follow-up MVP implements the planned typed-edge Task graph redesign from `specs/task-graph-typed-edges-diff.md`.
+
+The typed-edge MVP replaces split Dependency/Source-link storage with a single typed edge model, adds dynamic `gate` coordination edges that wait for an evolving branch to drain, and folds escalation/Repair Alert routing into ordinary graph semantics through `about` and `repair` edges. The work is accepted as a breaking pre-v1 DB/CLI change.
 
 ## Important references
 
-- `specs/task-graph.md` — durable task graph semantics and review-as-ordinary-work behavior.
-- `specs/control-plane-supervision.md` — control-plane lifecycle, built-in claim/enqueue contract, and Greed/Pandora review behavior.
-- `specs/agent-configuration.md` — built-in capability/agent configuration context if affected.
+- `specs/task-graph-typed-edges-diff.md` — planning diff overlay and primary contract for Tasks 5–11.
+- `specs/task-graph.md` — current durable Task graph semantics to replace/fold into.
+- `specs/control-plane-supervision.md` — current escalation/Repair Alert and pdx integration semantics to update.
 - `UBIQUITOUS_LANGUAGE.md` — domain terminology to update after implementation.
-- `packages/pithos/src/builtins.ts` — built-in Agent kinds, Capabilities, claim rules, enqueue rules.
-- `packages/pithos/src/chain-policy.ts` — chain policy Capability typing and escalation special-case behavior.
-- `packages/pithos/src/rows.ts` — task capability row decoding.
-- `packages/pdx/src/controller.ts` and `packages/pdx/src/services.ts` — supervision launch policy and capability unions.
-- `packages/spawner/src/spawner.ts` — selected-capability claim command rendering for agents, including multi-claim Greed.
-- `packages/pithos/test/`, `packages/pdx/test/`, `packages/spawner/src/spawner.test.ts` — behavior, seed, CLI/help, supervision, and prompt-rendering contract tests.
-- `resources/data-dir/templates/common/base.md`, `resources/data-dir/templates/agents/greed.md`, `resources/data-dir/templates/agents/pandora.md`, `resources/data-dir/templates/agents/toil.md`, `resources/README.md` — prompt and template docs to update.
+- `packages/pithos/src/db.ts` — schema and seeded durable contracts.
+- `packages/pithos/src/chain-policy.ts` — enqueue policy and implicit edge behavior.
+- `packages/pithos/src/engine.ts` and `packages/pithos/src/engine/*` — Task transitions, claim loop, read models, graph inspection, renderers, Repair Alerts, and events.
+- `packages/pithos/test/` — behavior, CLI, render, lifecycle, and graph tests; Task 9 should add broad snapshot coverage for readable graph variations.
+- `packages/pdx/src/` and `packages/pdx/test/` — Repair Alert call sites and command-card/supervision integration affected by CLI changes.
+- `packages/spawner/src/` and `resources/data-dir/templates/` — agent prompt/command-card surfaces that must stop using removed flags.
+- Earlier completed review-capability references remain in Tasks 1–4 and the Developer Notes history below.
 
 ## Task strategy
 
-The plan is split into AFK vertical slices. Task 1 makes `review` real in the durable Pithos contract and updates pdx/Spawner integration so Greed can be launched for, and claim, either `design` or `review` work. Task 2 updates canonical agent prompts so the new capability is usable without imposing review gates by default. Task 3 folds the temporary change spec into the permanent project docs and removes the change spec. Task 4 performs full validation and repairs any integration misses.
+Tasks 1–4 are complete and belong to the previous scoped-review plan. Tasks 5–11 are the typed-edge implementation plan.
 
-No HITL slices are required: the user has already decided the outstanding product questions for the MVP. Future QA/`verify` capability work is explicitly out of scope.
+The new plan is split into AFK vertical slices. Task 5 changes storage while preserving existing behavior. Task 6 exposes the non-gate typed-edge enqueue surface and chain-policy changes. Task 7 adds dynamic gate claimability and release snapshots. Task 8 enforces late-growth protection after gate release. Task 9 makes typed edges and gates visible to agents, with broad snapshot tests for readable graph display variations. Task 10 folds the temporary diff spec into canonical docs and prompts. Task 11 performs full verification and repair.
+
+No HITL slices are required: the user has accepted the breaking-change direction, gate semantics, escalation unification, and the need for snapshot-heavy graph display coverage.
 
 ## Developer Notes
 
@@ -61,3 +65,10 @@ Append notes here. Do not rewrite earlier notes.
 - Isolated `pandora-spawn preview` succeeded for Greed with `--selected-capability review`, Pandora, and Toil after fresh `pithos init --fresh` and `pdx init` in temp data/user dirs.
 - `pnpm verify` passed from the repo root.
 - No temporary scoped review spec remains under `specs/`; no integration repairs were needed.
+
+### Typed edge task plan amendment — 2026-05-19
+
+- Added Tasks 5–11 for the typed-edge Task graph redesign captured in `specs/task-graph-typed-edges-diff.md`.
+- The plan intentionally preserves completed review tasks and appends the new work with new integer ids.
+- Task 9 explicitly requires broad snapshot tests for readable `graph inspect` variations so future display changes are obvious in diffs and can be intentionally accepted with `vitest run --update`.
+- Deep-review follow-up tightened standalone AFK ownership: Task 5 owns `task.created` typed-edge event payloads, Task 6 owns `after/about/repair` membership cycle tests and system-only `repair` edges, Task 7 owns checkpoint escalation continuation plus invalid gate-closure/cycle checks plus `task.gate_released`, Task 8 now requires durable `task_gate_late_growth_markers` instead of choosing between marker/event, and Task 9 renders that marker.
